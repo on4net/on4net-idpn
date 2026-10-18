@@ -3,11 +3,15 @@ import Fastify, { type FastifyInstance } from 'fastify';
 
 import { MemorySigningKeyRepository, SigningKeyManager } from './oidc/keys.js';
 import { registerOidcRoutes } from './oidc/routes.js';
+import { registerRevokeIntrospectRoutes } from './oidc/revoke-introspect.js';
+import type { TokenRouteOptions } from './oidc/token-route.js';
+import { registerTokenRoute } from './oidc/token-route.js';
 
 export interface BuildServerOptions {
   /** Public issuer URL; defaults to a local development value. */
   issuer?: string;
   keys?: SigningKeyManager;
+  token?: Omit<TokenRouteOptions, 'issuer' | 'keys'>;
 }
 
 /**
@@ -25,6 +29,17 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   });
 
   registerOidcRoutes(app, { issuer, keys });
+
+  if (options.token !== undefined) {
+    registerTokenRoute(app, { ...options.token, issuer, keys });
+    registerRevokeIntrospectRoutes(app, {
+      issuer,
+      keys,
+      clients: options.token.clients,
+      refreshTokens: options.token.refreshTokens,
+      ...(options.token.now === undefined ? {} : { now: options.token.now }),
+    });
+  }
 
   return app;
 }
