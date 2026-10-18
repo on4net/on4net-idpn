@@ -32,7 +32,6 @@
 | Table | shadcn `table` | 2026-10-18 | `text-start` به‌جای `text-left` |
 
 ## Patchهای سراسری
-
 1. **Preflight غیرفعال است.** فقط `tailwindcss/theme.css` و `tailwindcss/utilities.css` ایمپورت می‌شوند تا CSS
    به Host نشت نکند (`docs/spikes/shadcn-mfe-spike.md`).
 2. **توکن‌ها روی `.idpn-root`** تعریف می‌شوند، نه `:root`؛ بنابراین چند MFE/تم می‌توانند همزیستی کنند.
@@ -46,3 +45,20 @@ pnpm --filter @idpn/web ui:add <component>
 ```
 
 سپس: ۱) Patchهای لازم (RTL/Portal) را اعمال کنید، ۲) در جدول Inventory ثبت کنید، ۳) تست RTL/A11y اضافه کنید.
+
+## سیاست Upgrade
+
+1. نسخه CLI در `web/package.json` (devDependency) Pin است؛ ارتقا فقط با تصمیم مالک Design System و در یک PR مستقل.
+2. پس از ارتقا، کامپوننت‌های تغییریافته را بازتولید کنید و **Patchهای محلی را دوباره اعمال** کنید؛ سپس ردیف
+   Inventory و تاریخ آن را به‌روز کنید.
+3. هیچ به‌روزرسانی خودکار یا Range شناور مجاز نیست؛ Lockfile باید Commit شود.
+4. پس از هر Upgrade: `typecheck`، `test:coverage`، `test:e2e` و بررسی RTL/axe الزامی است.
+5. Registryهای شخص ثالث فقط با بازبینی کد و لایسنس و ثبت در همین فایل.
+
+## منشأ کامپوننت‌های فعلی
+
+کامپوننت‌های فهرست بالا در فاز ۰ بر اساس الگوی Registry رسمی shadcn/ui و با Patchهای محلی (RTL/Portal/توکن)
+در مخزن قرار گرفته‌اند؛ اجرای `shadcn init` عمداً انجام نشد چون Preflight اضافه می‌کند و ایزولاسیون MFE را
+می‌شکند. از این پس **همه** کامپوننت‌های جدید فقط با `ui:add` از Registry Pin‌شده اضافه می‌شوند؛ دستور کار در
+`.github/skills/ui-styling/SKILL.md` است.
+
