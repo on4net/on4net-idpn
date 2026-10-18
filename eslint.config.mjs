@@ -11,6 +11,8 @@ export default tseslint.config(
       '**/.vite/**',
       '**/playwright-report/**',
       '**/test-results/**',
+      // Generated code (Prisma client) is not reviewed or linted.
+      '**/generated/**',
       // Agent skills ship standalone templates that are not part of the build.
       '.github/**',
     ],

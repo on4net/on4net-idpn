@@ -7,6 +7,9 @@ build/
 *.tsbuildinfo
 .vite/
 
+# Prisma generated client
+api/src/generated/
+
 # Test output
 coverage/
 playwright-report/

@@ -129,7 +129,40 @@ docker compose down -v        # حذف کامل همراه داده‌ها (تخ
 - Mailhog در پروژه اصلی آرشیو شده و نگه‌داری نمی‌شود؛ فقط برای ایمیل آزمایشی محلی استفاده می‌شود و در
   بازبینی Supply Chain (کارت #57) ارزیابی خواهد شد.
 
-## 6. اسکریپت‌ها
+## 6. پایگاه داده و Migration
+
+مدل داده با **Prisma 7** و PostgreSQL 16 پیاده‌سازی شده است.
+
+| مورد | مسیر |
+|---|---|
+| Schema | `api/prisma/schema.prisma` |
+| Migrationها | `api/prisma/migrations/<name>/migration.sql` و `down.sql` |
+| Seed | `api/prisma/seed.ts` |
+| Client تولیدشده | `api/src/generated/prisma` (در Git نیست؛ با `pnpm install` تولید می‌شود) |
+| تنظیم اتصال | `api/prisma.config.ts` (از `DATABASE_URL` در `.env` ریشه استفاده می‌کند) |
+
+```powershell
+pnpm --filter @idpn/api db:generate   # تولید Client
+pnpm --filter @idpn/api db:deploy     # اعمال Migrationها (محیط توسعه و CI)
+pnpm --filter @idpn/api db:migrate -- --name add_x   # ساخت Migration جدید
+pnpm --filter @idpn/api db:rollback   # برگشت آخرین Migration
+pnpm --filter @idpn/api db:seed       # داده اولیه (Idempotent)
+```
+
+- **Migration جدید:** Schema را تغییر دهید و `db:migrate -- --name <name>` را اجرا کنید. SQL تولیدشده را بازبینی کنید؛
+  اگر تغییر نیاز به SQL دستی دارد (مثل محدودیت `CHECK` یا ایندکس Partial)، آن را به انتهای همان فایل اضافه کنید.
+- **Rollback:** برای هر Migration یک `down.sql` نگه‌داری می‌شود. `db:rollback` آخرین Migration اعمال‌شده را در یک
+  تراکنش برمی‌گرداند و رکورد آن را از `_prisma_migrations` حذف می‌کند. اگر `down.sql` موجود نباشد، فرمان با خطا متوقف می‌شود.
+- **Seed Idempotent:** Tenant پیش‌فرض (`default`)، کلاینت `admin-panel` (با MFA اجباری)، ۱۳ مجوز و ۳ نقش سراسری
+  (`idp:superadmin`، `idp:security-admin`، `idp:support`) و کاربران تست `admin`، `support` و `user`.
+  کاربران تست عمداً **رمز عبور ندارند**؛ Credential در فاز ۱ (کارت #12) اضافه می‌شود.
+- **قواعد سطح دیتابیس:** یکتایی `(tenant_id, email)` و `(tenant_id, username)`، اجباری‌بودن حروف کوچک ایمیل/نام کاربری،
+  یکتایی عضویت `(client_id, login_context_id, user_id)` با `NULLS NOT DISTINCT`، یک Context پیش‌فرض برای هر کلاینت،
+  سازگاری `scope_type`/`scope_id` در `Assignments` و `ON DELETE RESTRICT` روی FKها.
+- **تست:** `pnpm --filter @idpn/api test` با Testcontainers روی PostgreSQL واقعی اجرا می‌شود و Migration، Rollback،
+  اعمال مجدد و Idempotency مربوط به Seed را بررسی می‌کند (Docker باید فعال باشد).
+
+## 7. اسکریپت‌ها
 
 | دستور | کار |
 |---|---|
@@ -147,7 +180,6 @@ pnpm --filter @idpn/config test
 pnpm --filter @idpn/api typecheck
 ```
 
-## 7. گام‌های بعدی
+## 8. گام‌های بعدی
 
-- Migration و Seed اولیه — کارت #10
 - CI و Test Harness — کارت #11
