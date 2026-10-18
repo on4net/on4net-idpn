@@ -4,14 +4,23 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { MemorySigningKeyRepository, SigningKeyManager } from './oidc/keys.js';
 import { registerOidcRoutes } from './oidc/routes.js';
 import { registerRevokeIntrospectRoutes } from './oidc/revoke-introspect.js';
+import { registerPublicConfigRoute } from './public-config/routes.js';
 import type { TokenRouteOptions } from './oidc/token-route.js';
 import { registerTokenRoute } from './oidc/token-route.js';
+import { registerUserInfoRoute } from './oidc/userinfo-route.js';
 
 export interface BuildServerOptions {
   /** Public issuer URL; defaults to a local development value. */
   issuer?: string;
   keys?: SigningKeyManager;
   token?: Omit<TokenRouteOptions, 'issuer' | 'keys'>;
+  publicConfig?: {
+    repository: Parameters<typeof registerPublicConfigRoute>[1]['repository'];
+    originLookup: (clientId: string) => Promise<string[]>;
+    mfe: { version: string; remoteEntry: string };
+    translationsUrlTemplate?: string;
+  };
+  userInfo?: { users: Parameters<typeof registerUserInfoRoute>[1]['users'] };
 }
 
 /**
@@ -39,6 +48,23 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
       refreshTokens: options.token.refreshTokens,
       ...(options.token.now === undefined ? {} : { now: options.token.now }),
     });
+  }
+
+  if (options.publicConfig !== undefined) {
+    registerPublicConfigRoute(app, {
+      repository: options.publicConfig.repository,
+      allowedOrigins: options.publicConfig.originLookup,
+      dependencies: {
+        mfe: options.publicConfig.mfe,
+        ...(options.publicConfig.translationsUrlTemplate === undefined
+          ? {}
+          : { translationsUrlTemplate: options.publicConfig.translationsUrlTemplate }),
+      },
+    });
+  }
+
+  if (options.userInfo !== undefined) {
+    registerUserInfoRoute(app, { issuer, keys, users: options.userInfo.users });
   }
 
   return app;

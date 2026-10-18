@@ -225,6 +225,7 @@ async function refreshTokenGrant(
       amr: session?.amr ?? ['pwd'],
       sid: rotation.record.sessionId,
       jti: randomUUID(),
+      scope: rotation.record.scope.join(' '),
       tenant_id: profile.tenantId,
     },
     {

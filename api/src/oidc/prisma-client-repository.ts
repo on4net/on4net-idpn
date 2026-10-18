@@ -7,7 +7,8 @@ const now = (): Date => new Date();
 /** Reads OAuth clients (public metadata) and their active secrets from PostgreSQL. */
 export function createPrismaClientRepository(
   prisma: PrismaClient,
-): ClientRepository & ClientAuthRepository {
+): ClientRepository &
+  ClientAuthRepository & { findAllowedOrigins(clientId: string): Promise<string[]> } {
   async function load(clientId: string) {
     return prisma.client.findUnique({
       where: { clientId },
@@ -38,6 +39,14 @@ export function createPrismaClientRepository(
     async findByClientId(clientId) {
       const row = await load(clientId);
       return row === null ? null : toOAuthClient(row);
+    },
+
+    async findAllowedOrigins(clientId) {
+      const row = await prisma.client.findUnique({
+        where: { clientId },
+        select: { allowedOrigins: true },
+      });
+      return row?.allowedOrigins ?? [];
     },
 
     async findForAuth(clientId): Promise<ClientAuthClientRecord | null> {

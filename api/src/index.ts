@@ -9,6 +9,7 @@ import { createPrismaClientRepository } from './oidc/prisma-client-repository.js
 import { createPrismaCodeRepository } from './oidc/prisma-code-repository.js';
 import { createPrismaRefreshTokenRepository } from './oidc/prisma-refresh-repository.js';
 import { createPrismaUserRepository } from './oidc/prisma-user-repository.js';
+import { createPrismaPublicConfigRepository } from './public-config/prisma-repository.js';
 import { buildServer } from './server.js';
 import { RedisSessionCache } from './session/redis-cache.js';
 import { RedisSessionStore } from './session/store.js';
@@ -30,15 +31,28 @@ const sessions = new RedisSessionStore({
   },
 });
 
+const clientsRepository = createPrismaClientRepository(prisma);
+const usersRepository = createPrismaUserRepository(prisma);
+
 const app = buildServer({
   issuer: env.APP_URL,
   keys,
   token: {
-    clients: createPrismaClientRepository(prisma),
+    clients: clientsRepository,
     codes: createPrismaCodeRepository(prisma),
     refreshTokens: createPrismaRefreshTokenRepository(prisma),
-    users: createPrismaUserRepository(prisma),
+    users: usersRepository,
     sessions,
+  },
+  userInfo: { users: usersRepository },
+  publicConfig: {
+    repository: createPrismaPublicConfigRepository(prisma),
+    originLookup: (clientId) => clientsRepository.findAllowedOrigins(clientId),
+    mfe: {
+      version: env.MFE_VERSION,
+      remoteEntry: `${(env.MFE_PUBLIC_URL ?? env.APP_URL).replace(/\/+$/, '')}/${env.MFE_VERSION}/remoteEntry.js`,
+    },
+    translationsUrlTemplate: `${env.APP_URL.replace(/\/+$/, '')}/api/v1/clients/{clientId}/translations/bundle`,
   },
 });
 

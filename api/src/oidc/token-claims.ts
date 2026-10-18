@@ -40,6 +40,7 @@ export function buildAccessTokenClaims(input: AccessTokenClaimsInput): Record<st
     amr: input.code.amr,
     sid: input.code.sessionId,
     jti: input.jti,
+    scope: input.code.scope.join(' '),
     tenant_id: input.profile.tenantId,
     ...(input.code.loginContext === undefined ? {} : { login_context: input.code.loginContext }),
   };

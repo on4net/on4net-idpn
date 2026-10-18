@@ -92,6 +92,8 @@ export const serverEnvSchema = z.object({
   ARGON2_PARALLELISM: z.coerce.number().int().min(1).max(8).default(1),
   SIGNING_KEY_REF: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
   MFE_PUBLIC_URL: optionalUrl(),
+  /** Version of the published MFE bundle (used for the remoteEntry URL). */
+  MFE_VERSION: z.preprocess(emptyToUndefined, z.string().min(1).default('0.1.0')),
   MFE_ALLOWED_ORIGINS: csv(origin).default([]),
   SOCIAL_CALLBACK_BASE_URL: optionalUrl(),
   SMTP_URL: z.preprocess(
