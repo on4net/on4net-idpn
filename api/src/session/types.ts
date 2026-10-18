@@ -9,6 +9,8 @@ export interface IdpSession {
   loginContext?: string;
   createdAt: string;
   lastSeenAt: string;
+  /** When the user actually authenticated; `max_age` is measured from here. */
+  authTime: string;
   idleExpiresAt: string;
   absoluteExpiresAt: string;
   ip?: string;
@@ -37,6 +39,8 @@ export interface CreateSessionInput {
   userAgent?: string;
   amr: string[];
   acr: string;
+  /** Authentication time; defaults to now. Preserved across rotation. */
+  authTime?: Date;
 }
 
 export interface SessionPolicy {

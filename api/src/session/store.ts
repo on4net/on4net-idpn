@@ -47,6 +47,7 @@ export class RedisSessionStore {
       ...definedOptional('loginContext', input.loginContext),
       createdAt: now.toISOString(),
       lastSeenAt: now.toISOString(),
+      authTime: (input.authTime ?? now).toISOString(),
       idleExpiresAt: new Date(now.getTime() + this.policy.idleTtlSeconds * 1000).toISOString(),
       absoluteExpiresAt: new Date(
         now.getTime() + this.policy.absoluteTtlSeconds * 1000,
@@ -108,6 +109,7 @@ export class RedisSessionStore {
       userAgent: current.userAgent,
       amr: current.amr,
       acr: current.acr,
+      authTime: new Date(current.authTime),
     });
   }
 
