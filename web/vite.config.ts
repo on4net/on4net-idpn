@@ -5,6 +5,7 @@ import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
 const DEV_PORT = Number(process.env.VITE_PORT ?? 5173);
+const API_PROXY = process.env.VITE_API_PROXY ?? 'http://127.0.0.1:3000';
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -17,6 +18,13 @@ export default defineConfig({
     host: '127.0.0.1',
     port: DEV_PORT,
     strictPort: true,
+    proxy: {
+      // The Hosted UI talks to the API on the IdP origin; the dev proxy keeps cookies
+      // first-party and avoids CORS in local development.
+      '/api': API_PROXY,
+      '/oauth2': API_PROXY,
+      '/.well-known': API_PROXY,
+    },
   },
   preview: {
     host: '127.0.0.1',

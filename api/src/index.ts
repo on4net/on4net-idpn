@@ -10,6 +10,7 @@ import { createPrismaCodeRepository } from './oidc/prisma-code-repository.js';
 import { createPrismaRefreshTokenRepository } from './oidc/prisma-refresh-repository.js';
 import { createPrismaUserRepository } from './oidc/prisma-user-repository.js';
 import { createPrismaPublicConfigRepository } from './public-config/prisma-repository.js';
+import { createPrismaLoginRepository } from './login/prisma-repository.js';
 import { buildServer } from './server.js';
 import { RedisSessionCache } from './session/redis-cache.js';
 import { RedisSessionStore } from './session/store.js';
@@ -33,6 +34,7 @@ const sessions = new RedisSessionStore({
 
 const clientsRepository = createPrismaClientRepository(prisma);
 const usersRepository = createPrismaUserRepository(prisma);
+const loginRepository = createPrismaLoginRepository(prisma);
 
 const app = buildServer({
   issuer: env.APP_URL,
@@ -45,6 +47,18 @@ const app = buildServer({
     sessions,
   },
   userInfo: { users: usersRepository },
+  authorize: { clients: clientsRepository },
+  login: {
+    users: loginRepository,
+    sessions,
+    persistSession: (input) => loginRepository.persistSession(input),
+    audit: { record: (event) => loginRepository.record(event) },
+    cookie: {
+      secure: env.APP_URL.startsWith('https://'),
+      idleTtlSeconds: env.SESSION_IDLE_TTL_SECONDS,
+      absoluteTtlSeconds: env.SESSION_ABSOLUTE_TTL_SECONDS,
+    },
+  },
   publicConfig: {
     repository: createPrismaPublicConfigRepository(prisma),
     originLookup: (clientId) => clientsRepository.findAllowedOrigins(clientId),

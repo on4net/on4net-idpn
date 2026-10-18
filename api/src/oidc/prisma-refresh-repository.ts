@@ -2,6 +2,14 @@ import type { PrismaClient } from '../generated/prisma/client.js';
 import type { RefreshTokenRecord, RefreshTokenRepository } from './refresh-token.js';
 
 export function createPrismaRefreshTokenRepository(prisma: PrismaClient): RefreshTokenRepository {
+  async function internalClientId(clientId: string): Promise<string> {
+    const client = await prisma.client.findUniqueOrThrow({
+      where: { clientId },
+      select: { id: true },
+    });
+    return client.id;
+  }
+
   return {
     async create(record) {
       await prisma.refreshToken.create({
@@ -9,7 +17,7 @@ export function createPrismaRefreshTokenRepository(prisma: PrismaClient): Refres
           id: record.id,
           tokenHash: record.tokenHash,
           familyId: record.familyId,
-          clientId: record.clientId,
+          clientId: await internalClientId(record.clientId),
           userId: record.userId,
           sessionId: record.sessionId,
           scope: record.scope,
@@ -20,7 +28,10 @@ export function createPrismaRefreshTokenRepository(prisma: PrismaClient): Refres
     },
 
     async findByHash(tokenHash) {
-      const row = await prisma.refreshToken.findUnique({ where: { tokenHash } });
+      const row = await prisma.refreshToken.findUnique({
+        where: { tokenHash },
+        include: { client: { select: { clientId: true } } },
+      });
       if (row === null) {
         return null;
       }
@@ -28,7 +39,7 @@ export function createPrismaRefreshTokenRepository(prisma: PrismaClient): Refres
         id: row.id,
         tokenHash: row.tokenHash,
         familyId: row.familyId,
-        clientId: row.clientId,
+        clientId: row.client.clientId,
         userId: row.userId,
         sessionId: row.sessionId,
         scope: row.scope,

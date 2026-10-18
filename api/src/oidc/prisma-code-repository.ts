@@ -3,12 +3,20 @@ import type { AuthorizationCodeRecord, AuthorizationCodeRepository } from './aut
 
 /** Prisma-backed authorization code store (codes are looked up by their SHA-256 hash). */
 export function createPrismaCodeRepository(prisma: PrismaClient): AuthorizationCodeRepository {
+  async function internalClientId(clientId: string): Promise<string> {
+    const client = await prisma.client.findUniqueOrThrow({
+      where: { clientId },
+      select: { id: true },
+    });
+    return client.id;
+  }
+
   return {
     async create(record) {
       await prisma.authorizationCode.create({
         data: {
           codeHash: record.codeHash,
-          clientId: record.clientId,
+          clientId: await internalClientId(record.clientId),
           userId: record.userId,
           sessionId: record.sessionId,
           redirectUri: record.redirectUri,
@@ -25,13 +33,16 @@ export function createPrismaCodeRepository(prisma: PrismaClient): AuthorizationC
     },
 
     async findByHash(codeHash) {
-      const row = await prisma.authorizationCode.findUnique({ where: { codeHash } });
+      const row = await prisma.authorizationCode.findUnique({
+        where: { codeHash },
+        include: { client: { select: { clientId: true } } },
+      });
       if (row === null) {
         return null;
       }
       const record: AuthorizationCodeRecord = {
         codeHash: row.codeHash,
-        clientId: row.clientId,
+        clientId: row.client.clientId,
         userId: row.userId,
         sessionId: row.sessionId,
         redirectUri: row.redirectUri,

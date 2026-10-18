@@ -72,7 +72,7 @@ beforeAll(async () => {
       tenantId: tenant.id,
     },
   });
-  clientId = client.id;
+  clientId = client.clientId;
   const user = await prisma.user.create({
     data: {
       tenantId: tenant.id,

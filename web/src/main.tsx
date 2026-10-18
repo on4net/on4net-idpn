@@ -1,8 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
-import { IdpnRoot } from './app/idpn-root';
-import { LoginPage } from './app/login-page';
+import { HostedLoginPage } from './app/hosted-login';
 import './styles/globals.css';
 
 const container = document.getElementById('root');
@@ -12,8 +11,6 @@ if (container === null) {
 
 createRoot(container).render(
   <StrictMode>
-    <IdpnRoot locale="fa-IR" dir="rtl">
-      <LoginPage />
-    </IdpnRoot>
+    <HostedLoginPage />
   </StrictMode>,
 );

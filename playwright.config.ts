@@ -61,6 +61,7 @@ export default defineConfig({
       timeout: 120_000,
       env: {
         VITE_PORT: String(WEB_PORT),
+        VITE_API_PROXY: apiURL,
       },
     },
     {

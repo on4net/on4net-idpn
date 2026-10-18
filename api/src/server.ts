@@ -2,9 +2,12 @@ import { healthResponseSchema, type HealthResponse } from '@idpn/contracts';
 import Fastify, { type FastifyInstance } from 'fastify';
 
 import { MemorySigningKeyRepository, SigningKeyManager } from './oidc/keys.js';
+import { registerAuthorizeRoute } from './oidc/authorize-route.js';
 import { registerOidcRoutes } from './oidc/routes.js';
 import { registerRevokeIntrospectRoutes } from './oidc/revoke-introspect.js';
 import { registerPublicConfigRoute } from './public-config/routes.js';
+import type { LoginRouteOptions } from './login/routes.js';
+import { registerLoginRoute } from './login/routes.js';
 import type { TokenRouteOptions } from './oidc/token-route.js';
 import { registerTokenRoute } from './oidc/token-route.js';
 import { registerUserInfoRoute } from './oidc/userinfo-route.js';
@@ -21,6 +24,9 @@ export interface BuildServerOptions {
     translationsUrlTemplate?: string;
   };
   userInfo?: { users: Parameters<typeof registerUserInfoRoute>[1]['users'] };
+  login?: Omit<LoginRouteOptions, 'appUrl'>;
+  /** Mounts GET /oauth2/authorize; requires a client repository and the code store. */
+  authorize?: { clients: Parameters<typeof registerAuthorizeRoute>[1]['clients'] };
 }
 
 /**
@@ -48,6 +54,15 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
       refreshTokens: options.token.refreshTokens,
       ...(options.token.now === undefined ? {} : { now: options.token.now }),
     });
+
+    if (options.authorize !== undefined) {
+      registerAuthorizeRoute(app, {
+        issuer,
+        clients: options.authorize.clients,
+        codes: options.token.codes,
+        sessions: options.token.sessions ?? { read: async () => null },
+      });
+    }
   }
 
   if (options.publicConfig !== undefined) {
@@ -65,6 +80,10 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
 
   if (options.userInfo !== undefined) {
     registerUserInfoRoute(app, { issuer, keys, users: options.userInfo.users });
+  }
+
+  if (options.login !== undefined) {
+    registerLoginRoute(app, { ...options.login, appUrl: issuer });
   }
 
   return app;

@@ -5,10 +5,12 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { Alert, AlertDescription, AlertTitle } from './alert';
 import { Badge } from './badge';
+import { Button } from './button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './card';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from './form';
 import { Input } from './input';
 import { ScrollArea } from './scroll-area';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './select';
 import { Spinner } from './spinner';
 import {
   Table,
@@ -20,6 +22,20 @@ import {
   TableRow,
 } from './table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './tabs';
+
+describe('Button', () => {
+  it('renders as a child element with asChild and forwards variants', () => {
+    render(
+      <Button asChild variant="outline" size="sm">
+        <a href="/forgot-password">بازیابی</a>
+      </Button>,
+    );
+
+    const link = screen.getByRole('link', { name: 'بازیابی' });
+    expect(link).toHaveAttribute('href', '/forgot-password');
+    expect(link.className).toContain('border');
+  });
+});
 
 describe('Card', () => {
   it('renders its slots', () => {
@@ -136,6 +152,31 @@ describe('Table', () => {
     expect(screen.getByRole('table')).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'نام' })).toBeInTheDocument();
     expect(screen.getByRole('cell', { name: 'sara@example.com' })).toBeInTheDocument();
+  });
+});
+
+describe('Select', () => {
+  it('opens the listbox and selects an item with the keyboard', async () => {
+    const user = userEvent.setup();
+    const onValueChange = vi.fn();
+
+    render(
+      <Select onValueChange={onValueChange}>
+        <SelectTrigger aria-label="نوع ورود">
+          <SelectValue placeholder="انتخاب" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="admin">مدیر</SelectItem>
+          <SelectItem value="team">تیم</SelectItem>
+        </SelectContent>
+      </Select>,
+    );
+
+    await user.click(screen.getByRole('combobox', { name: 'نوع ورود' }));
+    const option = await screen.findByRole('option', { name: 'تیم' });
+    await user.click(option);
+
+    expect(onValueChange).toHaveBeenCalledWith('team');
   });
 });
 
