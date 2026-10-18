@@ -81,6 +81,11 @@ export const serverEnvSchema = z.object({
     emptyToUndefined,
     z.string().min(32, 'must be at least 32 characters long'),
   ),
+  /** Optional server-side pepper for Argon2id; supply from KMS/Vault in production. */
+  PASSWORD_PEPPER: z.preprocess(emptyToUndefined, z.string().min(32).optional()),
+  ARGON2_MEMORY_KIB: z.coerce.number().int().min(8192).max(1_048_576).default(65_536),
+  ARGON2_TIME_COST: z.coerce.number().int().min(1).max(10).default(3),
+  ARGON2_PARALLELISM: z.coerce.number().int().min(1).max(8).default(1),
   SIGNING_KEY_REF: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
   MFE_PUBLIC_URL: optionalUrl(),
   MFE_ALLOWED_ORIGINS: csv(origin).default([]),

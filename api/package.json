@@ -22,6 +22,7 @@
     "@idpn/contracts": "workspace:^",
     "@prisma/adapter-pg": "7.10.1",
     "@prisma/client": "7.10.1",
+    "argon2": "^0.45.1",
     "fastify": "5.12.7"
   },
   "devDependencies": {
