@@ -47,7 +47,10 @@ const app = buildServer({
     sessions,
   },
   userInfo: { users: usersRepository },
-  authorize: { clients: clientsRepository },
+  authorize: {
+    clients: clientsRepository,
+    loginUrl: `${(env.HOSTED_UI_URL ?? env.APP_URL).replace(/\/+$/, '')}/`,
+  },
   login: {
     users: loginRepository,
     sessions,

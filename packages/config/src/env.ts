@@ -92,6 +92,11 @@ export const serverEnvSchema = z.object({
   ARGON2_PARALLELISM: z.coerce.number().int().min(1).max(8).default(1),
   SIGNING_KEY_REF: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
   MFE_PUBLIC_URL: optionalUrl(),
+  /**
+   * Public origin of the Hosted Auth UI. Defaults to `APP_URL` (single-origin deployment);
+   * set it when the UI is served from a different host or port than the API.
+   */
+  HOSTED_UI_URL: optionalUrl(),
   /** Version of the published MFE bundle (used for the remoteEntry URL). */
   MFE_VERSION: z.preprocess(emptyToUndefined, z.string().min(1).default('0.1.0')),
   MFE_ALLOWED_ORIGINS: csv(origin).default([]),

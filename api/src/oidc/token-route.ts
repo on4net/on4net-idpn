@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
+import { registerFormBodyParser } from '../http/form-body.js';
 import type { IdpSession } from '../session/types.js';
 import {
   exchangeAuthorizationCode,
@@ -72,6 +73,7 @@ const tokenSuccess = (reply: FastifyReply, payload: TokenResponse): FastifyReply
  */
 export function registerTokenRoute(app: FastifyInstance, options: TokenRouteOptions): void {
   const now = options.now ?? (() => new Date());
+  registerFormBodyParser(app);
 
   app.post('/oauth2/token', async (request, reply) => {
     const payload = body(request);

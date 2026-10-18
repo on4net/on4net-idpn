@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
+import { registerFormBodyParser } from '../http/form-body.js';
 import {
   authenticateClient,
   parseBasicAuthHeader,
@@ -41,6 +42,7 @@ export function registerRevokeIntrospectRoutes(
   options: RevokeIntrospectOptions,
 ): void {
   const now = options.now ?? (() => new Date());
+  registerFormBodyParser(app);
 
   async function authenticate(
     request: FastifyRequest,

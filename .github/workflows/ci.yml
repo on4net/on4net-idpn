@@ -69,6 +69,7 @@ jobs:
           name: coverage-unit
           path: |
             packages/*/coverage/lcov.info
+            examples/*/coverage/lcov.info
             web/coverage/lcov.info
           if-no-files-found: ignore
 
@@ -132,8 +133,35 @@ jobs:
           if-no-files-found: error
 
   e2e:
-    name: E2E smoke (Chromium)
+    name: E2E (Chromium: API, Hosted UI, MFE, BFF)
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: idpn
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d idpn"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/idpn
+      REDIS_URL: redis://127.0.0.1:6379
+      SESSION_SECRET: ci-e2e-session-secret-at-least-32-characters
     steps:
       - uses: actions/checkout@v4
 
@@ -150,7 +178,10 @@ jobs:
       - name: Install Chromium
         run: pnpm exec playwright install --with-deps chromium
 
-      - name: E2E smoke
+      - name: Apply database migrations
+        run: pnpm --filter @idpn/api run db:deploy
+
+      - name: E2E
         run: pnpm test:e2e
 
       - name: Upload Playwright report

@@ -7,7 +7,11 @@ import {
   issueAuthorizationCode,
   type AuthorizationCodeRepository,
 } from './authorization-code.js';
-import { validateAuthorizeRequest, type AuthorizeQuery } from './authorize-request.js';
+import {
+  validateAuthorizeRequest,
+  type AuthorizeQuery,
+  type ValidatedAuthorizeRequest,
+} from './authorize-request.js';
 import type { ClientRepository } from './client-repository.js';
 import { buildCodeRedirect, buildErrorRedirect, oauthError } from './oauth-error.js';
 
@@ -53,6 +57,33 @@ function redirect(reply: FastifyReply, location: string): FastifyReply {
 }
 
 /**
+ * Builds the hosted-login URL for an interactive request.
+ *
+ * The login page needs the client and the original authorize request back so that it can
+ * return the user agent to this endpoint after a successful authentication (`return_to`).
+ */
+export function buildLoginRedirect(
+  loginUrl: string,
+  authorize: ValidatedAuthorizeRequest,
+  requestUrl: string,
+): string {
+  const target = new URL(loginUrl, 'http://placeholder.invalid');
+  target.searchParams.set('client_id', authorize.client.clientId);
+  target.searchParams.set('return_to', requestUrl);
+  if (authorize.uiLocales !== undefined) {
+    target.searchParams.set('ui_locales', authorize.uiLocales);
+  }
+  if (authorize.loginHint !== undefined) {
+    target.searchParams.set('login_hint', authorize.loginHint);
+  }
+  return isAbsoluteUrl(loginUrl) ? target.toString() : `${target.pathname}${target.search}`;
+}
+
+function isAbsoluteUrl(value: string): boolean {
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(value);
+}
+
+/**
  * `GET /oauth2/authorize` — Authorization Code flow with mandatory PKCE (docs/auth-flows.md 2).
  *
  * Consent and the interactive login screen are separate surfaces: this handler either issues
@@ -81,6 +112,7 @@ export function registerAuthorizeRoute(app: FastifyInstance, options: AuthorizeR
     }
 
     const authorize = validation.request;
+    const returnTo = request.url;
     const sid = readSessionId(request.headers.cookie);
     const session = sid === null ? null : await options.sessions.read(sid);
     const wantsSilent = authorize.prompt.includes('none');
@@ -92,7 +124,7 @@ export function registerAuthorizeRoute(app: FastifyInstance, options: AuthorizeR
           buildErrorRedirect(authorize.redirectUri, oauthError('login_required'), authorize.state),
         );
       }
-      return redirect(reply, loginUrl);
+      return redirect(reply, buildLoginRedirect(loginUrl, authorize, returnTo));
     }
 
     if (

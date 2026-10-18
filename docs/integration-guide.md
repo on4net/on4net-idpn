@@ -173,6 +173,11 @@ sequenceDiagram
 - نشست پلتفرم با `HttpOnly; Secure; SameSite=Lax` باشد.
 - Refresh Token فقط در سرور باشد.
 - مسیر Callback با متد GET/POST مطابق پیکربندی کلاینت باشد.
+- `scope` شامل `offline_access` باشد تا Refresh Token صادر شود.
+
+**نمونهٔ اجراشدنی:** [`examples/bff`](../examples/bff/README.md) این الگو را با یک اپلیکیشن کوچک
+Fastify پیاده می‌کند (`/login`، `/auth/callback`، `/refresh`، `/logout`) و تست‌های E2E آن در
+`e2e/bff/flow.spec.ts` اجرا می‌شوند.
 
 ## 5. الگوی SPA / Mobile
 

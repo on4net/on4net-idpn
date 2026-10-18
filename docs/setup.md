@@ -185,7 +185,7 @@ pnpm --filter @idpn/api typecheck
 | دستور | چه چیزی اجرا می‌شود |
 |---|---|
 | `pnpm test` | همه تست‌های پکیج‌ها (بدون Coverage) |
-| `pnpm test:unit` | Unit + Contract با Coverage: `packages/config`، `packages/contracts`، `web` |
+| `pnpm test:unit` | Unit + Contract با Coverage: `packages/config`، `packages/contracts`، `examples/bff`، `web` |
 | `pnpm test:integration` | تست‌های `api` (HTTP، Postgres، Redis، Rollback، Seed) با Coverage |
 | `pnpm test:e2e` | Playwright Smoke در Chromium |
 | `pnpm contract:check` | مقایسه Artifactهای تولیدشده با Schemaها (Drift = شکست) |
@@ -212,8 +212,26 @@ pnpm exec playwright install chromium   # فقط یک بار
 pnpm test:e2e
 ```
 
-`playwright.config.ts` خودش API را روی پورت `3100` بالا می‌آورد (`pnpm --filter @idpn/api dev`) و منتظر
-`/healthz` می‌ماند. این Smoke فعلاً سلامت API را در Chromium بررسی می‌کند؛ سناریوهای UI در فاز ۱ اضافه می‌شوند.
+`playwright.config.ts` خودش سرویس‌ها را بالا می‌آورد و منتظر Endpoint سلامت هرکدام می‌ماند:
+
+| Project | سرویس | پورت |
+|---|---|---|
+| `api-chromium` | API | `3100` |
+| `web-chromium`، `mfe-chromium` | Hosted Auth UI (Vite) | `5180` |
+| `mf-chromium` | MFE Host | `5176` |
+| `bff-chromium` | نمونهٔ BFF (`examples/bff`) | `3200` |
+
+پروژهٔ `bff-chromium` سناریوی کامل ورود، Refresh و Logout را روی API واقعی (Postgres + Redis) اجرا
+می‌کند. برای آن، پیش از بالا آمدن BFF یک Fixture یکتا ساخته می‌شود:
+
+```powershell
+pnpm --filter @idpn/api run seed:e2e
+```
+
+این اسکریپت `seedDatabase` را اجرا می‌کند و سپس کلاینت محرمانهٔ `sample-bff` (Redirect URI
+`http://127.0.0.1:3200/auth/callback`) و یک رمز برای کاربر `user@example.com` می‌سازد. مقادیر از
+`E2E_BFF_CLIENT_SECRET` و `E2E_USER_PASSWORD` خوانده می‌شوند؛ مقدار پیش‌فرض فقط برای CI و محیط توسعه
+است و هرگز نباید روی پایگاه دادهٔ Production اجرا شود.
 
 ### Coverage Gate
 | پکیج | حداقل (Lines/Statements/Functions) | Branches |
@@ -222,6 +240,7 @@ pnpm test:e2e
 | `packages/contracts` | 90% | 85% |
 | `web` | 90% | 85% |
 | `api` | 80% | 70% |
+| `examples/bff` | 80% | 75% |
 
 Coverage پایین‌تر از حد، فرمان را با خطا متوقف می‌کند.
 
@@ -235,7 +254,8 @@ Coverage پایین‌تر از حد، فرمان را با خطا متوقف م
 
 `.github/workflows/ci.yml` روی هر PR پنج Job اجرا می‌کند: `static` (Lint، Typecheck، Contract، Build)،
 `unit` (Coverage)، `integration` (Testcontainers)، `supply-chain` (Audit، Pin، SBOM) و `e2e`
-(Chromium Smoke). قبل از انتقال هر کارت به مرحلهٔ Review، همین مجموعه به‌صورت محلی هم اجرا می‌شود.
+(Chromium: API، Hosted UI، MFE و BFF روی سرویس‌های `postgres:16` و `redis:7`). قبل از انتقال هر کارت
+به مرحلهٔ Review، همین مجموعه به‌صورت محلی هم اجرا می‌شود.
 
 ### زنجیره تأمین
 

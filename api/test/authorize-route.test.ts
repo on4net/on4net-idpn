@@ -174,7 +174,28 @@ describe('GET /oauth2/authorize', () => {
       .query(baseQuery)
       .expect(302);
 
-    expect(response.headers.location).toBe(`${issuer}/login`);
+    const location = new URL(response.headers.location ?? '');
+    expect(location.origin + location.pathname).toBe(`${issuer}/login`);
+    expect(location.searchParams.get('client_id')).toBe('app-a');
+    const returnTo = new URL(location.searchParams.get('return_to') ?? '', issuer);
+    expect(returnTo.pathname).toBe('/oauth2/authorize');
+    expect(returnTo.searchParams.get('client_id')).toBe('app-a');
+    expect(returnTo.searchParams.get('state')).toBe('state-123');
+    await app.close();
+  });
+
+  it('carries ui_locales and login_hint into the hosted login URL', async () => {
+    const { app } = buildApp({ currentSession: null });
+    await app.ready();
+
+    const response = await request(app.server)
+      .get('/oauth2/authorize')
+      .query({ ...baseQuery, ui_locales: 'fa-IR', login_hint: 'sara@example.com' })
+      .expect(302);
+
+    const location = new URL(response.headers.location ?? '');
+    expect(location.searchParams.get('ui_locales')).toBe('fa-IR');
+    expect(location.searchParams.get('login_hint')).toBe('sara@example.com');
     await app.close();
   });
 
@@ -237,7 +258,9 @@ describe('GET /oauth2/authorize', () => {
       .set('Cookie', 'idpn_session=other-session')
       .expect(302);
 
-    expect(response.headers.location).toBe(`${issuer}/login`);
+    const location = new URL(response.headers.location ?? '');
+    expect(location.pathname).toBe('/login');
+    expect(location.searchParams.get('client_id')).toBe('app-a');
     await app.close();
   });
 });

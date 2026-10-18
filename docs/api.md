@@ -121,6 +121,9 @@ grant_type=authorization_code
 grant_type=refresh_token&refresh_token=...&scope=openid%20profile%20email
 ```
 
+پارامترها مطابق RFC 6749 به‌صورت `application/x-www-form-urlencoded` ارسال می‌شوند؛ بدنه JSON نیز برای
+کلاینت‌های داخلی (first-party) پذیرفته می‌شود.
+
 **پاسخ موفق:** `200`
 
 ```json

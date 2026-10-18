@@ -186,12 +186,13 @@ async function harness(options: HarnessOptions = {}) {
 async function seedCode(
   codes: AuthorizationCodeRepository,
   scope: string[] = ['openid', 'profile'],
+  overrides: { clientId?: string; redirectUri?: string } = {},
 ): Promise<string> {
   const { code } = await issueAuthorizationCode(codes, {
-    clientId: 'spa-app',
+    clientId: overrides.clientId ?? 'spa-app',
     userId: profile.id,
     sessionId: 'session-1',
-    redirectUri: 'https://spa.example.com/cb',
+    redirectUri: overrides.redirectUri ?? 'https://spa.example.com/cb',
     scope,
     nonce: 'nonce-1',
     codeChallenge: s256Challenge(verifier),
@@ -204,6 +205,33 @@ async function seedCode(
 }
 
 describe('POST /oauth2/token — authorization_code', () => {
+  it('accepts the RFC 6749 form-encoded body with client_secret_basic authentication', async () => {
+    const { app, codes } = await harness();
+    const redirectUri = 'https://web.example.com/cb';
+    const code = await seedCode(codes, ['openid', 'profile'], {
+      clientId: 'web-app',
+      redirectUri,
+    });
+
+    const response = await request(app.server)
+      .post('/oauth2/token')
+      .set('Content-Type', 'application/x-www-form-urlencoded')
+      .set('Authorization', `Basic ${Buffer.from(`web-app:${secret}`, 'utf8').toString('base64')}`)
+      .send(
+        new URLSearchParams({
+          grant_type: 'authorization_code',
+          code,
+          redirect_uri: redirectUri,
+          code_verifier: verifier,
+        }).toString(),
+      )
+      .expect(200);
+
+    expect(response.body).toMatchObject({ token_type: 'Bearer', expires_in: 600 });
+    expect(response.body.access_token).toEqual(expect.any(String));
+    await app.close();
+  });
+
   it('issues access and ID tokens with correct iss, aud, exp and sid', async () => {
     const { app, codes, keys } = await harness();
     const code = await seedCode(codes);

@@ -1,6 +1,7 @@
 import { healthResponseSchema, type HealthResponse } from '@idpn/contracts';
 import Fastify, { type FastifyInstance } from 'fastify';
 
+import { registerFormBodyParser } from './http/form-body.js';
 import { MemorySigningKeyRepository, SigningKeyManager } from './oidc/keys.js';
 import { registerAuthorizeRoute } from './oidc/authorize-route.js';
 import { registerOidcRoutes } from './oidc/routes.js';
@@ -26,7 +27,11 @@ export interface BuildServerOptions {
   userInfo?: { users: Parameters<typeof registerUserInfoRoute>[1]['users'] };
   login?: Omit<LoginRouteOptions, 'appUrl'>;
   /** Mounts GET /oauth2/authorize; requires a client repository and the code store. */
-  authorize?: { clients: Parameters<typeof registerAuthorizeRoute>[1]['clients'] };
+  authorize?: {
+    clients: Parameters<typeof registerAuthorizeRoute>[1]['clients'];
+    /** Hosted Auth UI used for interactive requests; defaults to `${issuer}/login`. */
+    loginUrl?: string;
+  };
 }
 
 /**
@@ -37,6 +42,10 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   const app = Fastify({ logger: false });
   const issuer = options.issuer ?? 'http://127.0.0.1:3000';
   const keys = options.keys ?? new SigningKeyManager(new MemorySigningKeyRepository());
+
+  // RFC 6749/7009 clients post `application/x-www-form-urlencoded` to the token and
+  // revocation endpoints; the JSON body stays supported for first-party callers.
+  registerFormBodyParser(app);
 
   app.get('/healthz', async (_request, reply) => {
     const payload: HealthResponse = { status: 'ok', service: 'on4net-idpn-api' };
@@ -61,6 +70,9 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
         clients: options.authorize.clients,
         codes: options.token.codes,
         sessions: options.token.sessions ?? { read: async () => null },
+        ...(options.authorize.loginUrl === undefined
+          ? {}
+          : { loginUrl: options.authorize.loginUrl }),
       });
     }
   }
