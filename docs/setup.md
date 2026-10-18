@@ -1,0 +1,126 @@
+# راه‌اندازی محیط توسعه
+
+> این سند پیش‌نیازها، ساختار Workspace، متغیرهای محیطی و اسکریپت‌های ریشه را تعریف می‌کند.
+> معماری در [architecture.md](./architecture.md) و استراتژی تست در [testing.md](./testing.md) آمده است.
+
+## 1. پیش‌نیازها
+
+| ابزار | نسخه | توضیح |
+|---|---|---|
+| Node.js | `>= 22.11` (LTS) | در `package.json` با `engines` اعمال می‌شود |
+| pnpm | `>= 9` | نسخه پین‌شده: `9.12.0` |
+| Git | — | — |
+| Docker + Compose | — | برای PostgreSQL، Redis و Mailhog (کارت #9) |
+
+فعال‌سازی pnpm با Corepack:
+
+```powershell
+corepack enable
+corepack prepare pnpm@9.12.0 --activate
+pnpm --version
+```
+
+## 2. ساختار Workspace
+
+```
+.
+├── api/               # @idpn/api — Auth Server و Admin API (NestJS + Fastify)
+├── web/               # @idpn/web — Hosted Auth UI، Admin Panel و MFE
+├── packages/
+│   └── config/        # @idpn/config — Schema اعتبارسنجی متغیرهای محیطی با Zod
+├── docs/
+├── pnpm-workspace.yaml
+├── tsconfig.base.json # تنظیمات TypeScript مشترک (strict + Path Aliases)
+└── eslint.config.mjs  # ESLint Flat Config مشترک
+```
+
+پکیج‌ها به‌صورت ESM (`"type": "module"`) نوشته می‌شوند و پکیج‌های داخلی از طریق
+`workspace:*` و Alias `@idpn/config` در `tsconfig.base.json` قابل Import هستند.
+
+## 3. نصب
+
+```powershell
+git clone <repository-url>
+cd on4net-idpn
+pnpm install
+```
+
+پکیج‌های Workspace به‌صورت Symlink در `node_modules` ریشه لینک می‌شوند؛ نیازی به `npm link` نیست.
+
+## 4. متغیرهای محیطی
+
+```powershell
+Copy-Item .env.example .env
+```
+
+سپس مقادیر واقعی را در `.env` جایگزین کنید. `.env` در `.gitignore` است و **هرگز Commit نمی‌شود**؛
+فقط `.env.example` با مقادیر نمونه در مخزن نگهداری می‌شود.
+
+| متغیر | الزامی | نمونه | توضیح |
+|---|---|---|---|
+| `NODE_ENV` | خیر | `development` | یکی از `development`، `test`، `production`؛ پیش‌فرض `development` |
+| `PORT` | خیر | `3000` | پورت سرور API؛ پیش‌فرض `3000` |
+| `APP_URL` | **بله** | `https://auth.example.com` | Issuer و Base URL سامانه |
+| `VITE_APP_URL` | **بله** (برای `web`) | `http://localhost:3000` | همان `APP_URL` که در Build فرانت‌اند قابل استفاده است |
+| `ADMIN_URL` | خیر | `https://admin.example.com` | آدرس پنل مدیریت |
+| `DATABASE_URL` | **بله** | `postgresql://…` | اتصال PostgreSQL (باید `postgres://` یا `postgresql://` باشد) |
+| `REDIS_URL` | **بله** | `redis://localhost:6379` | اتصال Redis (باید `redis://` یا `rediss://` باشد) |
+| `SESSION_SECRET` | **بله** | — | حداقل ۳۲ کاراکتر؛ امضای کوکی/CSRF |
+| `SIGNING_KEY_REF` | خیر | `vault://idpn/signing` | مرجع کلید امضا؛ در توسعه خالی می‌ماند |
+| `MFE_PUBLIC_URL` | خیر | `https://cdn.example.com/idpn-mfe` | آدرس پایه Remoteهای MFE |
+| `MFE_ALLOWED_ORIGINS` | خیر | `https://app-a.example.com,https://app-b.example.com` | فهرست Originهای مجاز Host (با کاما) |
+| `SOCIAL_CALLBACK_BASE_URL` | خیر | `https://auth.example.com` | پایه Callback سوشال |
+| `SMTP_URL` | خیر | `smtp://localhost:1025` | ارسال ایمیل (به `smtp://` یا `smtps://` نیاز دارد) |
+| `TRUSTED_PROXY_CIDRS` | خیر | `10.0.0.0/8` | CIDRهای پراکسی معتمد (با کاما) |
+| `LOG_LEVEL` | خیر | `info` | `fatal`، `error`، `warn`، `info`، `debug`، `trace`، `silent` |
+
+### اعتبارسنجی
+
+Schema در [`@idpn/config`](../packages/config/src/env.ts) با Zod تعریف شده و در سه نقطه استفاده می‌شود:
+
+- `parseServerEnv(source)` — همه متغیرهای سرور؛
+- `parsePublicEnv(source)` — زیرمجموعه عمومی مرورگر (`VITE_*`)؛
+- `redactConfig(env)` — نسخه امن برای Log (کلیدهای حساس مثل `SESSION_SECRET` ماسک می‌شوند).
+
+`api/src/config/env.ts` تابع `loadApiEnv()` را ارائه می‌دهد که در Bootstrap فراخوانی می‌شود و
+`web/src/config/env.ts` تابع `loadWebEnv()` را برای Build مرورگر.
+
+متغیر نامعتبر یا خالی باعث خطای واضح و توقف Startup می‌شود؛ این خطا همه کلیدهای مشکل‌دار را یک‌جا
+برمی‌گرداند و **مقدار** متغیرها را نمایش نمی‌دهد:
+
+```
+Invalid environment configuration:
+  - APP_URL: is required
+  - SESSION_SECRET: must be at least 32 characters long
+Fix the values in your .env file. See .env.example and docs/setup.md.
+```
+
+ساخت یک Secret معتبر:
+
+```powershell
+[Convert]::ToBase64String((1..32 | ForEach-Object { Get-Random -Maximum 256 }))
+```
+
+## 5. اسکریپت‌ها
+
+| دستور | کار |
+|---|---|
+| `pnpm lint` | ESLint (Flat Config) روی کل مخزن |
+| `pnpm lint:fix` | رفع خودکار خطاهای Lint |
+| `pnpm typecheck` | `tsc --noEmit` در تمام پکیج‌های Workspace |
+| `pnpm test` | Vitest در تمام پکیج‌های Workspace |
+| `pnpm format` / `pnpm format:check` | قالب‌بندی یا بررسی قالب با Prettier |
+| `pnpm build` | Build پکیج‌هایی که اسکریپت `build` دارند |
+
+اجرای اسکریپت در یک پکیج مشخص:
+
+```powershell
+pnpm --filter @idpn/config test
+pnpm --filter @idpn/api typecheck
+```
+
+## 6. گام‌های بعدی
+
+- `docker compose up` برای PostgreSQL/Redis/Mailhog — کارت #9
+- Migration و Seed اولیه — کارت #10
+- CI و Test Harness — کارت #11
