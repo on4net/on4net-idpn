@@ -36,9 +36,11 @@ const EXPECTED_TABLES = [
   'signing_keys',
 ];
 
-let container: StartedPostgreSqlContainer;
+let container: StartedPostgreSqlContainer | undefined;
 let connectionString: string;
 let client: Client;
+let scratchDatabase: string | undefined;
+let serverClient: Client | undefined;
 
 async function migrateDeploy(): Promise<void> {
   await execFileAsync(process.execPath, [PRISMA_CLI, 'migrate', 'deploy'], {
@@ -88,15 +90,34 @@ async function insertUser(tenantId: string, email = 'tester@example.com'): Promi
 }
 
 beforeAll(async () => {
-  container = await new PostgreSqlContainer('postgres:16-alpine').start();
-  connectionString = container.getConnectionUri();
+  const externalServer = process.env.TEST_DATABASE_URL;
+  if (externalServer !== undefined && externalServer !== '') {
+    // Local/CI shortcut: run against a temporary database on an existing server.
+    scratchDatabase = `idpn_test_${Date.now()}`;
+    serverClient = new Client({ connectionString: externalServer });
+    await serverClient.connect();
+    await serverClient.query(`CREATE DATABASE "${scratchDatabase}"`);
+    const url = new URL(externalServer);
+    url.pathname = `/${scratchDatabase}`;
+    connectionString = url.toString();
+  } else {
+    container = await new PostgreSqlContainer('postgres:16-alpine')
+      .withStartupTimeout(180_000)
+      .start();
+    connectionString = container.getConnectionUri();
+  }
+
   await migrateDeploy();
   client = new Client({ connectionString });
   await client.connect();
-}, 240_000);
+}, 300_000);
 
 afterAll(async () => {
   await client?.end();
+  if (scratchDatabase !== undefined && serverClient !== undefined) {
+    await serverClient.query(`DROP DATABASE IF EXISTS "${scratchDatabase}" WITH (FORCE)`);
+    await serverClient.end();
+  }
   await container?.stop();
 });
 
@@ -255,7 +276,7 @@ describe('initial schema', () => {
       `SELECT to_regclass('public.users') AS users`,
     );
     expect(afterReapply.rows[0]?.users).not.toBeNull();
-  }, 120_000);
+  }, 240_000);
 
   it('seeding twice does not duplicate data', async () => {
     const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });

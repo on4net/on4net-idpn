@@ -6,3 +6,7 @@ playwright-report
 test-results
 .github
 **/generated
+# Generated contract artifacts: the generator is their single source of truth.
+packages/contracts/openapi.json
+packages/contracts/mfe-config.schema.json
+packages/contracts/mfe-event.schema.json

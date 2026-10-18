@@ -16,10 +16,16 @@
     "format": "prettier --write \"**/*.{ts,tsx,js,mjs,cjs,json,yaml,yml,css}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,mjs,cjs,json,yaml,yml,css}\"",
     "typecheck": "pnpm -r --if-present run typecheck",
-    "test": "pnpm -r --if-present run test"
+    "test": "pnpm -r --if-present run test",
+    "test:unit": "pnpm --filter @idpn/config --filter @idpn/contracts --filter @idpn/web run test:coverage",
+    "test:integration": "pnpm --filter @idpn/api run test:coverage",
+    "test:e2e": "playwright test",
+    "contract:generate": "pnpm --filter @idpn/contracts run generate",
+    "contract:check": "pnpm --filter @idpn/contracts run check"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.64.1",
     "eslint": "^10.13.0",
     "eslint-config-prettier": "^10.1.8",
     "prettier": "^3.9.10",

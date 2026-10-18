@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://idpn.example.com/contracts/mfe-config.schema.json",
+  "title": "IdpnMfeConfig",
+  "description": "Micro-frontend configuration contract, schema version 1.",
+  "type": "object",
+  "properties": {
+    "clientId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "mode": {
+      "type": "string",
+      "enum": [
+        "bff",
+        "spa"
+      ]
+    },
+    "apiBaseUrl": {
+      "type": "string",
+      "minLength": 1
+    },
+    "loginUrl": {
+      "type": "string",
+      "format": "uri"
+    },
+    "locale": {
+      "type": "string",
+      "minLength": 1
+    },
+    "locales": {
+      "type": "object",
+      "properties": {
+        "default": {
+          "type": "string",
+          "minLength": 1
+        },
+        "supported": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "dir": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "enum": [
+              "rtl",
+              "ltr"
+            ]
+          }
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "default",
+        "supported",
+        "dir"
+      ],
+      "additionalProperties": false
+    },
+    "loginContext": {
+      "type": "string",
+      "minLength": 1
+    },
+    "theme": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string"
+      },
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "module": {
+      "type": "string",
+      "enum": [
+        "account",
+        "user-management"
+      ]
+    },
+    "basename": {
+      "type": "string"
+    },
+    "features": {
+      "type": "object",
+      "properties": {
+        "selfServiceRegistration": {
+          "type": "boolean"
+        },
+        "userManagement": {
+          "type": "boolean"
+        },
+        "mfa": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "clientId",
+    "mode",
+    "apiBaseUrl",
+    "module"
+  ],
+  "additionalProperties": false
+}

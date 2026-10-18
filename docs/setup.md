@@ -180,6 +180,65 @@ pnpm --filter @idpn/config test
 pnpm --filter @idpn/api typecheck
 ```
 
-## 8. گام‌های بعدی
+## 8. تست و CI
 
-- CI و Test Harness — کارت #11
+| دستور | چه چیزی اجرا می‌شود |
+|---|---|
+| `pnpm test` | همه تست‌های پکیج‌ها (بدون Coverage) |
+| `pnpm test:unit` | Unit + Contract با Coverage: `packages/config`، `packages/contracts`، `web` |
+| `pnpm test:integration` | تست‌های `api` (HTTP، Postgres، Redis، Rollback، Seed) با Coverage |
+| `pnpm test:e2e` | Playwright Smoke در Chromium |
+| `pnpm contract:check` | مقایسه Artifactهای تولیدشده با Schemaها (Drift = شکست) |
+| `pnpm contract:generate` | بازتولید `openapi.json` و Schemaهای MFE |
+
+### Integration Tests و Docker
+
+- در **CI** تست‌ها با **Testcontainers** روی `postgres:16-alpine` و `redis:7-alpine` اجرا می‌شوند.
+- برای اجرای محلیِ سریع می‌توان از سرویس‌های `compose.yaml` استفاده کرد:
+
+```powershell
+$env:TEST_DATABASE_URL='postgresql://idpn:idpn@localhost:5432/idpn'
+$env:TEST_REDIS_URL='redis://localhost:6379'
+pnpm test:integration
+```
+
+  در این حالت یک دیتابیس موقت (`idpn_test_<timestamp>`) روی همان سرور ساخته، آزمایش‌ها روی آن اجرا و در پایان
+  حذف می‌شود؛ دادهٔ دیتابیس توسعه دست‌نخورده می‌ماند. اگر این دو متغیر ست نشوند، همان Testcontainers استفاده می‌شود.
+
+### E2E
+
+```powershell
+pnpm exec playwright install chromium   # فقط یک بار
+pnpm test:e2e
+```
+
+`playwright.config.ts` خودش API را روی پورت `3100` بالا می‌آورد (`pnpm --filter @idpn/api dev`) و منتظر
+`/healthz` می‌ماند. این Smoke فعلاً سلامت API را در Chromium بررسی می‌کند؛ سناریوهای UI در فاز ۱ اضافه می‌شوند.
+
+### Coverage Gate
+
+| پکیج | حداقل (Lines/Statements/Functions) | Branches |
+|---|---|---|
+| `packages/config` | 95% | 85% |
+| `packages/contracts` | 90% | 85% |
+| `web` | 90% | 85% |
+| `api` | 80% | 70% |
+
+Coverage پایین‌تر از حد، فرمان را با خطا متوقف می‌کند.
+
+### Contractها
+
+- `packages/contracts/openapi.json` — OpenAPI 3.1 برای Endpointهای پیاده‌شده.
+- `packages/contracts/mfe-config.schema.json` و `mfe-event.schema.json` — قرارداد نسخه‌دار Config/Event میکرو-فرانت‌اند.
+- تغییر Schema بدون `pnpm contract:generate` باعث شکست `contract:check` در CI می‌شود.
+
+### CI
+
+`.github/workflows/ci.yml` روی هر PR چهار Job اجرا می‌کند: `static` (Lint، Typecheck، Contract، Build)،
+`unit` (Coverage)، `integration` (Testcontainers) و `e2e` (Chromium Smoke). قبل از انتقال هر کارت به
+مرحلهٔ Review، همین مجموعه به‌صورت محلی هم اجرا می‌شود.
+
+## 9. گام‌های بعدی
+
+- اسپایک و راه‌اندازی shadcn/ui — کارت‌های #50 و #51
+- شروع فاز ۱: Credential و Argon2id — کارت #12

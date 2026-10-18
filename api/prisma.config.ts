@@ -2,7 +2,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { config as loadEnv } from 'dotenv';
-import { defineConfig, env } from 'prisma/config';
+import { defineConfig } from 'prisma/config';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -18,6 +18,7 @@ export default defineConfig({
     seed: 'tsx prisma/seed.ts',
   },
   datasource: {
-    url: env('DATABASE_URL'),
+    // Prisma commands need DATABASE_URL; `prisma generate` runs without it (e.g. CI install).
+    url: process.env.DATABASE_URL,
   },
 });
