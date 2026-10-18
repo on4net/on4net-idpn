@@ -31,7 +31,8 @@ export default defineConfig({
   },
   build: {
     target: 'esnext',
-    outDir: 'dist-mfe',
+    // Served by the host dev server from its public directory (same origin).
+    outDir: 'host-mf/public/remote',
     emptyOutDir: true,
   },
   server: {

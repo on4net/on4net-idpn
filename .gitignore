@@ -7,6 +7,7 @@ build/
 dist-mfe/
 dist-wc/
 dist-host/
+web/host-mf/public/
 *.tsbuildinfo
 .vite/
 

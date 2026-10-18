@@ -18,7 +18,7 @@ export default defineConfig({
         idpnMfe: {
           type: 'module',
           name: 'idpnMfe',
-          entry: 'http://127.0.0.1:5174/remoteEntry.js',
+          entry: '/remote/remoteEntry.js',
         },
       },
       shared: {

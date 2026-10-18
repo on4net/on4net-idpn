@@ -4,7 +4,6 @@ const API_PORT = Number(process.env.E2E_PORT ?? 3100);
 const WEB_PORT = Number(process.env.E2E_WEB_PORT ?? 5180);
 const apiURL = `http://127.0.0.1:${API_PORT}`;
 const webURL = `http://127.0.0.1:${WEB_PORT}`;
-const remoteURL = 'http://127.0.0.1:5174';
 const hostURL = 'http://127.0.0.1:5176';
 const isCI = process.env.CI === 'true';
 
@@ -65,16 +64,10 @@ export default defineConfig({
       },
     },
     {
-      command: 'pnpm --filter @idpn/web serve:mfe',
-      url: `${remoteURL}/remoteEntry.js`,
-      reuseExistingServer: !isCI,
-      timeout: 180_000,
-    },
-    {
       command: 'pnpm --filter @idpn/web dev:host',
       url: hostURL,
       reuseExistingServer: !isCI,
-      timeout: 120_000,
+      timeout: 180_000,
     },
   ],
 });
