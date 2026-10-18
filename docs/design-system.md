@@ -234,3 +234,42 @@ Tailwind v4 و CSS گلوبال shadcn می‌توانند با Host تداخل 
 - [ ] تست Visual برای Light/Dark و RTL/LTR وجود دارد.
 - [ ] Supply Chain و لایسنس بررسی شده است.
 - [ ] دستورالعمل پروژه بر shadcn/ui تأکید دارد.
+
+## 14. تصمیم Go/No-Go: shadcn/ui در MFE (اسپایک #50)
+
+**نتیجه: Go** برای shadcn/ui + Tailwind v4 در Hosted Auth UI، Module Federation و Web Component.
+جزئیات و اندازه‌گیری‌ها: [spikes/shadcn-mfe-spike.md](./spikes/shadcn-mfe-spike.md).
+
+| معیار | نتیجه | شاهد |
+|---|---|---|
+| نشت CSS/Preflight به Host | ندارد | تست Playwright با Host دارای Preflight و Utilityهای مهاجم |
+| Portalهای Dialog/Select | داخل `.idpn-root` | تست E2E در Hosted، Shadow DOM و Host فدریشن |
+| RTL فارسی | درست | `DirectionProvider` + Utilityهای Logical + تست axe/keyboard |
+| axe | بدون Critical/Serious | سه صفحه (ورود، Host ساده، Host فدریشن) |
+| React 19 Singleton | تایید شد | Mount واقعی Remote با `shared.singleton` و رندر Hook/Context |
+
+**تصمیم‌های الزام‌آور حاصل از اسپایک:**
+
+1. Preflight تیلویند در MFE وارد نمی‌شود؛ فقط `tailwindcss/theme.css` و `tailwindcss/utilities.css`.
+2. توکن‌ها روی `.idpn-root` تعریف می‌شوند، نه `:root`.
+3. `Dialog`/`Select` (و هر Portal آینده) باید `container` از `usePortalContainer()` بگیرند.
+4. ماژول MFE خودکفاست (`UserManagementRoot`): ریشه، جهت و Portal Container را خودش می‌سازد،
+   زیرا Context بین Bundleهای فدریشن مشترک نیست.
+5. Remote روی Origin خودش سرو می‌شود یا هدر CORS دارد؛ `remoteEntry.js` بدون CORS لود نمی‌شود.
+6. رنگ Primary باید کنتراست AA با متن سفید داشته باشد (`oklch(0.48 …)` یا تیره‌تر).
+
+## 15. Governance اجرایی و زنجیره تأمین
+
+- **منبع کامپوننت:** فقط CLI پین‌شده `pnpm dlx shadcn@4.22.0` (اسکریپت `ui:add`).
+  کپی دستی یا Registry تأییدنشده ممنوع است.
+- **دستورالعمل پروژه:** [`.github/instructions/ui-components.instructions.md`](../.github/instructions/ui-components.instructions.md)
+  روی `web/src/components/ui/**`، `web/src/app/**` و `web/src/mfe/**` اعمال می‌شود.
+- **Skill:** [`.github/skills/ui-styling/SKILL.md`](../.github/skills/ui-styling/SKILL.md) —
+  روند افزودن کامپوننت، مالکیت حوزه‌ها و چک‌لیست بازبینی.
+- **Inventory و Patchها:** [`web/UPSTREAM.md`](../web/UPSTREAM.md).
+- **نسخه‌ها:** همه وابستگی‌های Design System دقیقاً Pin هستند (بدون `^`/`~`)؛ بررسی با `pnpm supply-chain`.
+- **آسیب‌پذیری:** `pnpm audit:ci` روی High/Critical شکست می‌خورد؛ SBOM با `pnpm sbom` (CycloneDX 1.5)
+  تولید می‌شود. جزئیات: [supply-chain.md](./supply-chain.md).
+- **Upgrade:** فقط دستی و در PR مستقل، همراه با اعمال دوباره Patchها و اجرای
+  `typecheck`، `test:coverage`، `test:e2e` و بازبینی RTL/axe.
+- **لایسنس:** MIT برای shadcn/ui، Radix UI و Tailwind CSS در [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md).

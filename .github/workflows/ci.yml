@@ -99,6 +99,38 @@ jobs:
           path: api/coverage/lcov.info
           if-no-files-found: ignore
 
+  supply-chain:
+    name: Supply chain (audit, SBOM, pins)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Audit (fail on high/critical)
+        run: pnpm audit:ci
+
+      - name: Pinned versions and licenses
+        run: pnpm supply-chain
+
+      - name: Generate SBOM
+        run: pnpm sbom
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx
+          path: artifacts/sbom.cdx.json
+          if-no-files-found: error
+
   e2e:
     name: E2E smoke (Chromium)
     runs-on: ubuntu-latest

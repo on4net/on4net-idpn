@@ -24,6 +24,9 @@ test-results/
 .env.*
 !.env.example
 
+# Generated artifacts (SBOM, reports)
+artifacts/
+
 # Logs and OS files
 *.log
 .DS_Store

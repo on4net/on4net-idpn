@@ -5,7 +5,7 @@
 
 | مورد | مقدار |
 |---|---|
-| shadcn CLI | `4.22.0` — فقط devDependency، بدون وابستگی Runtime |
+| shadcn CLI | `4.22.0` — فقط با `pnpm dlx shadcn@4.22.0` (نصب‌شده نیست، بدون وابستگی Runtime) |
 | تاریخ Init | 2026-10-18 |
 | Style | `new-york` |
 | Tailwind | v4 (بدون فایل config؛ `@tailwindcss/vite`) |
@@ -48,7 +48,7 @@ pnpm --filter @idpn/web ui:add <component>
 
 ## سیاست Upgrade
 
-1. نسخه CLI در `web/package.json` (devDependency) Pin است؛ ارتقا فقط با تصمیم مالک Design System و در یک PR مستقل.
+1. نسخه CLI در اسکریپت `ui:add`/`ui:init` (`pnpm dlx shadcn@4.22.0`) Pin است؛ CLI در `package.json` نصب نمی‌شود و ارتقای آن فقط با تصمیم مالک Design System و در یک PR مستقل انجام می‌شود.
 2. پس از ارتقا، کامپوننت‌های تغییریافته را بازتولید کنید و **Patchهای محلی را دوباره اعمال** کنید؛ سپس ردیف
    Inventory و تاریخ آن را به‌روز کنید.
 3. هیچ به‌روزرسانی خودکار یا Range شناور مجاز نیست؛ Lockfile باید Commit شود.

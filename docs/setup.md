@@ -216,7 +216,6 @@ pnpm test:e2e
 `/healthz` می‌ماند. این Smoke فعلاً سلامت API را در Chromium بررسی می‌کند؛ سناریوهای UI در فاز ۱ اضافه می‌شوند.
 
 ### Coverage Gate
-
 | پکیج | حداقل (Lines/Statements/Functions) | Branches |
 |---|---|---|
 | `packages/config` | 95% | 85% |
@@ -234,11 +233,20 @@ Coverage پایین‌تر از حد، فرمان را با خطا متوقف م
 
 ### CI
 
-`.github/workflows/ci.yml` روی هر PR چهار Job اجرا می‌کند: `static` (Lint، Typecheck، Contract، Build)،
-`unit` (Coverage)، `integration` (Testcontainers) و `e2e` (Chromium Smoke). قبل از انتقال هر کارت به
-مرحلهٔ Review، همین مجموعه به‌صورت محلی هم اجرا می‌شود.
+`.github/workflows/ci.yml` روی هر PR پنج Job اجرا می‌کند: `static` (Lint، Typecheck، Contract، Build)،
+`unit` (Coverage)، `integration` (Testcontainers)، `supply-chain` (Audit، Pin، SBOM) و `e2e`
+(Chromium Smoke). قبل از انتقال هر کارت به مرحلهٔ Review، همین مجموعه به‌صورت محلی هم اجرا می‌شود.
+
+### زنجیره تأمین
+
+```powershell
+pnpm audit:ci        # شکست روی High/Critical
+pnpm supply-chain    # نسخه‌های Pin، لایسنس‌های مجاز، Singleton بودن React
+pnpm sbom            # artifacts/sbom.cdx.json (CycloneDX 1.5)
+```
+
+جزئیات، یافته‌ها و سیاست Upgrade در [supply-chain.md](./supply-chain.md).
 
 ## 9. گام‌های بعدی
 
-- اسپایک و راه‌اندازی shadcn/ui — کارت‌های #50 و #51
 - شروع فاز ۱: Credential و Argon2id — کارت #12

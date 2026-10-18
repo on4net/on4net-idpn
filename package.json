@@ -2,7 +2,7 @@
   "name": "on4net-idpn",
   "version": "0.1.0",
   "private": true,
-  "description": "on4net IDPN — OpenID Connect identity provider for multi-platform single sign-on",
+  "description": "on4net IDPN ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â OpenID Connect identity provider for multi-platform single sign-on",
   "license": "UNLICENSED",
   "packageManager": "pnpm@9.12.0",
   "engines": {
@@ -21,16 +21,21 @@
     "test:integration": "pnpm --filter @idpn/api run test:coverage",
     "test:e2e": "playwright test",
     "contract:generate": "pnpm --filter @idpn/contracts run generate",
-    "contract:check": "pnpm --filter @idpn/contracts run check"
+    "contract:check": "pnpm --filter @idpn/contracts run check",
+    "supply-chain": "node tools/check-supply-chain.mjs --licenses",
+    "audit:ci": "pnpm audit --audit-level=high",
+    "sbom": "node tools/sbom.mjs"
   },
   "devDependencies": {
-    "@axe-core/playwright": "^4.14.0",
-    "@eslint/js": "^10.0.1",
-    "@playwright/test": "^1.64.1",
-    "eslint": "^10.13.0",
-    "eslint-config-prettier": "^10.1.8",
-    "prettier": "^3.9.10",
-    "typescript": "^5.9.3",
-    "typescript-eslint": "^8.71.2"
+    "@axe-core/playwright": "4.14.0",
+    "@eslint/js": "10.0.1",
+    "@playwright/test": "1.64.1",
+    "@types/node": "26.6.5",
+    "eslint": "10.13.0",
+    "eslint-config-prettier": "10.1.8",
+    "prettier": "3.9.10",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.71.2",
+    "yaml": "2.9.1"
   }
 }

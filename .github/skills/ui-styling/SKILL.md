@@ -11,7 +11,7 @@ The design system is **shadcn/ui + Tailwind v4**, vendored into `web/src/compone
 ## Non-negotiable rules
 
 1. **Components come from the pinned shadcn CLI only.**
-   `pnpm --filter @idpn/web ui:add <component>` (pins `shadcn@4.22.0` in devDependencies).
+   `pnpm --filter @idpn/web ui:add <component>` — runs `pnpm dlx shadcn@4.22.0 add` (the CLI is never installed).
    Never copy component source from a blog, gist, another project, or an unapproved registry.
 2. **No runtime dependency on the CLI.** `shadcn` stays in `devDependencies`; the app imports only
    `web/src/components/ui/*` and `web/src/lib/utils.ts`.
