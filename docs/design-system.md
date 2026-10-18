@@ -211,14 +211,15 @@ Tailwind v4 و CSS گلوبال shadcn می‌توانند با Host تداخل 
 
 ## 12. Skills و دستورالعمل Agent
 
-- Skillهای موجود در Workspace اسکیل‌ها (`openon4net/.github/skills`):
-  - `ui-styling` برای shadcn/ui
-  - `design-system` برای Token Architecture
-  - `accessibility-review` برای A11y
-  - `i18n-rtl-review` برای RTL
-  - `playwright-skill` برای E2E/Visual
-  - `dependency-review` برای Supply Chain
+- Skillهای موجود در [`.github/skills`](../.github/skills/README.md):
+  - [accessibility-review](../.github/skills/accessibility-review/SKILL.md) برای A11y
+  - [i18n-rtl-review](../.github/skills/i18n-rtl-review/SKILL.md) برای RTL و i18n
+  - [playwright-skill](../.github/skills/playwright-skill/SKILL.md) برای E2E و Visual Regression
+  - [dependency-review](../.github/skills/dependency-review/SKILL.md) برای Supply Chain
+  - [review-gate](../.github/skills/review-gate/SKILL.md) برای پذیرش نهایی تسک
+  - [code-review](../.github/skills/code-review/SKILL.md) برای بازبینی مبتنی بر شواهد
 - دستورالعمل پروژه: **منبع کامپوننت shadcn/ui است؛ از کپی‌های دستی یا Registryهای تأییدنشده استفاده نشود.**
+- توکن‌ها، تم و RTL مطابق همین سند پیاده‌سازی می‌شوند؛ هیچ سند دیگری مرجع جایگزین نیست.
 
 ## 13. چک‌لیست پذیرش
 

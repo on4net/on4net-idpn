@@ -54,7 +54,8 @@ sequenceDiagram
 | `max_age` | خیر | حداکثر عمر احراز هویت (ثانیه) |
 | `login_hint` | خیر | پیش‌پر کردن نام کاربری/ایمیل |
 | `acr_values` | خیر | درخواست سطح اطمینان (مثلاً MFA) |
-| `ui_locales` | خیر | زبان صفحه ورود |
+| `ui_locales` | خیر | زبان صفحه ورود (مثل `fa-IR`) |
+| `login_context` | خیر | انتخاب مدل ورود داخل همان اپ (مثل `customer-admin`) |
 | `tenant` | خیر | در صورت چندسازمانی |
 
 ### 2.2 اعتبارسنجی در `/authorize`
@@ -65,14 +66,55 @@ sequenceDiagram
 4. Scopeها زیرمجموعه Scopeهای مجاز کلاینت هستند.
 5. PKCE برای کلاینت‌های عمومی الزامی و برای بقیه توصیه‌شده است.
 6. `state` و `nonce` وجود دارند.
-7. در صورت `prompt=none`: اگر نشست معتبر یا رضایت لازم نباشد، خطای مناسب برگردانده می‌شود.
+7. `login_context` (در صورت ارسال) فعال، متعلق به همین `client_id` و از Contextهای مجاز است.
+8. `ui_locales` (در صورت ارسال) یکی از زبان‌های فعال همان کلاینت است؛ در غیر این صورت نادیده گرفته می‌شود.
+9. در صورت `prompt=none`: اگر نشست معتبر یا رضایت لازم نباشد، خطای مناسب برگردانده می‌شود.
+
+### 2.5 انتخاب Login Context
+
+```mermaid
+flowchart TB
+  R[درخواست /authorize] --> A{login_context ارسال شده؟}
+  A -->|بله| V{فعال و متعلق به همین کلاینت؟}
+  V -->|خیر| E1[invalid_request]
+  V -->|بله| M{کاربر عضو فعال همان Context است؟}
+  M -->|خیر| E2[access_denied]
+  M -->|بله| S{نیاز به Step-up؟}
+  S -->|بله| E3[interaction_required]
+  S -->|خیر| OK[صدور Code با login_context]
+  A -->|خیر| D{چند Context فعال؟}
+  D -->|یکی| OK
+  D -->|بیشتر| P[صفحه انتخاب Context]
+  P --> OK
+```
+
+- Context در Code، Session و توکن ثبت می‌شود.
+- اپ باید `login_context` را از مسیر خودش (مثلاً `/admin` یا `/team`) تعیین کند، نه از ورودی خام کاربر.
+- اگر Context انتخاب‌شده `mfa_policy=required_all` داشته باشد، کاربر بدون MFA به مرحله ثبت/تأیید هدایت می‌شود.
+- جزئیات کامل: [login-contexts.md](./login-contexts.md).
+
+### 2.6 تعیین زبان صفحه ورود
+
+ترتیب اولویت:
+
+1. `ui_locales` در درخواست
+2. `Accept-Language` مرورگر (اگر زبان فعال کلاینت باشد)
+3. `locale` پروفایل کاربر
+4. `defaultLocale` کلاینت
+5. `defaultLocale` سازمان
+6. `fa-IR`
+
+- زبان نامعتبر باعث خطا نمی‌شود؛ به مرحله بعد سقوط می‌کند.
+- زبان انتخاب‌شده روی ریشه صفحه با `dir` متناظر اعمال می‌شود.
+- متن‌ها از Override همان کلاینت (و در صورت وجود، همان Context) خوانده می‌شوند.
+- جزئیات کامل: [localization.md](./localization.md).
 
 ### 2.3 صدور Code
 
 - Code یک مقدار تصادفی با آنتروپی حداقل 256 بیت است.
 - فقط **Hash** آن ذخیره می‌شود.
 - عمر 60 ثانیه، یک‌بارمصرف.
-- به `client_id`، `redirect_uri`، `code_challenge`، `session_id` و `nonce` مقید است.
+- به `client_id`، `redirect_uri`، `code_challenge`، `session_id`، `nonce` و `login_context` مقید است.
 - استفاده مجدد از Code باعث رد درخواست، ابطال توکن‌های صادرشده با آن و ثبت رویداد امنیتی می‌شود.
 
 ### 2.4 `/token`
@@ -103,6 +145,10 @@ sequenceDiagram
   "id_token": "eyJ..."
 }
 ```
+
+- Access Token و ID Token شامل `login_context` و `locale` هستند.
+- نقش‌های درج‌شده فقط از `allowed_roles` همان Context انتخاب می‌شوند.
+- Refresh Token به `login_context` همان درخواست مقید است و برای Context دیگر قابل استفاده نیست.
 
 ## 3. SSO و احراز هویت بی‌صدا
 

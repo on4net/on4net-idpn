@@ -18,6 +18,9 @@ erDiagram
 
   CLIENT ||--o{ CLIENT_SECRET : has
   CLIENT ||--o{ CLIENT_MEMBERSHIP : has
+  CLIENT ||--o{ CLIENT_LOGIN_CONTEXT : defines
+  CLIENT_LOGIN_CONTEXT ||--o{ CLIENT_MEMBERSHIP : scopes
+  CLIENT ||--o{ CLIENT_TRANSLATION : localizes
   USER ||--o{ CLIENT_MEMBERSHIP : joins
   CLIENT ||--o{ SOCIAL_PROVIDER : configures
   CLIENT ||--o{ CONSENT : receives
@@ -146,9 +149,11 @@ erDiagram
 | `registration_policy` | enum | `invite_only`, `self_service`, `disabled` |
 | `mfa_policy` | enum | `optional`, `required_admins`, `required_all` |
 | `allowed_email_domains` | text[] | محدودیت دامنه ایمیل برای ثبت‌نام/سوشال |
+| `locales` | jsonb | زبان پیش‌فرض و زبان‌های فعال همین کلاینت |
 | `branding` | jsonb | لوگو، رنگ‌ها، لینک‌های پشتیبانی |
 | `mfe_features` | jsonb | فعال/غیرفعال‌کردن ماژول‌های MFE |
 | `membership_schema` | jsonb? | Schema فیلدهای اختصاصی اپ (JSON Schema) |
+| `default_login_context_key` | string? | Context پیش‌فرض وقتی پارامتر ارسال نشود |
 | `status` | enum | `active`, `disabled` |
 | `tenant_id` | UUID | — |
 | `created_at` / `updated_at` | timestamp | — |
@@ -201,9 +206,10 @@ erDiagram
 |---|---|---|
 | `id` | UUID | — |
 | `client_id` | UUID | اپلیکیشن |
+| `login_context_id` | UUID? | Context عضویت؛ `null` = Context پیش‌فرض کلاینت |
 | `user_id` | UUID | کاربر مرکزی |
 | `status` | enum | `invited`, `active`, `suspended` |
-| `attributes` | jsonb | فیلدهای اختصاصی همان اپ (مطابق `membership_schema`) |
+| `attributes` | jsonb | فیلدهای اختصاصی همان Context (مطابق `membership_schema`) |
 | `invited_by` | UUID? | ادمین دعوت‌کننده |
 | `invited_at` | timestamp? | — |
 | `joined_at` | timestamp? | — |
@@ -212,12 +218,67 @@ erDiagram
 
 **قواعد:**
 
-- یکتایی `(client_id, user_id)`.
-- `suspended` یعنی کاربر نمی‌تواند برای آن اپ توکن جدید بگیرد؛ Refresh Tokenهای همان اپ باطل می‌شوند.
-- حذف Membership کاربر را حذف نمی‌کند؛ فقط دسترسی به آن اپ قطع می‌شود.
-- نقش‌های پیش‌فرض کلاینت در اولین عضویت تخصیص می‌یابند.
-- `attributes` فقط در توکن همان اپ و فقط برای همان `aud` درج می‌شود.
-- ادمین اپ فقط Membershipهای اپ خودش را می‌بیند و تغییر می‌دهد.
+- یکتایی `(client_id, login_context_id, user_id)`؛ بنابراین یک نفر می‌تواند در دو Context همان اپ دو عضویت مستقل داشته باشد.
+- `suspended` یعنی کاربر نمی‌تواند برای آن Context توکن جدید بگیرد؛ Refresh Tokenهای همان Context باطل می‌شوند.
+- حذف Membership کاربر را حذف نمی‌کند؛ فقط دسترسی به آن Context قطع می‌شود.
+- نقش‌های پیش‌فرض Context در اولین عضویت تخصیص می‌یابند.
+- `attributes` فقط در توکن همان Context و فقط برای همان `aud` درج می‌شود.
+- ادمین اپ/Context فقط Membershipهای محدوده خودش را می‌بیند و تغییر می‌دهد.
+
+### 2.6.3 ClientLoginContext
+
+درگاه ورود داخل یک اپ (مثلاً `customer-admin`، `customer-team`، `platform-admin`).
+
+| فیلد | نوع | توضیح |
+|---|---|---|
+| `id` | UUID | — |
+| `client_id` | UUID | اپلیکیشن |
+| `key` | string | یکتا در کلاینت |
+| `name` | string | نام نمایشی |
+| `description` | string? | توضیح کوتاه برای صفحه انتخاب |
+| `status` | enum | `active`, `disabled` |
+| `is_default` | boolean | فقط یکی در هر کلاینت |
+| `allowed_roles` | text[] | فقط نقش‌های همان کلاینت |
+| `default_roles` | text[] | نقش‌های خودکار در اولین عضویت |
+| `login_methods` | text[] | `password`, `google`, `facebook`, `otp`, `sso` |
+| `mfa_policy` | enum | `optional`, `required_admins`, `required_all` |
+| `registration_policy` | enum | `invite_only`, `self_service`, `disabled` |
+| `allowed_email_domains` | text[]? | محدودیت دامنه |
+| `session_idle_ttl` / `session_absolute_ttl` | int | ثانیه |
+| `step_up_required` | boolean | نیاز به احراز هویت تازه |
+| `branding` | jsonb? | لوگو/عنوان/تم مخصوص Context |
+| `sort_order` | int | ترتیب نمایش |
+
+**قواعد:**
+
+- یکتایی `(client_id, key)`؛ فقط یک `is_default = true`.
+- `allowed_roles` فقط نقش‌های `Role.client_id = client_id` را می‌پذیرد؛ `idp:*` ممنوع.
+- Context غیرفعال در Public Config و `/authorize` پذیرفته نمی‌شود.
+- حذف Context با عضویت فعال ممنوع است؛ ابتدا `disabled`.
+- تغییر `allowed_roles`، `mfa_policy` یا `login_methods` نیازمند Step-up و Audit است.
+
+### 2.6.4 ClientTranslation
+
+Override متن‌های رابط برای هر کلاینت و Locale.
+
+| فیلد | نوع | توضیح |
+|---|---|---|
+| `id` | UUID | — |
+| `client_id` | UUID | اپلیکیشن (`null` = بسته پایه سراسری) |
+| `login_context_key` | string? | Override مخصوص یک Context (اختیاری) |
+| `locale` | string | مثل `fa-IR` |
+| `messages` | jsonb | نگاشت `key → text` |
+| `version` | string | برای Cache/ETag |
+| `updated_by` | UUID? | ادمین |
+| `updated_at` | timestamp | — |
+
+**قواعد:**
+
+- یکتایی `(client_id, login_context_key, locale)`.
+- فقط کلیدهای موجود در بسته پایه پذیرفته می‌شوند؛ کلید ناشناخته `422`.
+- مقدار فقط متن ساده و Placeholderهای مجاز؛ HTML/Script ممنوع.
+- متن خالی = حذف Override و بازگشت به مقدار پایه.
+- تغییرات Audit می‌شوند.
 
 ### 2.7 Scope
 
@@ -232,6 +293,8 @@ Scopeها سطح دسترسی درخواستی کلاینت را مشخص می�
 | `offline_access` | صدور Refresh Token |
 | `idp.admin` | دسترسی Global Admin به Admin API (فقط پنل ادمین سراسری) |
 | `idp.client-admin` | دسترسی Delegated Admin به Admin API برای همان اپ (با `aud` = client) |
+| `idp.client-locale` | مدیریت زبان و ترجمه همان اپ |
+| `idp.client-context` | مدیریت Login Contextهای همان اپ |
 
 مجوزهای ریز از طریق Role/Permission مدیریت می‌شوند، نه Scope.
 
@@ -433,19 +496,22 @@ Scopeها سطح دسترسی درخواستی کلاینت را مشخص می�
 - **Permission:** کوچک‌ترین واحد دسترسی (`platform-a:contact:read`).
 - **Role:** مجموعه‌ای از Permissionها.
 - **Assignment:** اتصال یک Subject (کاربر/گروه/سرویس) به یک Role در یک Scope.
-- **Client Membership:** عضویت کاربر در یک اپ با وضعیت و ویژگی‌های اختصاصی همان اپ.
-- **Delegated Admin:** ادمین محدود به یک اپ که فقط داده و نقش‌های همان اپ را مدیریت می‌کند.
+- **Client Membership:** عضویت کاربر در یک Context از یک اپ با وضعیت و ویژگی‌های اختصاصی همان Context.
+- **Login Context:** درگاه ورود داخل یک اپ با نقش‌ها، روش‌های ورود و سیاست MFA مستقل.
+- **Delegated Admin:** ادمین محدود به یک اپ یا Context که فقط داده و نقش‌های همان محدوده را مدیریت می‌کند.
 
 ### 3.2 محاسبه مجوز مؤثر
 
-برای توکنی که برای کلاینت `C` صادر می‌شود:
+برای توکنی که برای کلاینت `C` و Context `K` صادر می‌شود:
 
 ```
 assignedRoles = roles assigned to subject (scope global)
               ∪ roles assigned with scope_type=organization
                 where subject is member of that organization
 
-effectiveRoles = assignedRoles where role.client_id is null OR role.client_id = C
+clientRoles = assignedRoles where role.client_id is null OR role.client_id = C
+
+effectiveRoles = clientRoles ∩ allowed_roles(K)
 
 permissions = ∪ permissions(effectiveRoles)
 ```
@@ -460,8 +526,10 @@ result = { p ∈ permissions | p.client_id is null OR p.client_id = C }
 
 - نقش‌های `idp:*` هرگز به کلاینت‌های عادی داده نمی‌شوند (حتی اگر اشتباهاً تخصیص داده شوند).
 - تخصیص منقضی‌شده نادیده گرفته می‌شود.
+- نقش‌های خارج از `allowed_roles` همان Context در توکن درج نمی‌شوند.
 - در صورت حجم زیاد مجوزها (بیش از حدود 2KB)، به‌جای درج در توکن از `/userinfo` یا Introspection استفاده می‌شود.
 - تصمیم دسترسی نهایی در API پلتفرم گرفته می‌شود؛ Claim فقط داده است.
+- جزئیات کامل در [login-contexts.md](./login-contexts.md).
 
 ### 3.3 کاتالوگ مجوز و نقش هر اپلیکیشن
 
@@ -476,7 +544,9 @@ result = { p ∈ permissions | p.client_id is null OR p.client_id = C }
   - مخصوص یک اپ باشند (`Role.client_id = C`)
   - یا سراسری باشند (`Role.client_id = null`) و در چند اپ استفاده شوند
 - نقش‌های پیش‌فرض هر اپ (`is_default`) در اولین عضویت تخصیص می‌یابند.
+- نقش‌های پیش‌فرض هر Context (`default_roles`) در اولین عضویت همان Context تخصیص می‌یابند.
 - مجوزهای یک اپ هرگز در توکن اپ دیگر قرار نمی‌گیرند.
+- نقش‌های خارج از `allowed_roles` همان Context در توکن قرار نمی‌گیرند.
 - اپ‌هایی که سیستم مجوز داخلی دارند، فقط کلید مجوز را در IdP نگاشت می‌کنند؛ IdP جایگزین بررسی سطح ردیف داده نیست.
 - اگر اپ به سیاست شرطی (ABAC) نیاز دارد، IdP هویت/نقش/ویژگی‌ها را در توکن می‌دهد و تصمیم نهایی در اپ یا یک Policy Decision Point جدا گرفته می‌شود.
 - برای نیازهای خاص هر اپ، `ClientMembership.attributes` در Claim `membership` همان اپ قرار می‌گیرد.
@@ -526,12 +596,15 @@ result = { p ∈ permissions | p.client_id is null OR p.client_id = C }
   "amr": ["pwd", "totp"],
   "sid": "c1a2...",
   "tenant_id": "default",
-  "roles": ["platform-a:member"],
+  "locale": "fa-IR",
+  "login_context": "customer-admin",
+  "roles": ["platform-a:customer-admin"],
   "permissions": [
     "platform-a:contact:read",
     "platform-a:contact:write"
   ],
   "membership": {
+    "context": "customer-admin",
     "status": "active",
     "attributes": {
       "department": "sales"
@@ -558,11 +631,13 @@ result = { p ∈ permissions | p.client_id is null OR p.client_id = C }
   "email": "ali@example.com",
   "email_verified": true,
   "name": "Ali Rezaei",
+  "locale": "fa-IR",
+  "login_context": "customer-admin",
   "tenant_id": "default"
 }
 ```
 
-> نقش‌ها در ID Token قرار نمی‌گیرند تا نشت اطلاعات دسترسی به کلاینت‌های غیرمرتبط کاهش یابد.
+> نقش‌ها در ID Token قرار نمی‌گیرند تا نشت اطلاعات دسترسی به کلاینت‌های غیرمرتبط کاهش یابد. `login_context` و `locale` برای نمایش صحیح رابط در کلاینت لازم‌اند.
 
 ## 4. سیاست نگهداشت و حذف داده
 
@@ -574,6 +649,8 @@ result = { p ∈ permissions | p.client_id is null OR p.client_id = C }
 | Authorization Code | 24 ساعت پس از انقضا | پاکسازی دوره‌ای |
 | Refresh Token | 30 روز پس از انقضا/ابطال | — |
 | Client Membership | تا حذف عضویت + 30 روز | برای Audit |
+| Client Login Context | تا حذف/غیرفعال‌سازی | داده تاریخی حفظ می‌شود |
+| Client Translation | تا حذف Override + نسخه قبلی 90 روز | برای Rollback |
 | Client Social Provider | تا حذف/غیرفعال‌سازی | Secret رمزنگاری‌شده |
 | Audit Event | 12 ماه | قابل تنظیم؛ Export قبل از حذف |
 | Login Attempt | 90 روز | در Redis با TTL یا جدول جدا |
@@ -591,7 +668,11 @@ result = { p ∈ permissions | p.client_id is null OR p.client_id = C }
 - تغییر ایمیل/موبایل باعث ابطال نشست‌های فعال نمی‌شود، اما Audit می‌شود.
 - تغییر رمز عبور باعث ابطال همه Refresh Tokenها و نشست‌ها می‌شود (قابل تنظیم).
 - غیرفعال‌سازی کاربر باعث ابطال فوری نشست‌ها و Refresh Tokenها می‌شود.
-- `suspended` شدن Membership باعث ابطال Refresh Tokenهای همان اپ می‌شود؛ Access Token فعلی تا انقضا معتبر است مگر با Introspection بررسی شود.
+- `suspended` شدن Membership باعث ابطال Refresh Tokenهای همان Context می‌شود؛ Access Token فعلی تا انقضا معتبر است مگر با Introspection بررسی شود.
 - حذف Membership باعث حذف کاربر مرکزی نمی‌شود.
-- حذف کلاینت باعث ابطال همه توکن‌های آن کلاینت و حذف/آرشیو Membershipهای آن می‌شود.
+- حذف کلاینت باعث ابطال همه توکن‌های آن کلاینت و حذف/آرشیو Membershipها و Contextهای آن می‌شود.
 - حذف Provider سوشال فقط سوشال همان اپ را غیرفعال می‌کند و روی ورود رمز اثر ندارد.
+- غیرفعال‌سازی Context باعث رد ورود و Refresh برای همان Context می‌شود؛ Context دیگر همان اپ اثر نمی‌گیرد.
+- تغییر `allowed_roles` روی توکن‌های جدید اثر دارد؛ توکن فعلی تا انقضا معتبر است.
+- حذف یا خالی‌کردن یک Locale از `Client.locales` باعث سقوط به زبان پیش‌فرض می‌شود، نه خطا.
+- Overrideهای ترجمه با حذف کلاینت حذف می‌شوند.

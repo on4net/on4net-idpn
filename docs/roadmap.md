@@ -30,7 +30,7 @@ MVP زمانی آماده است که:
 - اسکلت MFE (Remote `account`/`user-management`) + Shell صفحه ورود Hosted
 - اسکلت Host نمونه برای Module Federation و Web Component
 - اسپایک shadcn/ui + ایزولاسیون Tailwind v4 در MFE (Go/No-Go)
-- راه‌اندازی shadcn/ui، Pin نسخه، توکن‌های OKLCH و استفاده از Skill موجود `ui-styling`
+- راه‌اندازی shadcn/ui، Pin نسخه و توکن‌های OKLCH طبق [design-system.md](./design-system.md)
 - CI پایه (Lint، Typecheck، Unit، Integration، E2E Smoke)
 - Testcontainers و Playwright Config
 - مدیریت پیکربندی و Secret
