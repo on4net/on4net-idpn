@@ -6,6 +6,7 @@ dist/
 build/
 dist-mfe/
 dist-wc/
+dist-host/
 *.tsbuildinfo
 .vite/
 

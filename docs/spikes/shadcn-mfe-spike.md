@@ -1,7 +1,7 @@
 # Spike: shadcn/ui + Tailwind v4 در MFE (کارت #50)
 
-> وضعیت: **در جریان** — بخش Hosted Login، ایزولاسیون Web Component، RTL و A11y پاس شد؛
-> Mount ماژول Remote در یک Host مستقل (Module Federation) هنوز باقی است.
+> وضعیت: **Go** (با یک مورد مستندسازی باز) — Hosted Login، ایزولاسیون Web Component،
+> Mount واقعی Module Federation در Host مستقل، RTL و A11y همه تایید شدند.
 
 ## 1. آنچه ساخته شد
 
@@ -13,8 +13,9 @@
 | ماژول MFE | `web/src/mfe/user-management.tsx` | ✅ |
 | Web Component | `web/src/mfe/web-component.tsx` (`<on4net-idpn-user-management>` + Shadow DOM) | ✅ |
 | Remote (Module Federation) | `web/vite.mfe.config.ts` → `dist-mfe/remoteEntry.js` | ✅ Build |
+| Host مستقل Module Federation | `web/host-mf/*`، `web/vite.host.config.ts` | ✅ Mount |
 | Host fixture با CSS مستقل | `web/host/*` (HTML + CSS عمداً مهاجم) | ✅ |
-| تست E2E | `e2e/web/login.spec.ts`، `e2e/web/isolation.spec.ts` | ✅ ۶ تست |
+| تست E2E | `e2e/web/{login,isolation,mf-host}.spec.ts` | ✅ ۸ تست |
 
 ## 2. یافته‌ها
 
@@ -68,15 +69,27 @@
 - Web Component چون React را درون خود دارد سنگین‌تر است؛ برای Hostهای غیر-React همین انتظار می‌رود و
   در فاز انتشار باید Code-splitting/Lazy-loading ماژول‌ها بررسی شود.
 
+### Module Federation در Host
+
+- Host مستقل (`web/host-mf`) با Tailwind خودش (به‌همراه Preflight) و کانفیگ `@module-federation/vite`
+  ماژول `idpnMfe/UserManagement` را در Runtime لود می‌کند.
+- ماژول MFE **خودکفا** شد: `UserManagementRoot` ریشه `.idpn-root`، `DirectionProvider` و Portal Container را
+  خودش می‌سازد؛ بنابراین به Context سمت Host وابسته نیست (Context بین دو Bundle مشترک نیست).
+- React/ReactDOM با `singleton: true` به اشتراک گذاشته می‌شوند؛ رندر موفق کامپوننت‌های دارای Hook و Context
+  در Host، شاهد عملی تک‌نسخه‌بودن React 19 است.
+- نتیجه تست: Mount شدن Remote، تعامل کامل (باز کردن Dialog و افزودن کاربر)، نبود خطای Console،
+  حفظ استایل‌های Host، Portal داخل `.idpn-root` و axe بدون خطای Critical/Serious.
+- نکته عملیاتی: `preview` باید روی `127.0.0.1` گوش دهد و هدر `Access-Control-Allow-Origin` داشته باشد؛
+  در غیر این صورت Host نمی‌تواند `remoteEntry.js` را از Origin دیگر لود کند.
+
 ## 3. باقی‌مانده
 
-- Mount واقعی `idpnMfe/UserManagement` در یک Host React با Module Federation runtime و Tailwind مستقل
-  (شامل بررسی React 19 Singleton در Runtime، نه فقط در Build).
+- ثبت تصمیم نهایی Go/No-Go در `docs/design-system.md` — این فایل در حال حاضر تغییرات uncommitted مالک را
+  دارد؛ یافته‌ها و تصمیم در همین سند آماده‌ی Merge است.
 - اندازه‌گیری دقیق Bundle پس از Lazy-loading ماژول‌ها.
-- ثبت تصمیم نهایی Go/No-Go در `docs/design-system.md` پس از تکمیل مورد بالا (این فایل فعلاً تغییر
-  uncommitted کاربر را دارد و در همان زمان با هم Merge می‌شود).
 
-## 4. نتیجه موقت
+## 4. نتیجه
 
 **Go** برای: Hosted Login با shadcn/ui، Portal داخل ریشه، RTL، axe و ایزولاسیون Web Component.
-**باز** برای: تأیید نهایی Module Federation در Host.
+**Go** برای: Mount واقعی Module Federation در Host مستقل با React 19 Singleton.
+تنها کار باقی‌مانده، ثبت همین تصمیم در `docs/design-system.md` است.

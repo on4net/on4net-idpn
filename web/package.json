@@ -7,6 +7,8 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "dev": "vite",
+    "dev:host": "vite --config vite.host.config.ts",
+    "serve:mfe": "vite build --config vite.mfe.config.ts && vite preview --config vite.mfe.config.ts",
     "build": "vite build",
     "build:mfe": "vite build --config vite.mfe.config.ts",
     "build:wc": "vite build --config vite.webcomponent.config.ts",

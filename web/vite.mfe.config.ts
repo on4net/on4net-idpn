@@ -12,6 +12,7 @@ export default defineConfig({
     tailwindcss(),
     federation({
       name: 'idpnMfe',
+      dts: false,
       filename: 'remoteEntry.js',
       manifest: true,
       exposes: {
@@ -34,11 +35,15 @@ export default defineConfig({
     emptyOutDir: true,
   },
   server: {
+    host: '127.0.0.1',
     port: 5174,
     strictPort: true,
+    cors: true,
   },
   preview: {
+    host: '127.0.0.1',
     port: 5174,
     strictPort: true,
+    headers: { 'Access-Control-Allow-Origin': '*' },
   },
 });

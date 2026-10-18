@@ -1,0 +1,25 @@
+/*
+ * Independent host stylesheet: it includes its own Tailwind build (with
+ * preflight) plus host-specific element styles. The MFE must neither reset the
+ * host nor restyle these elements.
+ */
+@import 'tailwindcss';
+
+#host-title {
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 40px;
+  margin: 0;
+}
+
+#host-button {
+  background-color: rgb(200, 0, 0);
+  color: rgb(255, 255, 255);
+  font-size: 24px;
+  padding: 2px;
+  border: 0;
+}
+
+#host-paragraph {
+  display: block;
+  margin: 0;
+}

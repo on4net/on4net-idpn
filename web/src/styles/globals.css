@@ -7,6 +7,9 @@
 @import 'tailwindcss/theme.css' layer(theme);
 @import 'tailwindcss/utilities.css' layer(utilities);
 
+/* Scan the shared components when this stylesheet is built by a host app. */
+@source '../';
+
 .idpn-root {
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);

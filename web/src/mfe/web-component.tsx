@@ -1,8 +1,7 @@
 import { createRoot, type Root } from 'react-dom/client';
 
-import { IdpnRoot } from '@/app/idpn-root';
+import { UserManagementRoot } from './user-management';
 import styles from '@/styles/globals.css?inline';
-import { UserManagement } from './user-management';
 
 const ELEMENT_NAME = 'on4net-idpn-user-management';
 
@@ -48,11 +47,7 @@ export class IdpnUserManagementElement extends HTMLElement {
     }
     const locale = this.getAttribute('locale') ?? 'fa-IR';
     const dir = this.getAttribute('dir') === 'ltr' ? 'ltr' : 'rtl';
-    this.root.render(
-      <IdpnRoot locale={locale} dir={dir}>
-        <UserManagement />
-      </IdpnRoot>,
-    );
+    this.root.render(<UserManagementRoot locale={locale} dir={dir} />);
   }
 }
 

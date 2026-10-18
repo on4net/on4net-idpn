@@ -11,5 +11,12 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "host/**/*.ts", "vite*.config.ts"]
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "host/**/*.ts",
+    "host-mf/**/*.ts",
+    "host-mf/**/*.tsx",
+    "vite*.config.ts"
+  ]
 }

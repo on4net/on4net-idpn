@@ -1,6 +1,6 @@
 import * as React from 'react';
 
-import { usePortalContainer } from '@/app/idpn-root';
+import { IdpnRoot, usePortalContainer } from '@/app/idpn-root';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -108,4 +108,26 @@ export function UserManagement({ initialUsers = DEFAULT_USERS }: UserManagementP
   );
 }
 
-export default UserManagement;
+export interface UserManagementRootProps extends UserManagementProps {
+  locale?: string;
+  dir?: 'rtl' | 'ltr';
+}
+
+/**
+ * Self-contained entry point for hosts: the module owns its `.idpn-root`, direction
+ * and portal container, so it works identically in Module Federation and the Web
+ * Component without relying on host-provided React context.
+ */
+export function UserManagementRoot({
+  locale = 'fa-IR',
+  dir = 'rtl',
+  ...props
+}: UserManagementRootProps) {
+  return (
+    <IdpnRoot locale={locale} dir={dir}>
+      <UserManagement {...props} />
+    </IdpnRoot>
+  );
+}
+
+export default UserManagementRoot;

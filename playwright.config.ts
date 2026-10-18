@@ -4,6 +4,8 @@ const API_PORT = Number(process.env.E2E_PORT ?? 3100);
 const WEB_PORT = Number(process.env.E2E_WEB_PORT ?? 5180);
 const apiURL = `http://127.0.0.1:${API_PORT}`;
 const webURL = `http://127.0.0.1:${WEB_PORT}`;
+const remoteURL = 'http://127.0.0.1:5174';
+const hostURL = 'http://127.0.0.1:5176';
 const isCI = process.env.CI === 'true';
 
 export default defineConfig({
@@ -23,8 +25,18 @@ export default defineConfig({
     },
     {
       name: 'web-chromium',
-      testMatch: 'web/**/*.spec.ts',
+      testMatch: 'web/login.spec.ts',
       use: { ...devices['Desktop Chrome'], baseURL: webURL },
+    },
+    {
+      name: 'mfe-chromium',
+      testMatch: 'web/isolation.spec.ts',
+      use: { ...devices['Desktop Chrome'], baseURL: webURL },
+    },
+    {
+      name: 'mf-chromium',
+      testMatch: 'web/mf-host.spec.ts',
+      use: { ...devices['Desktop Chrome'], baseURL: hostURL },
     },
   ],
   webServer: [
@@ -51,6 +63,18 @@ export default defineConfig({
       env: {
         VITE_PORT: String(WEB_PORT),
       },
+    },
+    {
+      command: 'pnpm --filter @idpn/web serve:mfe',
+      url: `${remoteURL}/remoteEntry.js`,
+      reuseExistingServer: !isCI,
+      timeout: 180_000,
+    },
+    {
+      command: 'pnpm --filter @idpn/web dev:host',
+      url: hostURL,
+      reuseExistingServer: !isCI,
+      timeout: 120_000,
     },
   ],
 });
