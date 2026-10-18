@@ -101,7 +101,35 @@ Fix the values in your .env file. See .env.example and docs/setup.md.
 [Convert]::ToBase64String((1..32 | ForEach-Object { Get-Random -Maximum 256 }))
 ```
 
-## 5. اسکریپت‌ها
+## 5. سرویس‌های محلی با Docker Compose
+
+| سرویس | آدرس محلی | کاربرد |
+|---|---|---|
+| PostgreSQL 16 | `localhost:5432` | پایگاه داده اصلی |
+| Redis 7 | `localhost:6379` | نشست، Rate Limit، Cache |
+| Mailhog | `localhost:1025` (SMTP) و `localhost:8025` (UI) | ایمیل آزمایشی |
+
+```powershell
+docker compose up -d --wait   # شروع و انتظار تا Healthy شدن همه سرویس‌ها
+docker compose ps             # وضعیت و Healthcheck
+docker compose logs -f postgres
+docker compose stop           # توقف بدون حذف داده
+docker compose down           # حذف Container و Network (Volumeها می‌مانند)
+docker compose down -v        # حذف کامل همراه داده‌ها (تخریبی)
+```
+
+- پورت‌های میزبان از `.env` خوانده می‌شوند: `POSTGRES_PORT`، `REDIS_PORT`، `MAILHOG_SMTP_PORT` و
+  `MAILHOG_HTTP_PORT` (پیش‌فرض 5432/6379/1025/8025). اگر پورتی روی ماشین اشغال است، مقدار را تغییر دهید و
+  `DATABASE_URL` / `REDIS_URL` را هم به‌روز کنید.
+- `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` باید با `DATABASE_URL` هم‌خوان باشند.
+- داده‌ها در Volumeهای `postgres-data` و `redis-data` نگه‌داری می‌شوند و سرویس‌ها روی شبکه `idpn` هستند.
+- پورت‌ها فقط روی `127.0.0.1` منتشر می‌شوند تا پایگاه داده روی شبکه محلی افشا نشود.
+- Healthcheck: `pg_isready` برای Postgres، `redis-cli ping` برای Redis و درخواست HTTP به
+  `:8025/api/v2/messages` برای Mailhog.
+- Mailhog در پروژه اصلی آرشیو شده و نگه‌داری نمی‌شود؛ فقط برای ایمیل آزمایشی محلی استفاده می‌شود و در
+  بازبینی Supply Chain (کارت #57) ارزیابی خواهد شد.
+
+## 6. اسکریپت‌ها
 
 | دستور | کار |
 |---|---|
@@ -119,8 +147,7 @@ pnpm --filter @idpn/config test
 pnpm --filter @idpn/api typecheck
 ```
 
-## 6. گام‌های بعدی
+## 7. گام‌های بعدی
 
-- `docker compose up` برای PostgreSQL/Redis/Mailhog — کارت #9
 - Migration و Seed اولیه — کارت #10
 - CI و Test Harness — کارت #11
