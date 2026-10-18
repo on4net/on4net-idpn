@@ -27,6 +27,9 @@ test-results/
 # Generated artifacts (SBOM, reports)
 artifacts/
 
+# Local development signing keys (never commit private key material)
+.idpn-keys.json
+
 # Logs and OS files
 *.log
 .DS_Store
