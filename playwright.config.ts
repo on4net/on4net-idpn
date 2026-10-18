@@ -1,32 +1,56 @@
 import { defineConfig, devices } from '@playwright/test';
 
-const PORT = Number(process.env.E2E_PORT ?? 3100);
-const baseURL = `http://127.0.0.1:${PORT}`;
+const API_PORT = Number(process.env.E2E_PORT ?? 3100);
+const WEB_PORT = Number(process.env.E2E_WEB_PORT ?? 5180);
+const apiURL = `http://127.0.0.1:${API_PORT}`;
+const webURL = `http://127.0.0.1:${WEB_PORT}`;
+const isCI = process.env.CI === 'true';
 
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
-  forbidOnly: process.env.CI === 'true',
-  retries: process.env.CI === 'true' ? 1 : 0,
-  reporter: process.env.CI === 'true' ? [['github'], ['html', { open: 'never' }]] : 'list',
+  forbidOnly: isCI,
+  retries: isCI ? 1 : 0,
+  reporter: isCI ? [['github'], ['html', { open: 'never' }]] : 'list',
   use: {
-    baseURL,
     trace: 'on-first-retry',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
-  webServer: {
-    command: 'pnpm --filter @idpn/api dev',
-    url: `${baseURL}/healthz`,
-    reuseExistingServer: process.env.CI !== 'true',
-    timeout: 120_000,
-    env: {
-      NODE_ENV: 'test',
-      HOST: '127.0.0.1',
-      PORT: String(PORT),
-      APP_URL: baseURL,
-      DATABASE_URL: process.env.DATABASE_URL ?? 'postgresql://idpn:idpn@127.0.0.1:5432/idpn',
-      REDIS_URL: process.env.REDIS_URL ?? 'redis://127.0.0.1:6379',
-      SESSION_SECRET: process.env.SESSION_SECRET ?? 'e2e-session-secret-at-least-32-characters',
+  projects: [
+    {
+      name: 'api-chromium',
+      testMatch: 'health.spec.ts',
+      use: { ...devices['Desktop Chrome'], baseURL: apiURL },
     },
-  },
+    {
+      name: 'web-chromium',
+      testMatch: 'web/**/*.spec.ts',
+      use: { ...devices['Desktop Chrome'], baseURL: webURL },
+    },
+  ],
+  webServer: [
+    {
+      command: 'pnpm --filter @idpn/api dev',
+      url: `${apiURL}/healthz`,
+      reuseExistingServer: !isCI,
+      timeout: 120_000,
+      env: {
+        NODE_ENV: 'test',
+        HOST: '127.0.0.1',
+        PORT: String(API_PORT),
+        APP_URL: apiURL,
+        DATABASE_URL: process.env.DATABASE_URL ?? 'postgresql://idpn:idpn@127.0.0.1:5432/idpn',
+        REDIS_URL: process.env.REDIS_URL ?? 'redis://127.0.0.1:6379',
+        SESSION_SECRET: process.env.SESSION_SECRET ?? 'e2e-session-secret-at-least-32-characters',
+      },
+    },
+    {
+      command: 'pnpm --filter @idpn/web dev',
+      url: webURL,
+      reuseExistingServer: !isCI,
+      timeout: 120_000,
+      env: {
+        VITE_PORT: String(WEB_PORT),
+      },
+    },
+  ],
 });

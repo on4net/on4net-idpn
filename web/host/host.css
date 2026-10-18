@@ -1,0 +1,32 @@
+/*
+ * Deliberately opinionated host styles: aggressive element selectors and
+ * Tailwind-looking utility classes. If the MFE leaked preflight or global
+ * utilities, these values would change.
+ */
+body {
+  font-family: Georgia, 'Times New Roman', serif;
+  background-color: rgb(240, 240, 240);
+  color: rgb(20, 20, 20);
+  margin: 16px;
+}
+
+h1 {
+  font-size: 40px;
+  margin: 0;
+}
+
+button {
+  background-color: rgb(200, 0, 0);
+  color: rgb(255, 255, 255);
+  font-size: 24px;
+  padding: 2px;
+  border: 0;
+}
+
+.flex {
+  display: block;
+}
+
+.p-4 {
+  padding: 1px;
+}

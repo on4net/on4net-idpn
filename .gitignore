@@ -4,6 +4,8 @@ node_modules/
 # Build output
 dist/
 build/
+dist-mfe/
+dist-wc/
 *.tsbuildinfo
 .vite/
 
