@@ -9,19 +9,44 @@ import { PrismaClient } from '../src/generated/prisma/client.js';
 const BASE_PERMISSIONS = [
   { key: 'idp:user:read', description: 'View users and their profiles' },
   { key: 'idp:user:write', description: 'Create, update and disable users' },
+  { key: 'idp:user:invite', description: 'Invite a user to the identity provider' },
   { key: 'idp:user:reset-password', description: 'Trigger a password reset for a user' },
+  { key: 'idp:role:read', description: 'View the permission catalog and roles' },
+  { key: 'idp:role:write', description: 'Create, update and delete roles and permissions' },
   { key: 'idp:role:manage', description: 'Manage roles and role assignments' },
   { key: 'idp:client:manage', description: 'Manage clients and their configuration' },
   { key: 'idp:client:read', description: 'View clients and their configuration' },
   { key: 'idp:client:write', description: 'Create or change clients, secrets and MFE settings' },
+  { key: 'idp:client-member:read', description: 'View members of an app' },
+  { key: 'idp:client-member:invite', description: 'Invite members to an app' },
+  { key: 'idp:client-member:write', description: 'Change membership status and attributes' },
   { key: 'idp:client-member:manage', description: 'Manage client memberships' },
+  { key: 'idp:client-role:read', description: 'View roles of an app' },
+  { key: 'idp:client-role:write', description: 'Create or change roles of an app' },
+  { key: 'idp:client-role:assign', description: 'Assign or revoke roles of an app' },
   { key: 'idp:client-role:manage', description: 'Manage per-client roles' },
+  { key: 'idp:social-provider:read', description: 'View social provider settings of an app' },
+  { key: 'idp:social-provider:write', description: 'Change social provider credentials of an app' },
   { key: 'idp:social-provider:manage', description: 'Manage per-client social providers' },
+  { key: 'idp:client-session:read', description: 'View sessions of members of an app' },
   { key: 'idp:session:read', description: 'View active sessions' },
   { key: 'idp:session:revoke', description: 'Revoke sessions' },
   { key: 'idp:audit:read', description: 'Read audit events' },
   { key: 'idp:key:manage', description: 'Manage signing keys' },
   { key: 'idp:mfa:manage', description: 'Manage multi-factor authentication factors' },
+] as const;
+
+/** Permissions every per-app delegated administrator role receives (docs/domain-model.md 3.4). */
+const CLIENT_ADMIN_PERMISSIONS = [
+  'idp:client-member:read',
+  'idp:client-member:invite',
+  'idp:client-member:write',
+  'idp:client-role:read',
+  'idp:client-role:write',
+  'idp:client-role:assign',
+  'idp:social-provider:read',
+  'idp:social-provider:write',
+  'idp:client-session:read',
 ] as const;
 
 const BASE_ROLES = [
@@ -92,6 +117,78 @@ const ADMIN_CLIENT = {
 };
 
 /**
+ * Creates the base roles every client owns. `member` is the default role that is assigned
+ * on the first membership; `user-admin` is the delegated administration role. Both are
+ * idempotent so the seed can run repeatedly.
+ */
+async function seedClientRoles(
+  prisma: PrismaClient,
+  clientId: string,
+  permissionIds: Map<string, string>,
+): Promise<void> {
+  const client = await prisma.client.findUniqueOrThrow({
+    where: { clientId },
+    select: { id: true },
+  });
+
+  const roles = [
+    {
+      key: `${clientId}:member`,
+      name: 'Member',
+      description: `Default member role for ${clientId}`,
+      isDefault: true,
+      permissions: [] as string[],
+    },
+    {
+      key: `${clientId}:viewer`,
+      name: 'Viewer',
+      description: `Read-only role for ${clientId}`,
+      isDefault: false,
+      permissions: [] as string[],
+    },
+    {
+      key: `${clientId}:user-admin`,
+      name: 'User administrator',
+      description: `Delegated user administration role for ${clientId}`,
+      isDefault: false,
+      permissions: [...CLIENT_ADMIN_PERMISSIONS],
+    },
+  ];
+
+  for (const role of roles) {
+    const record = await prisma.role.upsert({
+      where: { key: role.key },
+      update: {
+        name: role.name,
+        description: role.description,
+        clientId: client.id,
+        isDefault: role.isDefault,
+      },
+      create: {
+        key: role.key,
+        name: role.name,
+        description: role.description,
+        clientId: client.id,
+        isDefault: role.isDefault,
+      },
+    });
+
+    await prisma.rolePermission.deleteMany({ where: { roleId: record.id } });
+    if (role.permissions.length > 0) {
+      await prisma.rolePermission.createMany({
+        data: role.permissions.map((key) => {
+          const permissionId = permissionIds.get(key);
+          if (permissionId === undefined) {
+            throw new Error(`Role ${role.key} references unknown permission ${key}`);
+          }
+          return { roleId: record.id, permissionId };
+        }),
+      });
+    }
+  }
+}
+
+/**
  * Creates the default tenant, the admin client, the base permission/role catalog and the
  * test users. Every write is an upsert or a presence check, so running it repeatedly
  * converges to the same state without duplicating rows.
@@ -150,6 +247,13 @@ export async function seedDatabase(prisma: PrismaClient): Promise<void> {
     update: { ...ADMIN_CLIENT, tenantId: tenant.id },
     create: { ...ADMIN_CLIENT, tenantId: tenant.id },
   });
+
+  // Every app gets its own base catalog roles: a default member role and the delegated
+  // administration role described in docs/domain-model.md 3.4.
+  const clients = await prisma.client.findMany({ select: { clientId: true } });
+  for (const client of clients) {
+    await seedClientRoles(prisma, client.clientId, permissionIds);
+  }
 
   for (const user of SEED_USERS) {
     // Credentials are provisioned by the password/identity flow; seeded users start

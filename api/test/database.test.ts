@@ -261,7 +261,9 @@ describe('initial schema', () => {
     });
   });
 
-  it('rolls back and re-applies the initial migration', async () => {
+  it('rolls back and re-applies the migrations', async () => {
+    const latest = await rollbackLatestMigration({ connectionString });
+    expect(latest).toBe('0002_assignments_nulls_not_distinct');
     const rolledBack = await rollbackLatestMigration({ connectionString });
     expect(rolledBack).toBe('0001_init');
 
@@ -290,8 +292,8 @@ describe('initial schema', () => {
       expect(first.tenants).toBe(1);
       expect(first.clients).toBe(1);
       expect(first.users).toBe(3);
-      expect(first.roles).toBe(3);
-      expect(first.permissions).toBe(15);
+      expect(first.roles).toBe(6);
+      expect(first.permissions).toBe(27);
       expect(first.assignments).toBe(2);
       expect(first.rolePermissions).toBeGreaterThan(0);
     } finally {
