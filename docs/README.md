@@ -119,6 +119,8 @@
 | [api.md](./api.md) | قرارداد APIهای OIDC، Public Config، Admin و Delegated Admin |
 | [security.md](./security.md) | مدل تهدید، امنیت MFE، سوشال، Context و ترجمه، کنترل‌ها، چک‌لیست |
 | [integration-guide.md](./integration-guide.md) | راهنمای اتصال اپ‌ها و نمونه‌های استک‌های مختلف |
+| [app-onboarding.md](./app-onboarding.md) | ابزار و پیکربندی آماده‌سازی اپ: Credential سوشال هر اپ، نگاشت مجوز/نقش، مهاجرت کاربران |
+| [runbooks/app-onboarding.md](./runbooks/app-onboarding.md) | Runbook عملیاتی: ثبت Callback، چرخش Secret، مهاجرت، محیط Staging و Rollback |
 | [testing.md](./testing.md) | استراتژی Unit/Integration/Contract/E2E، پوشش، CI و تست امنیتی |
 | [roadmap.md](./roadmap.md) | فازبندی اجرا، معیار پذیرش و ریسک‌ها |
 

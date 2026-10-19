@@ -23,6 +23,12 @@ test-results/
 .env
 .env.*
 !.env.example
+# Staging variable contract (placeholders only; the real .env.staging is ignored above).
+!.env.staging.example
+
+# Per-app social credentials for the onboarding CLI (fake examples are committed).
+*.secrets.json
+!*.secrets.example.json
 
 # Generated artifacts (SBOM, reports)
 artifacts/

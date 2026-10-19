@@ -16,7 +16,9 @@
     "db:deploy": "prisma migrate deploy",
     "db:rollback": "tsx scripts/db-rollback.ts",
     "db:seed": "prisma db seed",
-    "seed:e2e": "tsx --env-file-if-exists=../.env scripts/seed-e2e.ts"
+    "seed:e2e": "tsx --env-file-if-exists=../.env scripts/seed-e2e.ts",
+    "onboard:client": "tsx --env-file-if-exists=../.env scripts/onboard-client.ts",
+    "import:users": "tsx --env-file-if-exists=../.env scripts/import-users.ts"
   },
   "dependencies": {
     "@idpn/config": "workspace:*",
