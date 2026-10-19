@@ -274,6 +274,79 @@ onBeforeUnmount(() => {
 </template>
 ```
 
+### 3.5 میزبان کامل React (Module Federation)
+
+مرجع اجراشدنی این بخش `web/host-mf` است: یک اپ React 19 مستقل با Tailwind و Preflight
+خودش که دو Remote را Lazy بارگذاری می‌کند و منبع آن `idpnMfe` با `IDPN_REMOTE_ENTRY`
+پین می‌شود.
+
+| فایل | نقش |
+|---|---|
+| `host-mf/host-config.ts` | خواندن و اعتبارسنجی `VITE_IDPN_*` و ساخت Propهای ماژول |
+| `host-mf/IdpnModuleHost.tsx` | `React.lazy` + `Suspense` + Error Boundary برای هر Remote |
+| `host-mf/HostApp.tsx` | Shell میزبان، خلاصهٔ Config و بنر `role="alert"` برای `auth:error` |
+| `host-mf/host-events.ts` | لاگ رویدادها با حذف کلیدهای توکن‌مانند و رشته‌های JWT |
+| `host-mf/token-provider.ts` | نگه‌دارندهٔ توکن SPA فقط در حافظه (Closure) |
+| `host-mf/remote-loaders.ts` | Importهای داینامیک `idpnMfe/UserManagement` و `idpnMfe/Account` |
+
+تنظیمات از طریق Environment در زمان Build خوانده می‌شود (هیچ کلیدی از URL یا ورودی کاربر
+گرفته نمی‌شود):
+
+| متغیر | پیش‌فرض | توضیح |
+|---|---|---|
+| `VITE_IDPN_CLIENT_ID` | — (الزامی) | `clientId` اپ؛ تنها منبع Scope درخواست‌ها |
+| `VITE_IDPN_MODE` | `bff` | `bff` (کوکی نشست) یا `spa` (فقط اپ مورد اعتماد) |
+| `VITE_IDPN_API_BASE_URL` | خالی = Same-origin | پیشوند `/auth` در BFF |
+| `VITE_IDPN_LOGIN_URL` | `/oauth2/authorize` | مقصد Fallback Hosted؛ فقط Path یا http(s) |
+| `VITE_IDPN_LOGIN_CONTEXT` | `default` | Context فعال Route؛ فقط نمایشی |
+| `VITE_IDPN_LOCALE` | `fa-IR` | Locale فعال |
+| `VITE_IDPN_DIR` | `auto` | `auto` جهت را از Locale می‌سازد |
+| `VITE_IDPN_MODULE` | `all` | `all`، `user-management` یا `account` |
+| `VITE_IDPN_THEME` | `{}` | JSON از توکن‌های CSS روی `.idpn-root` |
+| `IDPN_REMOTE_ENTRY` | `/remote/remoteEntry.js` | URL پین‌شدهٔ `remoteEntry.js` |
+
+```bash
+# ساخت Remote و اجرای میزبان (Remote در host-mf/public/remote سرو می‌شود)
+$env:VITE_IDPN_CLIENT_ID='app-a'
+$env:VITE_IDPN_LOGIN_URL='https://auth.example.com/oauth2/authorize'
+pnpm --filter @idpn/web run dev:host
+```
+
+رفتار:
+
+- **Singleton:** `react` و `react-dom` در هر دو طرف با `singleton: true` و
+  `requiredVersion: '^19.0.0'` به اشتراک گذاشته می‌شوند؛ `Suspense` و Hookها در مرز
+  Federation کار می‌کنند.
+- **Loading / Failure:** هر ماژول Boundary و Fallback خودش را دارد. تا زمانی که Remote
+  نرسیده `role="status"` و پس از خطای Load/Render یک `role="alert"` با لینک
+  «Open the hosted … page» روی `loginUrl` نمایش داده می‌شود؛ از دست رفتن یک ماژول
+  ماژول دیگر را Unmount نمی‌کند.
+- **امنیت:** در `bff` هیچ Getter توکنی به Remote داده نمی‌شود (کوکی `HttpOnly` کار
+  می‌کند)؛ در `spa` فقط Getter حافظه‌ای پاس می‌شود و Provider هیچ‌جا
+  `localStorage`/`sessionStorage`/Cookie را نمی‌خواند یا نمی‌نویسد. `clientId` و
+  `loginContext` فقط از Config می‌آیند.
+- **رویدادها:** `onEvent` به یک Logger می‌رود که کلیدهای `*token*`/`secret`/`authorization`
+  را حذف و رشته‌های JWT را Redact می‌کند؛ `auth:error` علاوه بر لاگ، در بنر دسترس‌پذیر
+  میزبان با `code` نمایش داده می‌شود.
+- **جداسازی:** میزبان shadcn/Tailwind خودش را دارد و ماژول‌ها `.idpn-root`، جهت،
+  Portal Container و توکن‌ها را داخل خودشان می‌سازند؛ توکن‌های Theme روی `:root`
+  نوشته نمی‌شوند.
+- **CSS:** در این Monorepo میزبان همان `src/styles/globals.css` مشترک MFE را Import
+  می‌کند (بدون Preflight). در انتشار واقعی، CSS مربوط به Remote باید از Manifest/CDN
+  همان نسخهٔ پین‌شده بارگذاری شود؛ حذف آن ماژول را بدون استایل رندر می‌کند.
+
+تست‌ها:
+
+```bash
+pnpm --filter @idpn/web exec vitest run host-mf   # Config، Redaction، Token، Loading/Error
+pnpm test:e2e --project=mf-chromium               # Mount، Isolation، Fallback، auth:error
+```
+
+سناریوهای E2E: Mount هر دو ماژول با `clientId` تنظیم‌شده و بدون هدر `Authorization`،
+عدم پذیرش `clientId` از Query String، باقی‌ماندن استایل‌های میزبان و عدم نشت توکن Theme،
+Portal داخل `.idpn-root`، Fallback Hosted پس از خطای Remote، و بنر `auth:error` بدون
+توکن در لاگ‌ها.
+
 ## 4. قرارداد تنظیمات
 
 | فیلد | الزامی | نوع | کاربرد |

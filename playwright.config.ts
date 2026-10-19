@@ -96,6 +96,19 @@ export default defineConfig({
       url: hostURL,
       reuseExistingServer: !isCI,
       timeout: 180_000,
+      env: {
+        // Host configuration is build-time only; the E2E suite asserts these values are
+        // what the remotes receive, and that a query string cannot override them.
+        VITE_IDPN_CLIENT_ID: 'app-a',
+        VITE_IDPN_API_BASE_URL: '',
+        VITE_IDPN_LOGIN_URL: `${webURL}/oauth2/authorize`,
+        VITE_IDPN_LOGIN_CONTEXT: 'admin',
+        VITE_IDPN_LOCALE: 'fa-IR',
+        VITE_IDPN_DIR: 'auto',
+        VITE_IDPN_MODULE: 'all',
+        VITE_IDPN_THEME: JSON.stringify({ brand: '#0057b8' }),
+        IDPN_REMOTE_ENTRY: '/remote/remoteEntry.js',
+      },
     },
     {
       // Seeds the sample BFF client and a login credential, then starts the sample app.

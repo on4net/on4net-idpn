@@ -11,6 +11,7 @@
     "ui:add": "pnpm dlx shadcn@4.22.0 add",
     "ui:init": "pnpm dlx shadcn@4.22.0 init",
     "build": "vite build",
+    "build:host": "vite build --config vite.host.config.ts",
     "build:mfe": "vite build --config vite.mfe.config.ts",
     "build:wc": "vite build --config vite.webcomponent.config.ts",
     "preview": "vite preview",

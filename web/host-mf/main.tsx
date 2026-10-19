@@ -1,39 +1,76 @@
+import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import type { ComponentType } from 'react';
 
 import '@/styles/globals.css';
 import './host-mf.css';
 
-interface RemoteModule {
-  default: ComponentType<{
-    clientId: string;
-    apiBaseUrl?: string;
-    locale?: string;
-    dir?: 'rtl' | 'ltr';
-  }>;
+import { HostApp } from './HostApp';
+import { HostConfigError, parseHostConfig, type HostConfigIssue } from './host-config';
+import { createHostEventLogger } from './host-events';
+import { remoteLoaders } from './remote-loaders';
+import { createInMemoryTokenProvider } from './token-provider';
+
+/** Rendered instead of the modules when the build-time host config is incomplete. */
+function ConfigErrorView({ issues }: { issues: readonly HostConfigIssue[] }) {
+  return (
+    <div className="idpn-host-alert" role="alert" data-testid="idpn-host-config-error">
+      <p className="idpn-host-alert__title">The Module Federation host is not configured.</p>
+      <ul>
+        {issues.map((issue) => (
+          <li key={issue.key}>
+            <code>{issue.key}</code>: {issue.message}
+          </li>
+        ))}
+      </ul>
+      <p>See the &quot;React host (Module Federation)&quot; section of docs/mfe-sdk.md.</p>
+    </div>
+  );
 }
 
-async function bootstrap(): Promise<void> {
-  const container = document.getElementById('host-root');
-  if (container === null) {
-    throw new Error('Missing #host-root element');
-  }
-
-  // Resolved through Module Federation; React is shared as a singleton and each
-  // module brings its own `.idpn-root` and portal container. `clientId` is host
-  // configuration and scopes every request to this app.
-  const userManagement = (await import('idpnMfe/UserManagement')) as RemoteModule;
-  const UserManagement = userManagement.default;
-  createRoot(container).render(<UserManagement clientId="app-a" locale="fa-IR" dir="rtl" />);
-
-  const accountContainer = document.getElementById('account-root');
-  if (accountContainer !== null) {
-    // The account module is same-origin with the IdP; this fixture has no IdP session,
-    // so it renders its own safe error state without leaking anything to the host.
-    const account = (await import('idpnMfe/Account')) as RemoteModule;
-    const Account = account.default;
-    createRoot(accountContainer).render(<Account clientId="app-a" locale="fa-IR" dir="rtl" />);
-  }
+const container = document.getElementById('host-root');
+if (container === null) {
+  throw new Error('Missing #host-root element');
 }
 
-void bootstrap();
+const root = createRoot(container);
+
+function bootstrap(): void {
+  let config;
+  try {
+    config = parseHostConfig(import.meta.env);
+  } catch (error) {
+    if (error instanceof HostConfigError) {
+      root.render(
+        <StrictMode>
+          <ConfigErrorView issues={error.issues} />
+        </StrictMode>,
+      );
+      return;
+    }
+    throw error;
+  }
+
+  // BFF is the default: the token provider exists but its getter is only forwarded in
+  // `spa` mode. A host with a local OIDC client calls `setAccessToken` after a silent
+  // renew; this demo has none, so the getter stays empty and the module renders its own
+  // unauthorized state without a token ever reaching the browser bundle.
+  const tokens = createInMemoryTokenProvider();
+  const onEvent = createHostEventLogger((message, details) => {
+    console.info(message, details);
+  });
+
+  root.render(
+    <StrictMode>
+      <HostApp
+        config={config}
+        loaders={remoteLoaders}
+        onEvent={onEvent}
+        {...(config.mode === 'spa' ? { getAccessToken: tokens.getAccessToken } : {})}
+      />
+    </StrictMode>,
+  );
+
+  window.addEventListener('pagehide', () => root.unmount(), { once: true });
+}
+
+bootstrap();

@@ -6,6 +6,8 @@ import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
 /** Independent React 19 host that consumes the `idpnMfe` remote. */
+const REMOTE_ENTRY = process.env.IDPN_REMOTE_ENTRY ?? '/remote/remoteEntry.js';
+
 export default defineConfig({
   root: fileURLToPath(new URL('./host-mf', import.meta.url)),
   plugins: [
@@ -15,10 +17,11 @@ export default defineConfig({
       name: 'idpnHost',
       dts: false,
       remotes: {
+        // Pin at least the major version (`.../idpn-mfe/1.4.0/remoteEntry.js` in production).
         idpnMfe: {
           type: 'module',
           name: 'idpnMfe',
-          entry: '/remote/remoteEntry.js',
+          entry: REMOTE_ENTRY,
         },
       },
       shared: {

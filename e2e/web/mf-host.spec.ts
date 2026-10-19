@@ -1,52 +1,47 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 
-const members = [
-  {
-    membershipId: 'm1',
-    userId: 'u1',
-    email: 'negar@example.com',
-    username: 'negar',
-    displayName: 'نگار کریمی',
-    userStatus: 'active',
-    status: 'active',
-    attributes: {},
-    roleKeys: ['app-a:member'],
-    invitedAt: null,
-    joinedAt: '2026-10-19T09:00:00.000Z',
-    createdAt: '2026-10-19T09:00:00.000Z',
-    updatedAt: '2026-10-19T09:00:00.000Z',
-  },
-];
+const CLIENT_ID = 'app-a';
+const LOGIN_URL = `${process.env.E2E_WEB_URL ?? 'http://127.0.0.1:5180'}/oauth2/authorize`;
+
+const member = {
+  membershipId: 'm1',
+  userId: 'u1',
+  email: 'negar@example.com',
+  username: 'negar',
+  displayName: 'نگار کریمی',
+  userStatus: 'active',
+  status: 'active',
+  attributes: {},
+  roleKeys: ['app-a:member'],
+  invitedAt: null,
+  joinedAt: '2026-10-19T09:00:00.000Z',
+  createdAt: '2026-10-19T09:00:00.000Z',
+  updatedAt: '2026-10-19T09:00:00.000Z',
+};
+
+interface MockApiOptions {
+  /** Return a Problem Details response instead of the member page. */
+  membersStatus?: number;
+}
 
 /**
- * The host fixture has no API server. Deterministic member/role responses let the tests
- * exercise the federated module instead of its error state.
+ * The host fixture has no API server. Deterministic responses let the tests exercise the
+ * federated modules (and their error surface) instead of transport noise.
  */
-async function mockApi(page: Page): Promise<void> {
-  await page.route('**/api/v1/clients/app-a/members**', (route) => {
-    if (route.request().method() === 'POST') {
-      const invited = {
-        ...members[0]!,
-        membershipId: 'm2',
-        userId: 'u2',
-        email: 'nima@example.com',
-        username: 'nima',
-        displayName: 'نیما کریمی',
-        joinedAt: null,
-        invitedAt: '2026-10-19T10:00:00.000Z',
-      };
-      members.push(invited);
+async function mockApi(page: Page, options: MockApiOptions = {}): Promise<void> {
+  await page.route(`**/api/v1/clients/${CLIENT_ID}/members**`, (route) => {
+    if (options.membersStatus !== undefined) {
       return route.fulfill({
-        status: 201,
-        contentType: 'application/json',
-        body: JSON.stringify({ member: invited, createdUser: false }),
+        status: options.membersStatus,
+        contentType: 'application/problem+json',
+        body: JSON.stringify({ title: 'Forbidden', status: options.membersStatus }),
       });
     }
     return route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ items: members, page: 1, limit: 10, total: members.length }),
+      body: JSON.stringify({ items: [member], page: 1, limit: 10, total: 1 }),
     });
   });
   await page.route('**/api/v1/roles**', (route) =>
@@ -87,61 +82,128 @@ async function mockApi(page: Page): Promise<void> {
       body: JSON.stringify({ items: [], page: 1, limit: 25, total: 0 }),
     }),
   );
+  await page.route('**/api/v1/account/mfa', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ enabled: false, factors: [] }),
+    }),
+  );
 }
 
-test.describe('module federation host (spike)', () => {
-  test('mounts the remote module with shared React and keeps host styles intact', async ({
-    page,
-  }) => {
+test.describe('module federation host', () => {
+  test('mounts both remotes with the configured client id and BFF session', async ({ page }) => {
     const consoleErrors: string[] = [];
+    const apiRequests: string[] = [];
+    const authorizationHeaders: string[] = [];
+
     page.on('console', (message) => {
       if (message.type() === 'error') {
         consoleErrors.push(message.text());
       }
     });
+    page.on('request', (request) => {
+      const url = request.url();
+      if (url.includes('/api/v1/')) {
+        apiRequests.push(url);
+        const authorization = request.headers()['authorization'];
+        if (authorization !== undefined) {
+          authorizationHeaders.push(authorization);
+        }
+      }
+    });
     await mockApi(page);
 
-    await page.goto('/');
+    // Hostile query string: neither clientId, loginContext nor mode may come from the URL.
+    await page.goto('/?clientId=attacker&loginContext=other&mode=spa');
 
-    // Remote mounted inside the host and rendered with hooks (proves a single React instance).
-    const mfeRoot = page.locator('#host-root .idpn-root');
-    await expect(mfeRoot).toBeVisible();
-    await expect(mfeRoot).toHaveAttribute('dir', 'rtl');
+    const userManagementRoot = page.locator(
+      '[data-testid="idpn-host-slot-user-management"] .idpn-root',
+    );
+    await expect(userManagementRoot).toBeVisible();
+    await expect(userManagementRoot).toHaveAttribute('dir', 'rtl');
+    await expect(userManagementRoot).toHaveAttribute('lang', 'fa-IR');
     await expect(page.getByRole('heading', { name: 'مدیریت کاربران' })).toBeVisible();
-    await expect(page.getByText('نگار کریمی')).toBeVisible();
+    await expect(
+      page.getByTestId('idpn-host-slot-user-management').getByText('نگار کریمی'),
+    ).toBeVisible();
 
-    // The account remote is mounted too, with its own root and safe states.
-    await expect(page.locator('#account-root .idpn-root')).toBeVisible();
+    const accountRoot = page.locator('[data-testid="idpn-host-slot-account"] .idpn-root');
+    await expect(accountRoot).toBeVisible();
     await expect(page.getByRole('heading', { name: 'حساب کاربری' })).toBeVisible();
 
-    // Host styles survive the remote CSS.
-    await expect(page.locator('#host-title')).toHaveCSS('font-size', '40px');
-    await expect(page.locator('#host-button')).toHaveCSS('background-color', 'rgb(200, 0, 0)');
-    await expect(page.locator('#host-button')).toHaveCSS('font-size', '24px');
-    await expect(page.locator('#host-paragraph')).toHaveCSS('display', 'block');
+    // The host shell reports the build-time configuration it actually used.
+    await expect(page.getByTestId('idpn-host-client-id')).toHaveText(CLIENT_ID);
+    await expect(page.getByTestId('idpn-host-mode')).toHaveText('bff');
+    await expect(page.getByTestId('idpn-host-login-context')).toHaveText('admin');
+    await expect(page.getByTestId('idpn-host-locale')).toHaveText('fa-IR (rtl)');
 
-    // Interaction works across the federation boundary.
-    await page.getByRole('button', { name: 'دعوت کاربر' }).click();
-    const dialog = page.getByRole('dialog', { name: 'دعوت عضو جدید' });
-    await expect(dialog).toBeVisible();
-    await page.getByLabel('ایمیل').fill('nima@example.com');
-    await page.getByLabel('نام نمایشی (اختیاری)').fill('نیما کریمی');
-    await page.getByRole('button', { name: 'دعوت', exact: true }).click();
-    await expect(page.getByRole('table', { name: 'اعضای اپ app-a' })).toContainText('نیما کریمی');
+    // Every member call is scoped to the configured client, and no request carried a token.
+    const memberUrls = apiRequests.filter((url) => url.includes('/members'));
+    expect(memberUrls.length).toBeGreaterThan(0);
+    for (const url of memberUrls) {
+      expect(new URL(url).pathname).toBe(`/api/v1/clients/${CLIENT_ID}/members`);
+    }
+    expect(apiRequests.some((url) => url.includes('attacker'))).toBe(false);
+    expect(authorizationHeaders).toEqual([]);
+
+    // BFF mode keeps the browser clean.
+    const storage = await page.evaluate(() => ({
+      local: localStorage.length,
+      session: sessionStorage.length,
+      cookies: document.cookie,
+    }));
+    expect(storage).toEqual({ local: 0, session: 0, cookies: '' });
 
     expect(consoleErrors).toEqual([]);
   });
 
-  test('portals stay inside the MFE root and axe reports no blocking issues', async ({ page }) => {
+  test('isolates host and MFE styles, tokens and portals', async ({ page }) => {
     await mockApi(page);
     await page.goto('/');
     await expect(page.getByRole('heading', { name: 'مدیریت کاربران' })).toBeVisible();
 
-    await page.getByRole('button', { name: 'دعوت کاربر' }).click();
-    await expect(page.getByRole('dialog', { name: 'دعوت عضو جدید' })).toBeVisible();
+    // MFE styles do not reset or restyle the host (host preflight/utilities stay intact).
+    await expect(page.locator('#host-title')).toHaveCSS('font-size', '40px');
+    await expect(page.locator('#host-button')).toHaveCSS('background-color', 'rgb(200, 0, 0)');
+    await expect(page.locator('#host-button')).toHaveCSS('font-size', '24px');
+    await expect(page.locator('#host-paragraph')).toHaveCSS('display', 'block');
+    await expect(page.locator('body')).toHaveCSS('font-family', /Georgia/);
 
+    // The host does not restyle the MFE: its own typography and controls win.
+    const mfeRoot = page.locator('[data-testid="idpn-host-slot-user-management"] .idpn-root');
+    await expect(mfeRoot).toHaveCSS('font-family', /Vazirmatn/);
+
+    const invite = page.getByRole('button', { name: 'دعوت کاربر' });
+    const inviteBackground = await invite.evaluate(
+      (element) => getComputedStyle(element).backgroundColor,
+    );
+    expect(inviteBackground).not.toBe('rgb(200, 0, 0)');
+    expect(inviteBackground).not.toBe('rgba(0, 0, 0, 0)');
+
+    // Client theme tokens are scoped to `.idpn-root`, never to `:root`.
+    const tokens = await page.evaluate(() => {
+      const root = document.querySelector(
+        '[data-testid="idpn-host-slot-user-management"] .idpn-root',
+      );
+      const styles = root === null ? null : getComputedStyle(root);
+      const documentStyles = getComputedStyle(document.documentElement);
+      return {
+        rootBrand: styles?.getPropertyValue('--idpn-brand').trim() ?? '',
+        documentBrand: documentStyles.getPropertyValue('--idpn-brand').trim(),
+      };
+    });
+    expect(tokens.rootBrand).toBe('#0057b8');
+    expect(tokens.documentBrand).toBe('');
+
+    // Radix portals render inside the MFE root, not in the host body.
+    await invite.click();
+    await expect(page.getByRole('dialog', { name: 'دعوت عضو جدید' })).toBeVisible();
     const dialogLocation = await page.evaluate(() => ({
-      insideMfeRoot: document.querySelector('#host-root .idpn-root [role="dialog"]') !== null,
+      insideMfeRoot:
+        document.querySelector(
+          '[data-testid="idpn-host-slot-user-management"] .idpn-root [role="dialog"]',
+        ) !== null,
       inDocumentBody: document.body.querySelector(':scope > [role="dialog"]') !== null,
     }));
     expect(dialogLocation.insideMfeRoot).toBe(true);
@@ -153,7 +215,45 @@ test.describe('module federation host (spike)', () => {
     const blocking = results.violations
       .filter((violation) => violation.impact === 'critical' || violation.impact === 'serious')
       .map((violation) => `${violation.id}: ${violation.help}`);
-
     expect(blocking).toEqual([]);
+  });
+
+  test('shows the hosted fallback link when the remote cannot be loaded', async ({ page }) => {
+    await page.route('**/remote/remoteEntry.js', (route) => route.abort());
+    await page.goto('/');
+
+    const fallback = page.getByTestId('idpn-user-management-fallback');
+    await expect(fallback).toBeVisible();
+    await expect(fallback).toHaveAttribute('role', 'alert');
+    await expect(fallback).toContainText('The User management module is unavailable.');
+    await expect(page.getByTestId('idpn-user-management-fallback-link')).toHaveAttribute(
+      'href',
+      LOGIN_URL,
+    );
+
+    // Each module has its own boundary: both offer the documented Hosted page.
+    await expect(page.getByTestId('idpn-account-fallback')).toBeVisible();
+    await expect(page.getByTestId('idpn-account-fallback-link')).toHaveAttribute('href', LOGIN_URL);
+  });
+
+  test('surfaces remote auth errors accessibly without logging tokens', async ({ page }) => {
+    const consoleMessages: string[] = [];
+    page.on('console', (message) => consoleMessages.push(message.text()));
+    await mockApi(page, { membersStatus: 403 });
+
+    await page.goto('/');
+
+    const alert = page.getByTestId('idpn-host-error');
+    await expect(alert).toBeVisible();
+    await expect(alert).toHaveAttribute('role', 'alert');
+    await expect(page.getByTestId('idpn-host-error-code')).toHaveText('forbidden');
+
+    await page.getByRole('button', { name: 'Dismiss' }).click();
+    await expect(page.getByTestId('idpn-host-error')).toBeHidden();
+
+    const logs = consoleMessages.join('\n');
+    expect(logs).toContain('[idpn-host] auth:error');
+    expect(logs).not.toMatch(/eyJ[A-Za-z0-9_-]{8,}\./);
+    expect(logs).not.toMatch(/Bearer\s+[A-Za-z0-9._-]+/);
   });
 });
