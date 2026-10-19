@@ -168,6 +168,22 @@ describe('RedisSessionStore', () => {
     expect(sets.get('idpn:user-sessions:user-1')?.size ?? 0).toBe(0);
   });
 
+  it('revokes every session of a user except the current one', async () => {
+    const { cache, sets } = createMemoryCache();
+    const store = new RedisSessionStore({ cache, policy });
+    const current = await store.create({ userId: 'user-1', amr: ['pwd'], acr: 'pwd' });
+    const other = await store.create({ userId: 'user-1', amr: ['pwd'], acr: 'pwd' });
+    const unrelated = await store.create({ userId: 'user-2', amr: ['pwd'], acr: 'pwd' });
+
+    await expect(
+      store.revokeAllForUserExcept('user-1', current.sid, 'password_change'),
+    ).resolves.toBe(1);
+    await expect(store.read(current.sid)).resolves.not.toBeNull();
+    await expect(store.read(other.sid)).resolves.toBeNull();
+    await expect(store.read(unrelated.sid)).resolves.not.toBeNull();
+    expect(sets.get('idpn:user-sessions:user-1')).toEqual(new Set([current.sid]));
+  });
+
   it('revokes the oldest sessions when the concurrent limit is exceeded', async () => {
     const { cache } = createMemoryCache();
     let now = new Date('2026-10-18T10:00:00Z');

@@ -1,6 +1,8 @@
 import { healthResponseSchema, type HealthResponse } from '@idpn/contracts';
 import Fastify, { type FastifyInstance } from 'fastify';
 
+import type { AccountRoutesOptions } from './account/routes.js';
+import { registerAccountRoutes } from './account/routes.js';
 import { registerFormBodyParser } from './http/form-body.js';
 import type { AdminRoutesOptions } from './admin/routes.js';
 import { registerAdminRoutes } from './admin/routes.js';
@@ -70,6 +72,8 @@ export interface BuildServerOptions {
   adminSessions?: Omit<SessionRoutesOptions, 'issuer' | 'verifier'>;
   /** Mounts the signing-key endpoints (docs/api.md 3.9). */
   adminKeys?: Omit<KeyRoutesOptions, 'issuer' | 'verifier' | 'keys'>;
+  /** Mounts the same-origin account surface used by the embedded MFE (docs/account-api.md). */
+  account?: Omit<AccountRoutesOptions, 'appUrl'>;
 }
 
 /**
@@ -183,6 +187,10 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
       verifier: keys,
       keys,
     });
+  }
+
+  if (options.account !== undefined) {
+    registerAccountRoutes(app, { ...options.account, appUrl: issuer });
   }
 
   return app;

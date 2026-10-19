@@ -144,6 +144,31 @@ export class RedisSessionStore implements ClientSessionRevoker {
   }
 
   /**
+   * Revokes every session of the user except the caller's own one. Used by the self-service
+   * password change so the device that performed the change stays signed in.
+   */
+  async revokeAllForUserExcept(
+    userId: string,
+    keepSid: string,
+    reason: RevokeReason,
+  ): Promise<number> {
+    const sids = await this.cache.setMembers(userKey(userId));
+    let revoked = 0;
+    for (const sid of sids) {
+      if (sid === keepSid) {
+        continue;
+      }
+      const session = await this.load(sid);
+      if (session !== null) {
+        await this.markRevoked(session, reason);
+        revoked += 1;
+      }
+      await this.cache.setRemove(userKey(userId), sid);
+    }
+    return revoked;
+  }
+
+  /**
    * Revokes only the sessions that were created for one app. Used when an app membership is
    * suspended: sessions belonging to other apps of the same user must stay valid.
    */

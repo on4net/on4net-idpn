@@ -12,3 +12,17 @@ declare module 'idpnMfe/UserManagement' {
 
   export default UserManagement;
 }
+
+declare module 'idpnMfe/Account' {
+  import type { ComponentType } from 'react';
+
+  const Account: ComponentType<{
+    apiBaseUrl?: string;
+    clientId?: string;
+    locale?: string;
+    dir?: 'rtl' | 'ltr';
+    onEvent?: (event: { type: 'auth:error'; code: string }) => void;
+  }>;
+
+  export default Account;
+}

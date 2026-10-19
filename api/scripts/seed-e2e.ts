@@ -24,42 +24,63 @@ const E2E_POST_LOGOUT_URI =
 const E2E_CLIENT_SECRET = process.env['E2E_BFF_CLIENT_SECRET'] ?? 'e2e-bff-client-secret';
 const E2E_USER_IDENTIFIER = process.env['E2E_USER_IDENTIFIER'] ?? 'user@example.com';
 const E2E_USER_PASSWORD = process.env['E2E_USER_PASSWORD'] ?? 'e2e-user-password-123';
+/**
+ * Second app used by the SSO/logout scenario: no second login page is started, the test only
+ * proves that `/oauth2/authorize` issues a code for this client from the existing IdP session.
+ */
+const E2E_SECOND_CLIENT_ID = process.env['E2E_SECOND_CLIENT_ID'] ?? 'sample-bff-b';
+const E2E_SECOND_REDIRECT_URI =
+  process.env['E2E_SECOND_REDIRECT_URI'] ?? 'http://127.0.0.1:3201/auth/callback';
+
+async function upsertWebClient(
+  prisma: PrismaClient,
+  tenantId: string,
+  input: {
+    clientId: string;
+    name: string;
+    redirectUri: string;
+    postLogoutRedirectUris: string[];
+  },
+): Promise<void> {
+  const data = {
+    name: input.name,
+    type: 'web' as const,
+    redirectUris: [input.redirectUri],
+    postLogoutRedirectUris: [...input.postLogoutRedirectUris],
+    allowedOrigins: [new URL(input.redirectUri).origin],
+    scopes: ['openid', 'profile', 'email', 'offline_access'],
+    requirePkce: true,
+    registrationPolicy: 'disabled' as const,
+    mfaPolicy: 'optional' as const,
+    status: 'active' as const,
+    tenantId,
+  };
+  await prisma.client.upsert({
+    where: { clientId: input.clientId },
+    update: data,
+    create: { clientId: input.clientId, ...data },
+  });
+}
 
 async function seedE2eFixtures(prisma: PrismaClient): Promise<void> {
   await seedDatabase(prisma);
 
   const tenant = await prisma.tenant.findUniqueOrThrow({ where: { slug: 'default' } });
 
-  const client = await prisma.client.upsert({
-    where: { clientId: E2E_CLIENT_ID },
-    update: {
-      name: 'Sample BFF (E2E)',
-      type: 'web',
-      redirectUris: [E2E_REDIRECT_URI],
-      postLogoutRedirectUris: [E2E_POST_LOGOUT_URI],
-      allowedOrigins: [new URL(E2E_REDIRECT_URI).origin],
-      scopes: ['openid', 'profile', 'email', 'offline_access'],
-      requirePkce: true,
-      registrationPolicy: 'disabled',
-      mfaPolicy: 'optional',
-      status: 'active',
-      tenantId: tenant.id,
-    },
-    create: {
-      clientId: E2E_CLIENT_ID,
-      name: 'Sample BFF (E2E)',
-      type: 'web',
-      redirectUris: [E2E_REDIRECT_URI],
-      postLogoutRedirectUris: [E2E_POST_LOGOUT_URI],
-      allowedOrigins: [new URL(E2E_REDIRECT_URI).origin],
-      scopes: ['openid', 'profile', 'email', 'offline_access'],
-      requirePkce: true,
-      registrationPolicy: 'disabled',
-      mfaPolicy: 'optional',
-      status: 'active',
-      tenantId: tenant.id,
-    },
+  await upsertWebClient(prisma, tenant.id, {
+    clientId: E2E_CLIENT_ID,
+    name: 'Sample BFF (E2E)',
+    redirectUri: E2E_REDIRECT_URI,
+    postLogoutRedirectUris: [E2E_POST_LOGOUT_URI],
   });
+  await upsertWebClient(prisma, tenant.id, {
+    clientId: E2E_SECOND_CLIENT_ID,
+    name: 'Sample BFF B (E2E)',
+    redirectUri: E2E_SECOND_REDIRECT_URI,
+    postLogoutRedirectUris: [],
+  });
+
+  const client = await prisma.client.findUniqueOrThrow({ where: { clientId: E2E_CLIENT_ID } });
 
   const secretHash = await hashPassword(E2E_CLIENT_SECRET);
   const activeSecrets = await prisma.clientSecret.findMany({

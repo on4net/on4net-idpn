@@ -13,11 +13,25 @@ export interface PasswordChangeUser extends PasswordSubject {
   deletedAt: Date | null;
 }
 
+export interface RevokeSessionOptions {
+  /** Session that must stay valid (the caller's current session). */
+  keepSessionId?: string;
+}
+
 export interface PasswordStore {
   findUser(userId: string): Promise<PasswordChangeUser | null>;
   updatePassword(userId: string, passwordHash: string, changedAt: Date): Promise<void>;
-  revokeSessions(userId: string, revokedAt: Date, reason: string): Promise<number>;
-  revokeRefreshTokens(userId: string, revokedAt: Date): Promise<number>;
+  revokeSessions(
+    userId: string,
+    revokedAt: Date,
+    reason: string,
+    options?: RevokeSessionOptions,
+  ): Promise<number>;
+  revokeRefreshTokens(
+    userId: string,
+    revokedAt: Date,
+    options?: RevokeSessionOptions,
+  ): Promise<number>;
   recordAudit(event: AuditEventInput): Promise<void>;
 }
 
@@ -26,6 +40,11 @@ export interface ChangePasswordInput {
   newPassword: string;
   /** Required for self-service changes; omitted for admin reset and reset-token flows. */
   currentPassword?: string;
+  /**
+   * Self-service only: keep the caller's current session instead of revoking every session.
+   * Other sessions and their refresh tokens are still revoked (docs/auth-flows.md 5.2).
+   */
+  keepSessionId?: string;
   actorType?: 'user' | 'admin' | 'system';
   actorId?: string | null;
   ip?: string | null;
@@ -87,8 +106,15 @@ export async function changePassword(
   const passwordHash = await hashPasswordFn(input.newPassword, params);
   await store.updatePassword(user.id, passwordHash, changedAt);
 
-  const revokedSessions = await store.revokeSessions(user.id, changedAt, 'password_change');
-  const revokedRefreshTokens = await store.revokeRefreshTokens(user.id, changedAt);
+  const revokeOptions: RevokeSessionOptions =
+    input.keepSessionId === undefined ? {} : { keepSessionId: input.keepSessionId };
+  const revokedSessions = await store.revokeSessions(
+    user.id,
+    changedAt,
+    'password_change',
+    revokeOptions,
+  );
+  const revokedRefreshTokens = await store.revokeRefreshTokens(user.id, changedAt, revokeOptions);
 
   await store.recordAudit({
     actorType: input.actorType ?? 'user',
@@ -99,7 +125,11 @@ export async function changePassword(
     ip: input.ip ?? null,
     userAgent: input.userAgent ?? null,
     result: 'success',
-    metadata: { revokedSessions, revokedRefreshTokens },
+    metadata: {
+      revokedSessions,
+      revokedRefreshTokens,
+      keptCurrentSession: input.keepSessionId !== undefined,
+    },
   });
 
   return { ok: true, revokedSessions, revokedRefreshTokens };

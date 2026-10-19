@@ -5,7 +5,7 @@ import { federation } from '@module-federation/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
-/** Module Federation remote exposing the `user-management` module. */
+/** Module Federation remote exposing the authenticated MFE modules. */
 export default defineConfig({
   plugins: [
     react(),
@@ -17,6 +17,7 @@ export default defineConfig({
       manifest: true,
       exposes: {
         './UserManagement': './src/mfe/user-management.tsx',
+        './Account': './src/mfe/account.tsx',
       },
       shared: {
         react: { singleton: true, requiredVersion: '^19.0.0' },

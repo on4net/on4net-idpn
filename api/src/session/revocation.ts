@@ -9,6 +9,11 @@ import type { IdpSession, RevokeReason } from './types.js';
 export interface SessionRevoker {
   revoke(sid: string, reason: RevokeReason): Promise<boolean>;
   revokeAllForUser(userId: string, reason: RevokeReason): Promise<number>;
+  /**
+   * Revokes every session of the user except `keepSid`. Self-service password changes keep
+   * the caller signed in while invalidating every other device (docs/auth-flows.md 5.2).
+   */
+  revokeAllForUserExcept?(userId: string, keepSid: string, reason: RevokeReason): Promise<number>;
 }
 
 /** App-scoped revocation used when a membership is suspended. */

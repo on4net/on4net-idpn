@@ -1,10 +1,49 @@
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
+
+const member = {
+  membershipId: 'm1',
+  userId: 'u1',
+  email: 'negar@example.com',
+  username: 'negar',
+  displayName: 'نگار کریمی',
+  userStatus: 'active',
+  status: 'active',
+  attributes: {},
+  roleKeys: ['app-a:member'],
+  invitedAt: null,
+  joinedAt: '2026-10-19T09:00:00.000Z',
+  createdAt: '2026-10-19T09:00:00.000Z',
+  updatedAt: '2026-10-19T09:00:00.000Z',
+};
+
+/** The fixture has no API; deterministic responses keep the isolation assertions focused. */
+async function mockApi(page: Page): Promise<void> {
+  await page.route('**/api/v1/clients/app-a/members**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ items: [member], page: 1, limit: 10, total: 1 }),
+    }),
+  );
+  await page.route('**/api/v1/roles**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        items: [
+          { id: 'r1', key: 'app-a:member', name: 'عضو', description: 'member', isDefault: true },
+        ],
+      }),
+    }),
+  );
+}
 
 test.describe('web component isolation (spike)', () => {
   test('does not leak MFE styles into the host and keeps portals inside the shadow root', async ({
     page,
   }) => {
+    await mockApi(page);
     await page.goto('/host/');
     await expect(page.locator('#host-title')).toBeVisible();
 
@@ -21,17 +60,18 @@ test.describe('web component isolation (spike)', () => {
     await expect(mfeRoot).toBeVisible();
     await expect(mfeRoot).toHaveAttribute('dir', 'rtl');
 
-    const addUser = page.getByRole('button', { name: 'افزودن کاربر' });
-    await expect(addUser).toBeVisible();
+    const invite = page.getByRole('button', { name: 'دعوت کاربر' });
+    await expect(invite).toBeVisible();
+    await expect(page.getByText('نگار کریمی')).toBeVisible();
 
-    const mfeButtonBackground = await addUser.evaluate(
+    const mfeButtonBackground = await invite.evaluate(
       (element) => getComputedStyle(element).backgroundColor,
     );
     expect(mfeButtonBackground).not.toBe('rgb(200, 0, 0)');
 
     // Radix portals must render inside the shadow root, not in document.body.
-    await addUser.click();
-    await expect(page.getByRole('dialog', { name: 'کاربر جدید' })).toBeVisible();
+    await invite.click();
+    await expect(page.getByRole('dialog', { name: 'دعوت عضو جدید' })).toBeVisible();
 
     const dialogLocation = await page.evaluate(() => {
       const host = document.querySelector('#mfe');
@@ -46,6 +86,7 @@ test.describe('web component isolation (spike)', () => {
   });
 
   test('host page has no critical accessibility violations', async ({ page }) => {
+    await mockApi(page);
     await page.goto('/host/');
     await expect(page.locator('#host-title')).toBeVisible();
 

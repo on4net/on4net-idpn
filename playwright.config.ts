@@ -14,6 +14,16 @@ const bffClientId = process.env.E2E_BFF_CLIENT_ID ?? 'sample-bff';
 const bffClientSecret = process.env.E2E_BFF_CLIENT_SECRET ?? 'e2e-bff-client-secret';
 const e2eUserIdentifier = process.env.E2E_USER_IDENTIFIER ?? 'user@example.com';
 const e2eUserPassword = process.env.E2E_USER_PASSWORD ?? 'e2e-user-password-123';
+const secondClientId = process.env.E2E_SECOND_CLIENT_ID ?? 'sample-bff-b';
+const secondRedirectUri =
+  process.env.E2E_SECOND_REDIRECT_URI ?? 'http://127.0.0.1:3201/auth/callback';
+
+// Browser specs need the IdP origin (the app under test is the BFF host) and the second
+// app's client configuration; expose them to the test runner, not only to web servers.
+process.env.E2E_IDP_URL = process.env.E2E_IDP_URL ?? apiURL;
+process.env.E2E_WEB_URL = process.env.E2E_WEB_URL ?? webURL;
+process.env.E2E_SECOND_CLIENT_ID = secondClientId;
+process.env.E2E_SECOND_REDIRECT_URI = secondRedirectUri;
 
 export default defineConfig({
   testDir: './e2e',
@@ -24,6 +34,9 @@ export default defineConfig({
   use: {
     trace: 'on-first-retry',
   },
+  // Vite optimizes the federated dependencies on the first cold request; a 5s default
+  // makes the first module mount flaky on slower machines. Assertions stay unchanged.
+  expect: { timeout: 15_000 },
   projects: [
     {
       name: 'api-chromium',
@@ -106,6 +119,8 @@ export default defineConfig({
         E2E_BFF_POST_LOGOUT_URI: `${bffURL}/signed-out`,
         E2E_USER_IDENTIFIER: e2eUserIdentifier,
         E2E_USER_PASSWORD: e2eUserPassword,
+        E2E_SECOND_CLIENT_ID: secondClientId,
+        E2E_SECOND_REDIRECT_URI: secondRedirectUri,
       },
     },
   ],

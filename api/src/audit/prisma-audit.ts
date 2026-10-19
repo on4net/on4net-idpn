@@ -2,7 +2,6 @@ import { sanitizeAuditMetadata, type AuditEventInput } from './sanitize.js';
 import type { PrismaClient } from '../generated/prisma/client.js';
 import type { SessionRevoker } from '../session/revocation.js';
 import type { PasswordStore } from '../users/change-password.js';
-
 /** Persists an audit event with credentials stripped from metadata. */
 export async function recordAuditEvent(
   prisma: PrismaClient,
@@ -33,7 +32,10 @@ export async function recordAuditEvent(
  */
 export function createPrismaPasswordStore(
   prisma: PrismaClient,
-  options: { sessions?: Pick<SessionRevoker, 'revokeAllForUser'> } = {},
+  options: {
+    sessions?: Pick<SessionRevoker, 'revokeAllForUser'> &
+      Partial<Pick<SessionRevoker, 'revokeAllForUserExcept'>>;
+  } = {},
 ): PasswordStore {
   return {
     async findUser(userId) {
@@ -58,18 +60,32 @@ export function createPrismaPasswordStore(
       });
     },
 
-    async revokeSessions(userId, revokedAt, reason) {
+    async revokeSessions(userId, revokedAt, reason, revokeOptions) {
+      const keepSessionId = revokeOptions?.keepSessionId;
       const result = await prisma.session.updateMany({
-        where: { userId, revokedAt: null },
+        where: {
+          userId,
+          revokedAt: null,
+          ...(keepSessionId === undefined ? {} : { id: { not: keepSessionId } }),
+        },
         data: { revokedAt, revokeReason: reason },
       });
-      await options.sessions?.revokeAllForUser(userId, 'password_change');
+      if (keepSessionId !== undefined && options.sessions?.revokeAllForUserExcept !== undefined) {
+        await options.sessions.revokeAllForUserExcept(userId, keepSessionId, 'password_change');
+      } else {
+        await options.sessions?.revokeAllForUser(userId, 'password_change');
+      }
       return result.count;
     },
 
-    async revokeRefreshTokens(userId, revokedAt) {
+    async revokeRefreshTokens(userId, revokedAt, revokeOptions) {
+      const keepSessionId = revokeOptions?.keepSessionId;
       const result = await prisma.refreshToken.updateMany({
-        where: { userId, revokedAt: null },
+        where: {
+          userId,
+          revokedAt: null,
+          ...(keepSessionId === undefined ? {} : { sessionId: { not: keepSessionId } }),
+        },
         data: { revokedAt },
       });
       return result.count;

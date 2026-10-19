@@ -1,8 +1,10 @@
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Redis } from 'ioredis';
 
+import { createPrismaAccountProfileRepository } from './account/prisma-account-repository.js';
 import { loadApiEnv } from './config/env.js';
 import { createPrismaAdminAudit } from './admin/prisma-audit.js';
+import { createPrismaPasswordStore } from './audit/prisma-audit.js';
 import { createPrismaAdminClientRepository } from './admin/clients/prisma-client-repository.js';
 import { createPrismaPermissionReader } from './admin/prisma-permission-reader.js';
 import { createPrismaRbacRepository } from './admin/rbac/prisma-rbac-repository.js';
@@ -77,6 +79,9 @@ const membersRepository = createPrismaMemberRepository(prisma, {
   sessions,
 });
 const effectiveAccess = createPrismaEffectiveAccessSource(prisma);
+const adminSessionsRepository = createPrismaAdminSessionRepository(prisma);
+/** Password changes keep the caller's session but revoke every other session and token. */
+const passwordStore = createPrismaPasswordStore(prisma, { sessions });
 
 /**
  * Back-channel logout is best effort: retries with backoff, then the durable Redis queue
@@ -135,7 +140,7 @@ const app = buildServer({
     sessions,
     revocations: createPrismaLogoutRepository(prisma),
     backchannel: backchannelLogout,
-    audit: { record: (event) => loginRepository.record(event) },
+    audit: createPrismaAdminAudit(prisma),
     cookie: { secure: env.APP_URL.startsWith('https://') },
   },
   publicConfig: {
@@ -181,8 +186,15 @@ const app = buildServer({
   adminSessions: {
     adminClientId: env.ADMIN_CLIENT_ID,
     permissions: permissionReader,
-    repository: createPrismaAdminSessionRepository(prisma),
+    repository: adminSessionsRepository,
     revoker: sessions,
+    audit: createPrismaAdminAudit(prisma),
+  },
+  account: {
+    sessions,
+    repository: adminSessionsRepository,
+    profiles: createPrismaAccountProfileRepository(prisma),
+    passwords: passwordStore,
     audit: createPrismaAdminAudit(prisma),
   },
   adminKeys: {

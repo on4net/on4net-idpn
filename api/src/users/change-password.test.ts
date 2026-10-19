@@ -12,6 +12,8 @@ interface FakeStore extends PasswordStore {
   audits: Parameters<PasswordStore['recordAudit']>[0][];
   updatedHash?: string;
   changedAt?: Date;
+  revokeOptions?: Parameters<PasswordStore['revokeSessions']>[3];
+  refreshOptions?: Parameters<PasswordStore['revokeRefreshTokens']>[2];
 }
 
 function createStore(user: PasswordChangeUser): FakeStore {
@@ -26,10 +28,12 @@ function createStore(user: PasswordChangeUser): FakeStore {
       store.changedAt = changedAt;
       store.user = { ...store.user, passwordHash: hash };
     },
-    async revokeSessions() {
+    async revokeSessions(_id, _revokedAt, _reason, options) {
+      store.revokeOptions = options;
       return 2;
     },
-    async revokeRefreshTokens() {
+    async revokeRefreshTokens(_id, _revokedAt, options) {
+      store.refreshOptions = options;
       return 3;
     },
     async recordAudit(event) {
@@ -175,6 +179,28 @@ describe('changePassword', () => {
       now,
     );
     expect(store.changedAt).toEqual(now());
+  });
+
+  it('keeps the caller session while revoking the others for a self-service change', async () => {
+    const existing = await hashPassword('old-password-123', FAST);
+    const store = createStore(activeUser({ passwordHash: existing }));
+
+    const result = await changePassword(
+      store,
+      hashPassword,
+      {
+        userId: 'user-1',
+        currentPassword: 'old-password-123',
+        newPassword: 'brand-new-password-456',
+        keepSessionId: 'session-current',
+      },
+      now,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(store.revokeOptions).toEqual({ keepSessionId: 'session-current' });
+    expect(store.refreshOptions).toEqual({ keepSessionId: 'session-current' });
+    expect(store.audits[0]?.metadata).toMatchObject({ keptCurrentSession: true });
   });
 });
 
