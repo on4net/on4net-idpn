@@ -171,3 +171,78 @@ describe('createAccountApiClient', () => {
     await expect(client.getProfile()).rejects.toBe(abort);
   });
 });
+
+describe('account MFA client', () => {
+  it('loads the MFA status without a token', async () => {
+    const status = { factors: [], totp: null, recoveryCodesRemaining: 0, available: true };
+    const fetchImpl = fetchMock(jsonResponse(status));
+    const client = createAccountApiClient({ baseUrl: 'https://auth.example/', fetchImpl });
+
+    await expect(client.getMfaStatus()).resolves.toEqual(status);
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://auth.example/api/v1/account/mfa',
+      expect.objectContaining({ method: 'GET', credentials: 'include' }),
+    );
+  });
+
+  it('posts enrollment, verification, disable and rotation as JSON', async () => {
+    const calls: RequestInit[] = [];
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push(init ?? {});
+      return jsonResponse({ ok: true, recoveryCodes: [], factorId: 'f1' });
+    }) as unknown as FetchMock;
+    const client = createAccountApiClient({ fetchImpl });
+
+    await client.enrollTotp();
+    await client.verifyTotpEnrollment({ factorId: 'f1', code: '123456' });
+    await client.disableTotp({ password: 'secret-password' });
+    await client.regenerateRecoveryCodes({ password: 'secret-password' });
+
+    const paths = fetchImpl.mock.calls.map(([input]) => String(input));
+    expect(paths).toEqual([
+      '/api/v1/account/mfa/totp/enroll',
+      '/api/v1/account/mfa/totp/verify',
+      '/api/v1/account/mfa/totp/disable',
+      '/api/v1/account/mfa/recovery-codes',
+    ]);
+    for (const init of calls) {
+      expect(init.method).toBe('POST');
+      expect(init.credentials).toBe('include');
+      expect((init.headers as Record<string, string>)['Content-Type']).toBe('application/json');
+      expect((init.headers as Record<string, string>)['Authorization']).toBeUndefined();
+    }
+    expect(calls[1]?.body).toBe(JSON.stringify({ factorId: 'f1', code: '123456' }));
+    expect(calls[2]?.body).toBe(JSON.stringify({ password: 'secret-password' }));
+  });
+
+  it('maps MFA problem codes so the UI can translate them', async () => {
+    const fetchImpl = fetchMock(
+      jsonResponse(
+        {
+          type: 'https://on4net.dev/problems/invalid-mfa-code',
+          title: 'Invalid code',
+          status: 400,
+          code: 'invalid_mfa_code',
+        },
+        400,
+      ),
+    );
+    const client = createAccountApiClient({ fetchImpl });
+
+    await expect(
+      client.verifyTotpEnrollment({ factorId: 'f1', code: '000000' }),
+    ).rejects.toMatchObject({ kind: 'invalid', status: 400, code: 'invalid_mfa_code' });
+  });
+
+  it('reports an unavailable deployment as a server problem', async () => {
+    const fetchImpl = fetchMock(
+      jsonResponse({ title: 'MFA unavailable', status: 503, code: 'mfa_unavailable' }, 503),
+    );
+    const client = createAccountApiClient({ fetchImpl });
+
+    await expect(client.enrollTotp()).rejects.toMatchObject({
+      status: 503,
+      code: 'mfa_unavailable',
+    });
+  });
+});

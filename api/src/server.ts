@@ -29,6 +29,7 @@ import { registerRevokeIntrospectRoutes } from './oidc/revoke-introspect.js';
 import { registerPublicConfigRoute } from './public-config/routes.js';
 import type { LoginRouteOptions } from './login/routes.js';
 import { registerLoginRoute } from './login/routes.js';
+import { registerMfaVerifyRoute } from './login/mfa-routes.js';
 import type { SocialLoginRouteOptions } from './social/routes.js';
 import { registerSocialLoginRoutes } from './social/routes.js';
 import type { TokenRouteOptions } from './oidc/token-route.js';
@@ -163,6 +164,17 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
 
   if (options.login !== undefined) {
     registerLoginRoute(app, { ...options.login, appUrl: issuer });
+    if (options.login.mfa !== undefined) {
+      registerMfaVerifyRoute(app, {
+        mfa: options.login.mfa,
+        users: options.login.users,
+        sessions: options.login.sessions,
+        persistSession: options.login.persistSession,
+        audit: options.login.audit,
+        cookie: options.login.cookie,
+        ...(options.login.now === undefined ? {} : { now: options.login.now }),
+      });
+    }
   }
 
   if (options.social !== undefined) {

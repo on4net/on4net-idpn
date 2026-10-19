@@ -12,7 +12,7 @@ import { createPrismaMemberRepository } from './admin/members/prisma-member-repo
 import { createPrismaAuditEventRepository } from './admin/audit/prisma-audit-repository.js';
 import { createPrismaAdminSessionRepository } from './admin/sessions/prisma-session-repository.js';
 import { createPrismaSocialProviderRepository } from './admin/social-providers/prisma-social-provider-repository.js';
-import { createSecretBox, loadSocialSecretKey } from './crypto/secret-box.js';
+import { createSecretBox, loadMfaSecretKey, loadSocialSecretKey } from './crypto/secret-box.js';
 import { createPrismaSocialLoginRepository } from './social/prisma-social-login-repository.js';
 import { RedisSocialTransactionStore } from './social/transaction-store.js';
 import { FacebookSocialAdapter } from './social/facebook.js';
@@ -36,6 +36,9 @@ import { createPrismaRefreshTokenRepository } from './oidc/prisma-refresh-reposi
 import { createPrismaUserRepository } from './oidc/prisma-user-repository.js';
 import { createPrismaPublicConfigRepository } from './public-config/prisma-repository.js';
 import { createPrismaLoginRepository } from './login/prisma-repository.js';
+import { createPrismaMfaRepository } from './mfa/prisma-repository.js';
+import { RedisMfaChallengeStore } from './mfa/challenge-store.js';
+import { verifyPassword } from './auth/password.js';
 import { buildServer } from './server.js';
 import { createPrismaSessionRevocationHook } from './session/prisma-revocation.js';
 import { RedisSessionCache } from './session/redis-cache.js';
@@ -94,6 +97,21 @@ const passwordStore = createPrismaPasswordStore(prisma, { sessions });
 // writes fail closed with 503 instead of persisting an unencrypted credential.
 const socialSecretKey = loadSocialSecretKey(env);
 const socialSecretBox = socialSecretKey === null ? null : createSecretBox(socialSecretKey);
+
+/**
+ * TOTP secrets are encrypted at rest with a dedicated AES-256-GCM key (`MFA_SECRET_KEY`,
+ * falling back to the social key for single-key deployments). Without a key MFA enrollment
+ * and verification answer `503` instead of persisting or accepting a plaintext secret.
+ */
+const mfaSecretKey = loadMfaSecretKey(env);
+const mfaSecretBox = mfaSecretKey === null ? null : createSecretBox(mfaSecretKey);
+const mfaRepository = createPrismaMfaRepository(prisma, { permissions: permissionReader });
+const mfaDependencies = {
+  repository: mfaRepository,
+  challenges: new RedisMfaChallengeStore(redis),
+  secretBox: mfaSecretBox,
+  verify: verifyPassword,
+};
 
 /**
  * Per-app social login (`docs/auth-flows.md` 9): single-use transactions live in Redis so the
@@ -179,6 +197,7 @@ const app = buildServer({
     sessions,
     persistSession: (input) => loginRepository.persistSession(input),
     audit: { record: (event) => loginRepository.record(event) },
+    mfa: mfaDependencies,
     cookie: {
       secure: env.APP_URL.startsWith('https://'),
       idleTtlSeconds: env.SESSION_IDLE_TTL_SECONDS,
@@ -253,6 +272,12 @@ const app = buildServer({
     profiles: createPrismaAccountProfileRepository(prisma),
     passwords: passwordStore,
     audit: createPrismaAdminAudit(prisma),
+    mfa: {
+      repository: mfaRepository,
+      secretBox: mfaSecretBox,
+      issuer: new URL(env.APP_URL).host,
+      verify: verifyPassword,
+    },
   },
   adminKeys: {
     adminClientId: env.ADMIN_CLIENT_ID,

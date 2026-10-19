@@ -19,7 +19,7 @@ export interface LoginFormProps {
   locale: Locale;
   dir: 'rtl' | 'ltr';
   submitting: boolean;
-  errorCode: 'invalid_credentials' | 'network' | null;
+  errorCode: 'invalid_credentials' | 'network' | 'mfa_enrollment_required' | null;
   /** Prefills the identifier from `login_hint`; the user may still change it. */
   defaultIdentifier?: string;
   /** Optional social login block rendered above the password form, inside the same card. */
@@ -62,7 +62,9 @@ export function LoginForm({
       ? t('login.errorInvalid')
       : errorCode === 'network'
         ? t('login.errorNetwork')
-        : null;
+        : errorCode === 'mfa_enrollment_required'
+          ? t('login.mfa.enrollmentRequired')
+          : null;
 
   return (
     <main className="w-full max-w-sm rounded-lg border border-border bg-card p-6 shadow-sm">

@@ -55,6 +55,39 @@ export interface ChangePasswordResult {
   keptCurrentSession: true;
 }
 
+/** MFA status of the signed-in account (docs/auth-flows.md 7). */
+export interface AccountMfaFactor {
+  id: string;
+  type: 'totp' | 'webauthn';
+  name: string;
+  confirmed: boolean;
+  createdAt: string;
+  lastUsedAt: string | null;
+}
+
+export interface AccountMfaStatus {
+  factors: AccountMfaFactor[];
+  totp: AccountMfaFactor | null;
+  recoveryCodesRemaining: number;
+  available: boolean;
+}
+
+export interface TotpEnrollment {
+  factorId: string;
+  /** Base32 secret; returned exactly once and never again. */
+  secret: string;
+  otpauthUri: string;
+  algorithm: string;
+  digits: number;
+  period: number;
+}
+
+export interface TotpDisableInput {
+  password?: string;
+  code?: string;
+  factorId?: string;
+}
+
 export type AccountApiErrorKind =
   'unauthorized' | 'forbidden' | 'not_found' | 'conflict' | 'invalid' | 'network' | 'server';
 
@@ -109,6 +142,14 @@ export interface AccountApiClient {
     options?: { signal?: AbortSignal },
   ): Promise<AccountSessionPage>;
   closeSession(sid: string): Promise<{ revoked: boolean; alreadyRevoked: boolean }>;
+  getMfaStatus(options?: { signal?: AbortSignal }): Promise<AccountMfaStatus>;
+  enrollTotp(input?: { name?: string }): Promise<TotpEnrollment>;
+  verifyTotpEnrollment(input: { factorId: string; code: string }): Promise<{
+    ok: true;
+    recoveryCodes: string[];
+  }>;
+  disableTotp(input: TotpDisableInput): Promise<{ ok: true }>;
+  regenerateRecoveryCodes(input: { password: string }): Promise<{ recoveryCodes: string[] }>;
 }
 
 export interface AccountApiClientOptions {
@@ -198,6 +239,28 @@ export function createAccountApiClient(options: AccountApiClientOptions = {}): A
         `/api/v1/account/sessions/${encodeURIComponent(sid)}`,
         { method: 'DELETE' },
       ),
+    getMfaStatus: (callOptions = {}) =>
+      call<AccountMfaStatus>('/api/v1/account/mfa', { method: 'GET' }, callOptions.signal),
+    enrollTotp: (input = {}) =>
+      call<TotpEnrollment>('/api/v1/account/mfa/totp/enroll', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    verifyTotpEnrollment: (input) =>
+      call<{ ok: true; recoveryCodes: string[] }>('/api/v1/account/mfa/totp/verify', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    disableTotp: (input) =>
+      call<{ ok: true }>('/api/v1/account/mfa/totp/disable', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    regenerateRecoveryCodes: (input) =>
+      call<{ recoveryCodes: string[] }>('/api/v1/account/mfa/recovery-codes', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
   };
 }
 

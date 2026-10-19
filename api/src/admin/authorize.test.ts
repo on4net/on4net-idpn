@@ -257,4 +257,95 @@ describe('delegated admin mode', () => {
       error: 'insufficient_user_authentication',
     });
   });
+
+  it('accepts an MFA step-up token whose acr and amr prove the second factor', async () => {
+    const mfaToken = {
+      ...delegatedToken,
+      acr: 'urn:on4net:acr:mfa',
+      amr: ['pwd', 'totp'],
+    };
+    const options = guard({
+      verifier: verifier(mfaToken),
+      permissions: permissions([], ['idp:client-role:write']),
+      now: () => new Date(1_760_000_100 * 1000),
+    });
+
+    const result = await authorizeAdminRequest(request(tokenWith(mfaToken)), options, {
+      ...requirement,
+      delegatedPermission: 'idp:client-role:write',
+      stepUp: true,
+      requireMfa: true,
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it('rejects a fresh password-only token when MFA is required for step-up', async () => {
+    const options = guard({
+      verifier: verifier(delegatedToken),
+      permissions: permissions([], ['idp:client-role:write']),
+      now: () => new Date(1_760_000_100 * 1000),
+    });
+
+    const result = await authorizeAdminRequest(
+      request(tokenWith({ ...delegatedToken, acr: 'urn:on4net:acr:pwd', amr: ['pwd'] })),
+      options,
+      {
+        ...requirement,
+        delegatedPermission: 'idp:client-role:write',
+        stepUp: true,
+        requireMfa: true,
+      },
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      status: 403,
+      error: 'insufficient_user_authentication',
+    });
+  });
+
+  it('rejects an MFA step-up token outside the freshness window', async () => {
+    const mfaToken = {
+      ...delegatedToken,
+      acr: 'urn:on4net:acr:mfa',
+      amr: ['pwd', 'recovery'],
+    };
+    const result = await authorizeAdminRequest(
+      request(tokenWith(mfaToken)),
+      guard({
+        verifier: verifier(mfaToken),
+        permissions: permissions([], ['idp:client-role:write']),
+        now: () => new Date(1_760_000_000 * 1000 + 3_600_000),
+      }),
+      {
+        ...requirement,
+        delegatedPermission: 'idp:client-role:write',
+        stepUp: true,
+        requireMfa: true,
+      },
+    );
+    expect(result).toMatchObject({
+      ok: false,
+      status: 403,
+      error: 'insufficient_user_authentication',
+    });
+  });
+
+  it('ignores an acr claim without the matching amr entry', async () => {
+    const forged = { ...delegatedToken, acr: 'urn:on4net:acr:mfa', amr: ['pwd'] };
+    const result = await authorizeAdminRequest(
+      request(tokenWith(forged)),
+      guard({
+        verifier: verifier(forged),
+        permissions: permissions([], ['idp:client-role:write']),
+        now: () => new Date(1_760_000_100 * 1000),
+      }),
+      {
+        ...requirement,
+        delegatedPermission: 'idp:client-role:write',
+        stepUp: true,
+        requireMfa: true,
+      },
+    );
+    expect(result).toMatchObject({ ok: false, status: 403 });
+  });
 });

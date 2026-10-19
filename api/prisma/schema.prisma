@@ -63,6 +63,12 @@ enum MfaPolicy {
   required_all
 }
 
+/// MFA methods (docs/domain-model.md 2.4). TOTP is implemented in phase 4; WebAuthn follows.
+enum MfaFactorType {
+  totp
+  webauthn
+}
+
 enum LoginContextStatus {
   active
   disabled
@@ -151,6 +157,7 @@ model User {
   authorizationCodes AuthorizationCode[]
   memberships        ClientMembership[]  @relation("MembershipUser")
   invitations        ClientMembership[]  @relation("MembershipInviter")
+  mfaFactors         MfaFactor[]
 
   @@unique([tenantId, username])
   @@unique([tenantId, email])
@@ -216,6 +223,45 @@ model Client {
 
   @@index([tenantId, status])
   @@map("clients")
+}
+
+model MfaFactor {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId          String        @map("user_id") @db.Uuid
+  type            MfaFactorType
+  name            String        @default("authenticator") @db.VarChar(64)
+  /// AES-256-GCM envelope (`crypto/secret-box.ts`); only set for TOTP and never returned.
+  secretEncrypted Bytes?        @map("secret_encrypted")
+  credentialId    Bytes?        @map("credential_id")
+  publicKey       Bytes?        @map("public_key")
+  signCount       BigInt        @default(0) @map("sign_count")
+  confirmedAt     DateTime?     @map("confirmed_at") @db.Timestamptz(6)
+  lastUsedAt      DateTime?     @map("last_used_at") @db.Timestamptz(6)
+  /// Last accepted TOTP step; a code from this step or earlier is replayed and rejected.
+  lastUsedStep    BigInt?       @map("last_used_step")
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user          User              @relation(fields: [userId], references: [id], onDelete: Restrict)
+  recoveryCodes MfaRecoveryCode[]
+
+  @@index([userId, type])
+  // A user has at most one TOTP factor; the partial unique index lives in the migration because
+  // Prisma cannot express `WHERE type = 'totp'`.
+  @@map("mfa_factors")
+}
+
+/// One-time recovery codes: only the Argon2id hash is stored (docs/auth-flows.md 7.5).
+model MfaRecoveryCode {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  factorId  String    @map("factor_id") @db.Uuid
+  codeHash  String    @map("code_hash")
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  usedAt    DateTime? @map("used_at") @db.Timestamptz(6)
+
+  factor MfaFactor @relation(fields: [factorId], references: [id], onDelete: Cascade)
+
+  @@index([factorId, usedAt])
+  @@map("mfa_recovery_codes")
 }
 
 model ClientSecret {

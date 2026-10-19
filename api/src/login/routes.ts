@@ -4,6 +4,8 @@ import { sanitizeAuditMetadata } from '../audit/sanitize.js';
 import { authenticateWithPassword } from '../auth/authenticate.js';
 import { maskEmail } from '../auth/normalize.js';
 import { hashPassword } from '../auth/password.js';
+import { mfaRequirement } from '../mfa/policy.js';
+import type { MfaLoginDependencies, MfaPolicy } from '../mfa/mfa-types.js';
 import { serializeSessionCookie } from '../session/cookie.js';
 import type { RedisSessionStore } from '../session/store.js';
 import {
@@ -55,6 +57,8 @@ export interface LoginRouteOptions {
     idleTtlSeconds: number;
     absoluteTtlSeconds: number;
   };
+  /** Second-factor policy and challenge storage. Without it, login stays password-only. */
+  mfa?: MfaLoginDependencies;
   now?: () => Date;
 }
 
@@ -62,6 +66,7 @@ interface LoginBody {
   identifier?: string;
   password?: string;
   clientId?: string;
+  loginContext?: string;
   returnTo?: string;
 }
 
@@ -81,6 +86,8 @@ export function registerLoginRoute(app: FastifyInstance, options: LoginRouteOpti
     const body = (request.body ?? {}) as LoginBody;
     const identifier = body.identifier?.trim() ?? '';
     const password = body.password ?? '';
+    /** Login context key from the hosted UI; only selects the MFA policy. */
+    const loginContext = optionalLoginContext(body.loginContext);
 
     if (identifier === '' || password === '') {
       return reject(reply, options, request, body, undefined, 'missing_credentials');
@@ -127,6 +134,63 @@ export function registerLoginRoute(app: FastifyInstance, options: LoginRouteOpti
         }),
       });
       return reject(reply, options, request, body, user.id, result.reason);
+    }
+
+    const requirement = await resolveMfaRequirement(options, user, {
+      ...(body.clientId === undefined ? {} : { clientId: body.clientId }),
+      ...(loginContext === undefined ? {} : { loginContext }),
+    });
+    if (requirement === 'challenge' && options.mfa !== undefined) {
+      const redirectTo = sanitizeReturnTo(body.returnTo, options.appUrl);
+      const challenge = await options.mfa.challenges.create({
+        userId: user.id,
+        tenantId: user.tenantId,
+        ...(body.clientId === undefined ? {} : { clientId: body.clientId }),
+        ...(loginContext === undefined ? {} : { loginContext }),
+        ...(redirectTo === undefined ? {} : { returnTo: redirectTo }),
+        now: at,
+      });
+      await options.audit.record({
+        actorType: 'user',
+        actorId: user.id,
+        action: 'user.login.mfa_challenged',
+        targetType: 'user',
+        targetId: user.id,
+        ip: request.ip,
+        userAgent: request.headers['user-agent'] ?? null,
+        result: 'success',
+        metadata: sanitizeAuditMetadata({ methods: ['totp', 'recovery'] }),
+      });
+      // No session and no cookie until the second factor is verified (docs/auth-flows.md 7.3).
+      return reply
+        .code(200)
+        .header('Cache-Control', 'no-store')
+        .send({
+          ok: false,
+          mfa: 'challenge',
+          challengeToken: challenge.token,
+          expiresAt: challenge.record.expiresAt,
+          methods: ['totp', 'recovery'],
+        });
+    }
+    if (requirement === 'enrollment_required') {
+      await options.audit.record({
+        actorType: 'user',
+        actorId: user.id,
+        action: 'user.login.mfa_enrollment_required',
+        targetType: 'user',
+        targetId: user.id,
+        ip: request.ip,
+        userAgent: request.headers['user-agent'] ?? null,
+        result: 'failure',
+        metadata: sanitizeAuditMetadata({ reason: 'mfa_enrollment_required' }),
+      });
+      // The client/login context requires MFA for this account but no factor is enrolled.
+      // No session is issued: an admin without MFA must not sign in (docs/roadmap.md phase 4).
+      return reply.code(403).header('Cache-Control', 'no-store').send({
+        error: 'mfa_enrollment_required',
+        message: 'دومرحله‌ای برای این حساب الزامی است؛ ابتدا آن را فعال کنید.',
+      });
     }
 
     const session = await options.sessions.create({
@@ -212,4 +276,39 @@ async function reject(
     .code(401)
     .header('Cache-Control', 'no-store')
     .send({ error: LOGIN_FAILED_CODE, message: LOGIN_FAILED_MESSAGE });
+}
+
+/** Client-side login context keys are short slugs (`docs/login-contexts.md` 3.1). */
+function optionalLoginContext(value: string | undefined): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed === '' ? undefined : trimmed.slice(0, 64);
+}
+
+/**
+ * Decides whether the session may be issued now, or whether a second factor is required.
+ *
+ * The policy comes from the login context (falling back to the client) and `required_admins`
+ * consults the permission tables. Only confirmed TOTP factors exist in this phase.
+ */
+async function resolveMfaRequirement(
+  options: LoginRouteOptions,
+  user: { id: string },
+  input: { clientId?: string | undefined; loginContext?: string | undefined },
+): Promise<'none' | 'challenge' | 'enrollment_required'> {
+  if (options.mfa === undefined) {
+    return 'none';
+  }
+  const policy: MfaPolicy = await options.mfa.repository.resolveMfaPolicy({
+    clientId: input.clientId,
+    loginContext: input.loginContext,
+  });
+  const factor = await options.mfa.repository.findConfirmedTotp(user.id);
+  const isAdmin =
+    policy === 'required_admins'
+      ? await options.mfa.repository.isAdmin(user.id, input.clientId)
+      : false;
+  return mfaRequirement({ policy, hasConfirmedFactor: factor !== null, isAdmin });
 }

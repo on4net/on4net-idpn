@@ -24,6 +24,13 @@ import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 /** Environment variable that carries the key-encryption key (base64 of exactly 32 bytes). */
 export const SOCIAL_SECRET_KEY_ENV = 'SOCIAL_SECRET_KEY';
 
+/**
+ * Optional dedicated key for TOTP secrets (`docs/security.md` 9). Falling back to
+ * `SOCIAL_SECRET_KEY` keeps single-key deployments working, but production should supply a
+ * separate key so the two ciphertext families are not interchangeable.
+ */
+export const MFA_SECRET_KEY_ENV = 'MFA_SECRET_KEY';
+
 /** AES-256 requires a 256-bit key. */
 const KEY_BYTES = 32;
 const IV_BYTES = 12;
@@ -123,4 +130,33 @@ export function loadSocialSecretKey(env: SecretKeyEnv): Buffer | null {
     return null;
   }
   return parseSecretKey(raw);
+}
+
+export interface MfaSecretKeyEnv {
+  NODE_ENV?: string | undefined;
+  MFA_SECRET_KEY?: string | undefined;
+  SOCIAL_SECRET_KEY?: string | undefined;
+}
+
+/**
+ * Loads the key used for TOTP secrets. `MFA_SECRET_KEY` wins; `SOCIAL_SECRET_KEY` is the
+ * documented fallback for deployments with a single key. Returns `null` in development/test
+ * when neither is set, in which case TOTP enrollment answers `503` instead of storing a
+ * secret in plaintext.
+ */
+export function loadMfaSecretKey(env: MfaSecretKeyEnv): Buffer | null {
+  const raw = env.MFA_SECRET_KEY?.trim();
+  if (raw !== undefined && raw !== '') {
+    return parseSecretKey(raw);
+  }
+  const fallback = env.SOCIAL_SECRET_KEY?.trim();
+  if (fallback !== undefined && fallback !== '') {
+    return parseSecretKey(fallback);
+  }
+  if (env.NODE_ENV === 'production') {
+    throw new SecretBoxError(
+      `${MFA_SECRET_KEY_ENV} (or ${SOCIAL_SECRET_KEY_ENV}) is required in production to encrypt TOTP secrets`,
+    );
+  }
+  return null;
 }

@@ -1,5 +1,6 @@
 import type { FastifyRequest } from 'fastify';
 
+import { MFA_ACR, MFA_AMR_METHODS } from '../mfa/mfa-types.js';
 import type { AdminPrincipal } from './admin-types.js';
 
 /** Scope that only the global admin client is allowed to receive (docs/api.md 3). */
@@ -58,6 +59,12 @@ export interface AdminRequirement {
   /** Requires an authentication newer than `stepUpMaxAgeSeconds`. */
   stepUp?: boolean;
   /**
+   * Additionally requires proof that the recent authentication was multi-factor
+   * (`acr = urn:on4net:acr:mfa` and `amr` contains a second factor). Used for operations
+   * where a fresh password entry alone is not enough, such as sensitive role changes.
+   */
+  requireMfa?: boolean;
+  /**
    * Accept any valid admin token without checking a fine-grained permission. Only for
    * self-service endpoints that act on the caller's own resources (`/api/v1/me/*`).
    */
@@ -109,6 +116,24 @@ const denied = (
   error: Extract<AdminAuthorization, { ok: false }>['error'],
   message: string,
 ): AdminAuthorization => ({ ok: false, status, error, message });
+
+/**
+ * True when the token proves a multi-factor authentication: the documented ACR plus an AMR
+ * entry for a second factor (docs/auth-flows.md 7.3). Both claims come from the signed token.
+ */
+export function tokenProvesMfa(payload: Record<string, unknown>): boolean {
+  if (payload['acr'] !== MFA_ACR) {
+    return false;
+  }
+  const amr = payload['amr'];
+  if (!Array.isArray(amr)) {
+    return false;
+  }
+  return amr.some(
+    (method) =>
+      typeof method === 'string' && (MFA_AMR_METHODS as readonly string[]).includes(method),
+  );
+}
 
 /**
  * Authorizes an Admin API request (docs/api.md 3, docs/security.md 4).
@@ -213,6 +238,15 @@ export async function authorizeAdminRequest(
         403,
         'insufficient_user_authentication',
         'recent authentication is required for this operation',
+      );
+    }
+    // A fresh password entry is not proof of MFA: the token must carry the MFA ACR and an
+    // AMR entry for the second factor that was actually used.
+    if (requirement.requireMfa === true && !tokenProvesMfa(payload)) {
+      return denied(
+        403,
+        'insufficient_user_authentication',
+        'multi-factor authentication is required for this operation',
       );
     }
   }

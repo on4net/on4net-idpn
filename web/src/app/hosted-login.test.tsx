@@ -1,6 +1,7 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import type { ComponentProps } from 'react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { IdpnRoot } from './idpn-root';
 import { HostedLoginPage, normalizeLoginHint } from './hosted-login';
@@ -493,5 +494,279 @@ describe('HostedLoginPage', () => {
       'ارتباط با سرور برقرار نشد. دوباره تلاش کنید.',
     );
     vi.unstubAllGlobals();
+  });
+});
+
+describe('HostedLoginPage MFA step', () => {
+  const challenge = {
+    ok: false as const,
+    reason: 'mfa_required' as const,
+    challengeToken: 'challenge-token-value-1234567890',
+  };
+
+  const submitWithPassword = async (user: ReturnType<typeof userEvent.setup>) => {
+    await user.type(screen.getByLabelText('ایمیل یا نام کاربری'), 'sara@example.com');
+    await user.type(screen.getByLabelText('رمز عبور'), 'a-very-long-password');
+    await user.click(screen.getByRole('button', { name: 'ورود' }));
+  };
+
+  const renderWith = (
+    verify: ComponentProps<typeof HostedLoginPage>['verify'],
+    navigate = vi.fn(),
+  ) =>
+    render(
+      <HostedLoginPage
+        search="?client_id=app-a&return_to=%2Foauth2%2Fauthorize%3Fclient_id%3Dapp-a"
+        fetchConfig={vi.fn().mockResolvedValue(null)}
+        submit={vi.fn().mockResolvedValue(challenge)}
+        verify={verify}
+        navigate={navigate}
+      />,
+    );
+
+  it('shows the one-time-code step after the password and completes the login', async () => {
+    const user = userEvent.setup();
+    const verify = vi.fn().mockResolvedValue({ ok: true });
+    const navigate = vi.fn();
+    renderWith(verify, navigate);
+
+    await submitWithPassword(user);
+
+    expect(await screen.findByRole('heading', { name: 'ورود دومرحله‌ای' })).toBeVisible();
+    const input = screen.getByLabelText('کد ۶ رقمی');
+    expect(input).toHaveAttribute('autocomplete', 'one-time-code');
+    expect(input).toHaveAttribute('inputmode', 'numeric');
+    expect(input).toHaveAttribute('dir', 'ltr');
+
+    await user.type(input, '123456');
+    await user.click(screen.getByRole('button', { name: 'تأیید و ورود' }));
+
+    expect(verify).toHaveBeenCalledWith({
+      challengeToken: challenge.challengeToken,
+      code: '123456',
+      method: 'totp',
+    });
+    expect(navigate).toHaveBeenCalledWith('/oauth2/authorize?client_id=app-a');
+    expect(screen.getByTestId('idpn-root')).toHaveAttribute('dir', 'rtl');
+  });
+
+  it('switches to a recovery code and normalizes formatting', async () => {
+    const user = userEvent.setup();
+    const verify = vi.fn().mockResolvedValue({ ok: true });
+    renderWith(verify);
+
+    await submitWithPassword(user);
+    await user.click(await screen.findByRole('button', { name: 'استفاده از کد بازیابی' }));
+
+    const input = screen.getByLabelText('کد بازیابی');
+    expect(screen.getByText('کد بازیابی ۱۰ کاراکتری را با خط تیره وارد کنید.')).toBeVisible();
+    await user.type(input, 'abcde-fghjk');
+    await user.click(screen.getByRole('button', { name: 'تأیید و ورود' }));
+
+    expect(verify).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 'abcde-fghjk', method: 'recovery' }),
+    );
+  });
+
+  it('validates the code before calling the API', async () => {
+    const user = userEvent.setup();
+    const verify = vi.fn();
+    renderWith(verify);
+
+    await submitWithPassword(user);
+    await user.click(await screen.findByRole('button', { name: 'تأیید و ورود' }));
+    expect(screen.getByText('کد تأیید را وارد کنید.')).toBeVisible();
+
+    await user.type(screen.getByLabelText('کد ۶ رقمی'), '12');
+    await user.click(screen.getByRole('button', { name: 'تأیید و ورود' }));
+    expect(screen.getByText('کد باید ۶ رقم باشد.')).toBeVisible();
+    expect(verify).not.toHaveBeenCalled();
+  });
+
+  it('announces an invalid code and a rate-limited challenge', async () => {
+    const user = userEvent.setup();
+    const verify = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, reason: 'invalid_code' })
+      .mockResolvedValueOnce({ ok: false, reason: 'rate_limited' });
+    renderWith(verify);
+
+    await submitWithPassword(user);
+    const input = await screen.findByLabelText('کد ۶ رقمی');
+    await user.type(input, '000000');
+    await user.click(screen.getByRole('button', { name: 'تأیید و ورود' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('کد واردشده معتبر نیست.');
+    expect(screen.getByRole('alert')).toHaveAttribute('aria-live', 'assertive');
+
+    await user.click(screen.getByRole('button', { name: 'تأیید و ورود' }));
+    expect(
+      await screen.findByText('تلاش‌های ناموفق بیش از حد بود. دوباره وارد شوید.'),
+    ).toBeVisible();
+  });
+
+  it('explains an expired challenge without pretending the code was wrong', async () => {
+    const user = userEvent.setup();
+    renderWith(vi.fn().mockResolvedValue({ ok: false, reason: 'expired' }));
+
+    await submitWithPassword(user);
+    await user.type(await screen.findByLabelText('کد ۶ رقمی'), '123456');
+    await user.click(screen.getByRole('button', { name: 'تأیید و ورود' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'زمان این ورود به پایان رسیده است. دوباره وارد شوید.',
+    );
+  });
+
+  it('returns to the password step and drops the challenge token', async () => {
+    const user = userEvent.setup();
+    renderWith(vi.fn());
+
+    await submitWithPassword(user);
+    await user.click(await screen.findByRole('button', { name: 'بازگشت به ورود' }));
+
+    expect(screen.getByRole('heading', { name: 'ورود به حساب' })).toBeVisible();
+    expect(screen.queryByLabelText('کد ۶ رقمی')).toBeNull();
+  });
+
+  it('tells the user when the policy requires enrollment', async () => {
+    const user = userEvent.setup();
+    render(
+      <HostedLoginPage
+        search="?client_id=app-required"
+        fetchConfig={vi.fn().mockResolvedValue(null)}
+        submit={vi.fn().mockResolvedValue({ ok: false, reason: 'mfa_enrollment_required' })}
+        navigate={vi.fn()}
+      />,
+    );
+
+    await submitWithPassword(user);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'برای این حساب ورود دومرحله‌ای الزامی است. ابتدا آن را در بخش امنیت حساب فعال کنید.',
+    );
+  });
+});
+
+describe('HostedLoginPage default API calls', () => {
+  const jsonResponse = (body: unknown, status = 200): Response =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+  const stubFetch = (
+    handler: (url: string, init?: RequestInit) => Response | Promise<Response>,
+  ): void => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => handler(String(input), init)),
+    );
+  };
+
+  const signIn = async (user: ReturnType<typeof userEvent.setup>) => {
+    await user.type(screen.getByLabelText('ایمیل یا نام کاربری'), 'sara@example.com');
+    await user.type(screen.getByLabelText('رمز عبور'), 'a-very-long-password');
+    await user.click(screen.getByRole('button', { name: 'ورود' }));
+  };
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('turns a challenge response into the second-factor step', async () => {
+    const user = userEvent.setup();
+    stubFetch((url) =>
+      url.includes('/public-config')
+        ? jsonResponse({}, 404)
+        : jsonResponse({ ok: false, mfa: 'challenge', challengeToken: 'token-from-api' }),
+    );
+    render(<HostedLoginPage search="?client_id=app-a" navigate={vi.fn()} />);
+
+    await signIn(user);
+
+    expect(await screen.findByRole('heading', { name: 'ورود دومرحله‌ای' })).toBeVisible();
+  });
+
+  it('shows the enrollment-required message for a 403 with that code', async () => {
+    const user = userEvent.setup();
+    stubFetch((url) =>
+      url.includes('/public-config')
+        ? jsonResponse({}, 404)
+        : jsonResponse({ error: 'mfa_enrollment_required' }, 403),
+    );
+    render(<HostedLoginPage search="?client_id=app-a" navigate={vi.fn()} />);
+
+    await signIn(user);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'برای این حساب ورود دومرحله‌ای الزامی است. ابتدا آن را در بخش امنیت حساب فعال کنید.',
+    );
+  });
+
+  it('reports any other 403 as a network error', async () => {
+    const user = userEvent.setup();
+    stubFetch((url) =>
+      url.includes('/public-config')
+        ? jsonResponse({}, 404)
+        : jsonResponse({ error: 'forbidden' }, 403),
+    );
+    render(<HostedLoginPage search="?client_id=app-a" navigate={vi.fn()} />);
+
+    await signIn(user);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'ارتباط با سرور برقرار نشد. دوباره تلاش کنید.',
+    );
+  });
+
+  it('completes the login with the verify endpoint and follows redirectTo', async () => {
+    const user = userEvent.setup();
+    const navigate = vi.fn();
+    stubFetch((url) => {
+      if (url.includes('/public-config')) {
+        return jsonResponse({}, 404);
+      }
+      if (url.endsWith('/api/v1/login/mfa/verify')) {
+        return jsonResponse({ ok: true, redirectTo: '/oauth2/authorize?client_id=app-a' });
+      }
+      return jsonResponse({ ok: false, mfa: 'challenge', challengeToken: 'token-from-api' });
+    });
+    render(<HostedLoginPage search="?client_id=app-a" navigate={navigate} />);
+
+    await signIn(user);
+    await user.type(await screen.findByLabelText('کد ۶ رقمی'), '123456');
+    await user.click(screen.getByRole('button', { name: 'تأیید و ورود' }));
+
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith('/oauth2/authorize?client_id=app-a'));
+  });
+
+  it.each([
+    [429, { error: 'mfa_rate_limited' }, 'تلاش‌های ناموفق بیش از حد بود. دوباره وارد شوید.'],
+    [400, { error: 'invalid_request' }, 'کد واردشده معتبر نیست.'],
+    [
+      401,
+      { error: 'mfa_challenge_invalid' },
+      'زمان این ورود به پایان رسیده است. دوباره وارد شوید.',
+    ],
+    [401, { error: 'invalid_mfa_code' }, 'کد واردشده معتبر نیست.'],
+  ])('maps a %i verify failure to a safe message', async (status, body, message) => {
+    const user = userEvent.setup();
+    stubFetch((url) => {
+      if (url.includes('/public-config')) {
+        return jsonResponse({}, 404);
+      }
+      if (url.endsWith('/api/v1/login/mfa/verify')) {
+        return jsonResponse(body, status);
+      }
+      return jsonResponse({ ok: false, mfa: 'challenge', challengeToken: 'token-from-api' });
+    });
+    render(<HostedLoginPage search="?client_id=app-a" navigate={vi.fn()} />);
+
+    await signIn(user);
+    await user.type(await screen.findByLabelText('کد ۶ رقمی'), '123456');
+    await user.click(screen.getByRole('button', { name: 'تأیید و ورود' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(message);
   });
 });

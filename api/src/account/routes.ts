@@ -2,8 +2,23 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
 import type { AdminAudit } from '../admin/admin-types.js';
 import type { AdminSessionRepository } from '../admin/sessions/session-types.js';
+import {
+  disableTotp,
+  enrollTotp,
+  getMfaStatus,
+  regenerateRecoveryCodes,
+  verifyTotpEnrollment,
+  type AccountMfaDependencies,
+} from './mfa.js';
 import type { AccountProfile, AccountProfileRepository } from './account-types.js';
-import { accountSessionsQuerySchema, changePasswordSchema } from './schemas.js';
+import {
+  accountSessionsQuerySchema,
+  changePasswordSchema,
+  disableTotpSchema,
+  enrollTotpSchema,
+  regenerateRecoveryCodesSchema,
+  verifyTotpEnrollmentSchema,
+} from './schemas.js';
 import { hashPassword, type Argon2Params } from '../auth/password.js';
 import { readSessionId } from '../session/cookie.js';
 import type { IdpSession, RevokeReason } from '../session/types.js';
@@ -22,6 +37,8 @@ export interface AccountRoutesOptions {
   profiles: AccountProfileRepository;
   passwords: PasswordStore;
   audit: AdminAudit;
+  /** MFA surface (docs/auth-flows.md 7). Omitted only when the deployment has no key. */
+  mfa?: AccountMfaDependencies;
   hash?: (password: string, params: Argon2Params) => Promise<string>;
   now?: () => Date;
 }
@@ -36,7 +53,10 @@ type ProblemSlug =
   | 'password-policy'
   | 'password-reuse'
   | 'validation-error'
-  | 'not-found';
+  | 'not-found'
+  | 'conflict'
+  | 'invalid-mfa-code'
+  | 'service-unavailable';
 
 interface ProblemExtension {
   code?: string;
@@ -50,7 +70,7 @@ interface ProblemExtension {
  */
 function sendProblem(
   reply: FastifyReply,
-  status: 400 | 401 | 403 | 404 | 409 | 422,
+  status: 400 | 401 | 403 | 404 | 409 | 422 | 503,
   slug: ProblemSlug,
   title: string,
   detail: string,
@@ -350,4 +370,240 @@ export function registerAccountRoutes(app: FastifyInstance, options: AccountRout
       return noStore(reply).send({ revoked: true, alreadyRevoked: !revoked });
     },
   );
+
+  /** MFA mutations are cookie-authenticated, so they need the same CSRF guard as password. */
+  const guardMfaMutation = (request: FastifyRequest, reply: FastifyReply): boolean => {
+    if (!isSameOriginRequest(request, options.appUrl) || !hasJsonContentType(request)) {
+      sendProblem(reply, 403, 'forbidden', 'Forbidden', 'same-origin JSON request required', {
+        code: 'cross_origin_request',
+      });
+      return false;
+    }
+    return true;
+  };
+
+  const mfaUnavailable = (reply: FastifyReply): FastifyReply =>
+    sendProblem(
+      reply,
+      503,
+      'service-unavailable',
+      'MFA unavailable',
+      'this deployment cannot store TOTP secrets',
+      { code: 'mfa_unavailable' },
+    );
+
+  const invalidBody = (reply: FastifyReply, instance: string, detail: string): FastifyReply =>
+    sendProblem(reply, 422, 'validation-error', 'Validation failed', detail, { instance });
+
+  app.get('/api/v1/account/mfa', async (request, reply) => {
+    const auth = await authenticate(request, reply);
+    if (auth === null) {
+      return reply;
+    }
+    if (options.mfa === undefined) {
+      return mfaUnavailable(reply);
+    }
+    const status = await getMfaStatus(options.mfa, auth.profile.id);
+    return noStore(reply).send({
+      ...status,
+      available: options.mfa.secretBox !== null,
+    });
+  });
+
+  app.post('/api/v1/account/mfa/totp/enroll', async (request, reply) => {
+    if (!guardMfaMutation(request, reply)) {
+      return reply;
+    }
+    const auth = await authenticate(request, reply);
+    if (auth === null) {
+      return reply;
+    }
+    if (options.mfa === undefined) {
+      return mfaUnavailable(reply);
+    }
+    const parsed = enrollTotpSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return invalidBody(reply, '/api/v1/account/mfa/totp/enroll', 'invalid request body');
+    }
+
+    const result = await enrollTotp(options.mfa, {
+      userId: auth.profile.id,
+      accountName: auth.profile.email,
+      ...(parsed.data.name === undefined ? {} : { name: parsed.data.name }),
+    });
+    if (!result.ok) {
+      if (result.reason === 'unavailable') {
+        return mfaUnavailable(reply);
+      }
+      return sendProblem(
+        reply,
+        409,
+        'conflict',
+        'TOTP already enrolled',
+        'a confirmed TOTP factor already exists for this account',
+        { code: 'totp_already_enrolled' },
+      );
+    }
+    // The secret is returned exactly once and never stored in plaintext or audited.
+    return noStore(reply).code(201).send({
+      factorId: result.factorId,
+      secret: result.secret,
+      otpauthUri: result.otpauthUri,
+      algorithm: 'SHA1',
+      digits: 6,
+      period: 30,
+    });
+  });
+
+  app.post('/api/v1/account/mfa/totp/verify', async (request, reply) => {
+    if (!guardMfaMutation(request, reply)) {
+      return reply;
+    }
+    const auth = await authenticate(request, reply);
+    if (auth === null) {
+      return reply;
+    }
+    if (options.mfa === undefined) {
+      return mfaUnavailable(reply);
+    }
+    const parsed = verifyTotpEnrollmentSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return invalidBody(reply, '/api/v1/account/mfa/totp/verify', 'invalid request body');
+    }
+
+    const result = await verifyTotpEnrollment(options.mfa, {
+      userId: auth.profile.id,
+      factorId: parsed.data.factorId,
+      code: parsed.data.code,
+    });
+    if (result.ok) {
+      return noStore(reply).send({ ok: true, recoveryCodes: result.recoveryCodes });
+    }
+    if (result.reason === 'not_found') {
+      return sendProblem(reply, 404, 'not-found', 'Not found', 'factor does not exist', {
+        code: 'mfa_factor_not_found',
+      });
+    }
+    if (result.reason === 'already_confirmed') {
+      return sendProblem(
+        reply,
+        409,
+        'conflict',
+        'Already confirmed',
+        'the factor is already confirmed',
+        { code: 'totp_already_confirmed' },
+      );
+    }
+    if (result.reason === 'unavailable') {
+      return mfaUnavailable(reply);
+    }
+    return sendProblem(
+      reply,
+      400,
+      'invalid-mfa-code',
+      'Invalid code',
+      'the verification code is not valid',
+      { code: 'invalid_mfa_code' },
+    );
+  });
+
+  app.post('/api/v1/account/mfa/totp/disable', async (request, reply) => {
+    if (!guardMfaMutation(request, reply)) {
+      return reply;
+    }
+    const auth = await authenticate(request, reply);
+    if (auth === null) {
+      return reply;
+    }
+    if (options.mfa === undefined) {
+      return mfaUnavailable(reply);
+    }
+    const parsed = disableTotpSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return invalidBody(reply, '/api/v1/account/mfa/totp/disable', 'invalid request body');
+    }
+
+    const result = await disableTotp(options.mfa, {
+      userId: auth.profile.id,
+      ...(parsed.data.factorId === undefined ? {} : { factorId: parsed.data.factorId }),
+      ...(parsed.data.password === undefined ? {} : { password: parsed.data.password }),
+      ...(parsed.data.code === undefined ? {} : { code: parsed.data.code }),
+      actorIp: request.ip ?? null,
+      userAgent: request.headers['user-agent'] ?? null,
+    });
+    if (result.ok) {
+      return noStore(reply).send({ ok: true });
+    }
+    if (result.reason === 'not_found') {
+      return sendProblem(reply, 404, 'not-found', 'Not found', 'factor does not exist', {
+        code: 'mfa_factor_not_found',
+      });
+    }
+    if (result.reason === 'invalid_password') {
+      return sendProblem(
+        reply,
+        400,
+        'invalid-current-password',
+        'Invalid current password',
+        'the current password is incorrect',
+        { code: 'invalid_current_password' },
+      );
+    }
+    if (result.reason === 'invalid_code') {
+      return sendProblem(
+        reply,
+        400,
+        'invalid-mfa-code',
+        'Invalid code',
+        'the verification code is not valid',
+        { code: 'invalid_mfa_code' },
+      );
+    }
+    return sendProblem(
+      reply,
+      401,
+      'unauthorized',
+      'Unauthorized',
+      'the account is no longer available',
+      { code: 'account_unavailable' },
+    );
+  });
+
+  app.post('/api/v1/account/mfa/recovery-codes', async (request, reply) => {
+    if (!guardMfaMutation(request, reply)) {
+      return reply;
+    }
+    const auth = await authenticate(request, reply);
+    if (auth === null) {
+      return reply;
+    }
+    if (options.mfa === undefined) {
+      return mfaUnavailable(reply);
+    }
+    const parsed = regenerateRecoveryCodesSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return invalidBody(reply, '/api/v1/account/mfa/recovery-codes', 'invalid request body');
+    }
+
+    const result = await regenerateRecoveryCodes(options.mfa, {
+      userId: auth.profile.id,
+      password: parsed.data.password,
+    });
+    if (result.ok) {
+      return noStore(reply).send({ recoveryCodes: result.recoveryCodes });
+    }
+    if (result.reason === 'not_found') {
+      return sendProblem(reply, 404, 'not-found', 'Not found', 'no confirmed factor exists', {
+        code: 'mfa_factor_not_found',
+      });
+    }
+    return sendProblem(
+      reply,
+      400,
+      'invalid-current-password',
+      'Invalid current password',
+      'the current password is incorrect',
+      { code: 'invalid_current_password' },
+    );
+  });
 }

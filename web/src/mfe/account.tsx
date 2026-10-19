@@ -25,6 +25,7 @@ import {
   type AccountProfile,
   type AccountSession,
 } from './account-api-client';
+import { MfaSection } from './mfa-section';
 
 export interface AccountEvent {
   type: 'auth:error';
@@ -70,9 +71,9 @@ const isAbort = (error: unknown): boolean =>
 /**
  * `account` micro-frontend module (docs/micro-frontend.md 3).
  *
- * Renders the signed-in user's profile, password change and active sessions. The same-origin
- * IdP session cookie authenticates every call, so no token is read, stored or emitted.
- * The MFA section is a deliberately disabled placeholder until phase 4.
+ * Renders the signed-in user's profile, password change, active sessions and MFA. The
+ * same-origin IdP session cookie authenticates every call, so no token is read, stored or
+ * emitted.
  */
 export function Account({
   apiBaseUrl,
@@ -523,20 +524,7 @@ export function Account({
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <h2 className="text-lg font-semibold leading-none">{t('account.mfa.title')}</h2>
-            <Badge variant="outline">{t('account.mfa.badge')}</Badge>
-          </div>
-          <CardDescription>{t('account.mfa.description')}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Button type="button" variant="outline" disabled aria-disabled="true">
-            {t('account.mfa.button')}
-          </Button>
-        </CardContent>
-      </Card>
+      <MfaSection api={api} locale={activeLocale} t={t} onEvent={onEvent} />
     </section>
   );
 }

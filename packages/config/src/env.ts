@@ -133,6 +133,14 @@ export const serverEnvSchema = z.object({
     emptyToUndefined,
     z.string().refine(isSecretKey, 'must be the base64 encoding of exactly 32 bytes').optional(),
   ),
+  /**
+   * Optional dedicated key-encryption key for TOTP secrets. Falls back to
+   * `SOCIAL_SECRET_KEY`; base64 of exactly 32 bytes.
+   */
+  MFA_SECRET_KEY: z.preprocess(
+    emptyToUndefined,
+    z.string().refine(isSecretKey, 'must be the base64 encoding of exactly 32 bytes').optional(),
+  ),
   SMTP_URL: z.preprocess(
     emptyToUndefined,
     z

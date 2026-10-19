@@ -24,6 +24,8 @@ const EXPECTED_TABLES = [
   'client_social_providers',
   'client_login_contexts',
   'client_memberships',
+  'mfa_factors',
+  'mfa_recovery_codes',
   'permissions',
   'roles',
   'role_permissions',
@@ -160,6 +162,43 @@ describe('initial schema', () => {
     });
   });
 
+  it('allows one TOTP factor per user and cascades its recovery codes', async () => {
+    await inTransaction(async () => {
+      const tenantId = await insertTenant();
+      const userId = await insertUser(tenantId);
+      const { rows } = await client.query<{ id: string }>(
+        `INSERT INTO mfa_factors (user_id, type, secret_encrypted, confirmed_at)
+         VALUES ($1, 'totp', '\\x00'::bytea, now()) RETURNING id`,
+        [userId],
+      );
+      const factor = rows[0];
+      if (factor === undefined) {
+        throw new Error('failed to insert MFA factor');
+      }
+
+      await expectSqlError(
+        `INSERT INTO mfa_factors (user_id, type) VALUES ($1, 'totp')`,
+        [userId],
+        '23505',
+      );
+      // WebAuthn authenticators are multiple per user, so the partial index must not apply.
+      await client.query(`INSERT INTO mfa_factors (user_id, type) VALUES ($1, 'webauthn')`, [
+        userId,
+      ]);
+
+      await client.query(
+        `INSERT INTO mfa_recovery_codes (factor_id, code_hash) VALUES ($1, 'hash')`,
+        [factor.id],
+      );
+      await client.query('DELETE FROM mfa_factors WHERE id = $1', [factor.id]);
+      const remaining = await client.query<{ count: string }>(
+        `SELECT count(*)::text AS count FROM mfa_recovery_codes WHERE factor_id = $1`,
+        [factor.id],
+      );
+      expect(remaining.rows[0]?.count).toBe('0');
+    });
+  });
+
   it('enforces a single membership per client, context and user', async () => {
     await inTransaction(async () => {
       const tenantId = await insertTenant();
@@ -284,9 +323,11 @@ describe('initial schema', () => {
 
   it('rolls back and re-applies the migrations', async () => {
     const latest = await rollbackLatestMigration({ connectionString });
-    expect(latest).toBe('0003_audit_events_append_only');
+    expect(latest).toBe('0004_mfa_factors');
     const second = await rollbackLatestMigration({ connectionString });
-    expect(second).toBe('0002_assignments_nulls_not_distinct');
+    expect(second).toBe('0003_audit_events_append_only');
+    const third = await rollbackLatestMigration({ connectionString });
+    expect(third).toBe('0002_assignments_nulls_not_distinct');
     const rolledBack = await rollbackLatestMigration({ connectionString });
     expect(rolledBack).toBe('0001_init');
 

@@ -68,7 +68,44 @@ interface FakeClient {
   changePassword: ReturnType<typeof vi.fn>;
   listSessions: ReturnType<typeof vi.fn>;
   closeSession: ReturnType<typeof vi.fn>;
+  getMfaStatus: ReturnType<typeof vi.fn>;
+  enrollTotp: ReturnType<typeof vi.fn>;
+  verifyTotpEnrollment: ReturnType<typeof vi.fn>;
+  disableTotp: ReturnType<typeof vi.fn>;
+  regenerateRecoveryCodes: ReturnType<typeof vi.fn>;
 }
+
+const recoveryCodes = Array.from({ length: 10 }, (_, index) => `ABCDE-FGHJ${index}`);
+
+const enabledMfa = {
+  factors: [
+    {
+      id: 'factor-1',
+      type: 'totp' as const,
+      name: 'authenticator',
+      confirmed: true,
+      createdAt: '2026-10-19T09:00:00.000Z',
+      lastUsedAt: null,
+    },
+  ],
+  totp: {
+    id: 'factor-1',
+    type: 'totp' as const,
+    name: 'authenticator',
+    confirmed: true,
+    createdAt: '2026-10-19T09:00:00.000Z',
+    lastUsedAt: null,
+  },
+  recoveryCodesRemaining: 8,
+  available: true,
+};
+
+const disabledMfa = {
+  factors: [],
+  totp: null,
+  recoveryCodesRemaining: 0,
+  available: true,
+};
 
 function fakeClient(overrides: Partial<Record<keyof AccountApiClient, unknown>> = {}): FakeClient {
   const getProfile = vi.fn().mockResolvedValue(profile);
@@ -80,23 +117,41 @@ function fakeClient(overrides: Partial<Record<keyof AccountApiClient, unknown>> 
   });
   const listSessions = vi.fn().mockResolvedValue({ items: sessions, page: 1, limit: 25, total: 2 });
   const closeSession = vi.fn().mockResolvedValue({ revoked: true, alreadyRevoked: false });
+  const getMfaStatus = vi.fn().mockResolvedValue(disabledMfa);
+  const enrollTotp = vi.fn().mockResolvedValue({
+    factorId: 'factor-1',
+    secret: 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ',
+    otpauthUri:
+      'otpauth://totp/auth.example.com:sara%40example.com?secret=GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ',
+    algorithm: 'SHA1',
+    digits: 6,
+    period: 30,
+  });
+  const verifyTotpEnrollment = vi.fn().mockResolvedValue({ ok: true, recoveryCodes });
+  const disableTotp = vi.fn().mockResolvedValue({ ok: true });
+  const regenerateRecoveryCodes = vi.fn().mockResolvedValue({ recoveryCodes });
 
   const client = {
     getProfile,
     changePassword,
     listSessions,
     closeSession,
+    getMfaStatus,
+    enrollTotp,
+    verifyTotpEnrollment,
+    disableTotp,
+    regenerateRecoveryCodes,
     ...overrides,
   } as unknown as AccountApiClient;
 
-  return { client, getProfile, changePassword, listSessions, closeSession };
+  return { client, ...(client as unknown as Omit<FakeClient, 'client'>) };
 }
 
 const renderAccount = (fake: FakeClient, locale = 'fa-IR') =>
   render(<Account apiClient={fake.client} locale={locale} onEvent={undefined} />);
 
 describe('Account MFE', () => {
-  it('renders the Persian profile, sessions and the disabled MFA placeholder', async () => {
+  it('renders the Persian profile, sessions and the MFA section', async () => {
     const fake = fakeClient();
     const { container } = renderAccount(fake);
 
@@ -106,8 +161,9 @@ describe('Account MFE', () => {
     expect(screen.getByText('فعال')).toBeVisible();
     expect(screen.getByText('نشست فعلی')).toBeVisible();
     expect(screen.getByRole('button', { name: 'بستن نشست s2' })).toBeInTheDocument();
-    const mfa = screen.getByRole('button', { name: 'فعال‌سازی MFA (فاز ۴)' });
-    expect(mfa).toBeDisabled();
+    expect(screen.getByTestId('mfa-section')).toBeVisible();
+    expect(screen.getByTestId('mfa-badge')).toHaveTextContent('غیرفعال');
+    expect(screen.getByRole('button', { name: 'فعال‌سازی' })).toBeEnabled();
     expect(container.querySelector('[data-testid="account-module"]')).toHaveAttribute('dir', 'rtl');
   });
 
@@ -308,5 +364,216 @@ describe('Account MFE', () => {
     expect(await screen.findByText('برای مشاهده حساب باید وارد شوید.')).toBeVisible();
     expect(events).toEqual([{ type: 'auth:error', code: 'unauthorized' }]);
     expect(JSON.stringify(events).toLowerCase()).not.toContain('token');
+  });
+});
+
+describe('Account MFA section', () => {
+  it('enrolls TOTP, shows the recovery codes once and refreshes the status', async () => {
+    const fake = fakeClient();
+    fake.getMfaStatus.mockResolvedValueOnce(disabledMfa).mockResolvedValue(enabledMfa);
+    renderAccount(fake);
+    await screen.findByText('سارا محمدی');
+    const user = userEvent.setup();
+
+    await user.click(screen.getByTestId('mfa-enable'));
+
+    expect(fake.enrollTotp).toHaveBeenCalledTimes(1);
+    const secret = await screen.findByTestId('mfa-secret');
+    expect(secret).toHaveTextContent('GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ');
+    expect(secret).toHaveAttribute('dir', 'ltr');
+
+    const codeInput = screen.getByLabelText('کد ۶ رقمی');
+    expect(codeInput).toHaveAttribute('autocomplete', 'one-time-code');
+    await user.type(codeInput, '123456');
+    await user.click(screen.getByTestId('mfa-verify'));
+
+    expect(fake.verifyTotpEnrollment).toHaveBeenCalledWith({
+      factorId: 'factor-1',
+      code: '123456',
+    });
+    const codes = await screen.findByTestId('mfa-recovery-codes');
+    expect(codes).toHaveTextContent(recoveryCodes[0] ?? '');
+    expect(codes).toHaveTextContent('هر کد فقط یک بار قابل استفاده است.');
+
+    await user.click(screen.getByTestId('mfa-recovery-done'));
+    expect(screen.queryByTestId('mfa-recovery-codes')).toBeNull();
+    // The status is reloaded after confirmation: the badge now shows the enabled state.
+    expect(await screen.findByTestId('mfa-badge')).toHaveTextContent('فعال');
+  });
+
+  it('validates the confirmation code before calling the API', async () => {
+    const fake = fakeClient();
+    renderAccount(fake);
+    await screen.findByText('سارا محمدی');
+    const user = userEvent.setup();
+
+    await user.click(screen.getByTestId('mfa-enable'));
+    await user.type(await screen.findByLabelText('کد ۶ رقمی'), '12');
+    await user.click(screen.getByTestId('mfa-verify'));
+
+    expect(fake.verifyTotpEnrollment).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert')).toHaveTextContent('کد تأیید را وارد کنید.');
+  });
+
+  it('maps an invalid code from the server to a safe localized error', async () => {
+    const events: { type: string; code: string }[] = [];
+    const fake = fakeClient({
+      verifyTotpEnrollment: vi
+        .fn()
+        .mockRejectedValue(
+          new AccountApiError('invalid', 400, 'Invalid code', { code: 'invalid_mfa_code' }),
+        ),
+    });
+    render(
+      <Account apiClient={fake.client} locale="fa-IR" onEvent={(event) => events.push(event)} />,
+    );
+    await screen.findByText('سارا محمدی');
+    const user = userEvent.setup();
+
+    await user.click(screen.getByTestId('mfa-enable'));
+    await user.type(await screen.findByLabelText('کد ۶ رقمی'), '123456');
+    await user.click(screen.getByTestId('mfa-verify'));
+
+    expect(await screen.findByTestId('mfa-error')).toHaveTextContent('کد واردشده معتبر نیست.');
+    expect(events).toEqual([{ type: 'auth:error', code: 'invalid_mfa_code' }]);
+    expect(JSON.stringify(events)).not.toContain('123456');
+  });
+
+  it('disables MFA with the current password', async () => {
+    const fake = fakeClient({
+      getMfaStatus: vi.fn().mockResolvedValue(enabledMfa),
+    });
+    renderAccount(fake);
+    await screen.findByText('سارا محمدی');
+
+    expect(screen.getByTestId('mfa-badge')).toHaveTextContent('فعال');
+    expect(screen.getByText(/8 کد بازیابی باقی مانده است/)).toBeVisible();
+
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText('رمز عبور فعلی برای غیرفعال‌سازی'), 'current-password');
+    await user.click(screen.getByTestId('mfa-disable'));
+
+    expect(fake.disableTotp).toHaveBeenCalledWith({ password: 'current-password' });
+    expect(await screen.findByTestId('mfa-notice')).toHaveTextContent(
+      'ورود دومرحله‌ای غیرفعال شد.',
+    );
+  });
+
+  it('regenerates recovery codes after a password check and shows them once', async () => {
+    const fake = fakeClient({
+      getMfaStatus: vi.fn().mockResolvedValue(enabledMfa),
+    });
+    renderAccount(fake);
+    await screen.findByText('سارا محمدی');
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText('رمز عبور فعلی'), 'current-password');
+    await user.click(screen.getByTestId('mfa-regenerate'));
+
+    expect(fake.regenerateRecoveryCodes).toHaveBeenCalledWith({ password: 'current-password' });
+    expect(await screen.findByTestId('mfa-recovery-codes')).toHaveTextContent(
+      recoveryCodes[3] ?? '',
+    );
+  });
+
+  it('renders the MFA section in English LTR', async () => {
+    const fake = fakeClient();
+    render(<AccountRoot apiClient={fake.client} locale="en-US" />);
+
+    await screen.findByText('sara@example.com');
+    expect(screen.getByRole('heading', { name: 'Two-factor authentication (MFA)' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Enable' })).toBeVisible();
+    expect(screen.getByTestId('idpn-root')).toHaveAttribute('dir', 'ltr');
+  });
+
+  it('shows a load error and retries', async () => {
+    const fake = fakeClient();
+    fake.getMfaStatus
+      .mockRejectedValueOnce(new AccountApiError('network', 0, 'network error'))
+      .mockResolvedValueOnce(disabledMfa);
+    renderAccount(fake);
+
+    expect(await screen.findByTestId('mfa-load-error')).toHaveTextContent(
+      'ارتباط با سرور برقرار نشد.',
+    );
+    await userEvent.setup().click(screen.getByRole('button', { name: 'تلاش دوباره' }));
+
+    expect(await screen.findByTestId('mfa-enable')).toBeEnabled();
+    expect(fake.getMfaStatus).toHaveBeenCalledTimes(2);
+  });
+
+  it('disables enrollment when the deployment has no encryption key', async () => {
+    const fake = fakeClient({
+      getMfaStatus: vi.fn().mockResolvedValue({ ...disabledMfa, available: false }),
+    });
+    renderAccount(fake);
+
+    const button = await screen.findByTestId('mfa-enable');
+    expect(button).toBeDisabled();
+    expect(screen.getByText('ورود دومرحله‌ای در حال حاضر در دسترس نیست.')).toBeVisible();
+  });
+
+  it('cancels a pending enrollment and maps unexpected errors', async () => {
+    const fake = fakeClient({
+      enrollTotp: vi.fn().mockRejectedValue(new Error('boom')),
+    });
+    renderAccount(fake);
+    await screen.findByText('سارا محمدی');
+    const user = userEvent.setup();
+
+    await user.click(screen.getByTestId('mfa-enable'));
+    expect(await screen.findByTestId('mfa-error')).toHaveTextContent('عملیات MFA انجام نشد');
+
+    fake.enrollTotp.mockResolvedValue({
+      factorId: 'factor-1',
+      secret: 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ',
+      otpauthUri: 'otpauth://totp/auth.example.com:sara',
+      algorithm: 'SHA1',
+      digits: 6,
+      period: 30,
+    });
+    await user.click(screen.getByTestId('mfa-enable'));
+    await screen.findByTestId('mfa-enrollment');
+
+    await user.click(screen.getByRole('button', { name: 'انصراف' }));
+    expect(screen.queryByTestId('mfa-enrollment')).toBeNull();
+    expect(await screen.findByTestId('mfa-badge')).toHaveTextContent('غیرفعال');
+  });
+
+  it('validates the disable and regenerate forms locally', async () => {
+    const fake = fakeClient({ getMfaStatus: vi.fn().mockResolvedValue(enabledMfa) });
+    renderAccount(fake);
+    await screen.findByText('سارا محمدی');
+    const user = userEvent.setup();
+
+    await user.click(screen.getByTestId('mfa-disable'));
+    expect(fake.disableTotp).not.toHaveBeenCalled();
+    expect(screen.getByTestId('mfa-error')).toHaveTextContent(
+      'برای غیرفعال‌سازی، رمز عبور فعلی یا یک کد معتبر وارد کنید.',
+    );
+
+    await user.click(screen.getByTestId('mfa-regenerate'));
+    expect(fake.regenerateRecoveryCodes).not.toHaveBeenCalled();
+    expect(screen.getByTestId('mfa-error')).toHaveTextContent('رمز فعلی را وارد کنید.');
+  });
+
+  it('shows the recovery-rotation notice and formats the last use time', async () => {
+    const usedMfa = {
+      ...enabledMfa,
+      totp: { ...enabledMfa.totp, lastUsedAt: '2026-10-19T10:00:00.000Z' },
+    };
+    const fake = fakeClient({ getMfaStatus: vi.fn().mockResolvedValue(usedMfa) });
+    renderAccount(fake);
+    await screen.findByText('سارا محمدی');
+    const user = userEvent.setup();
+
+    expect(screen.queryByText(/هرگز/)).toBeNull();
+
+    await user.type(screen.getByLabelText('رمز عبور فعلی'), 'current-password');
+    await user.click(screen.getByTestId('mfa-regenerate'));
+
+    expect(await screen.findByTestId('mfa-notice')).toHaveTextContent(
+      'کدهای بازیابی جدید ساخته شد.',
+    );
   });
 });

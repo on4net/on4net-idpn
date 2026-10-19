@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   createSecretBox,
+  loadMfaSecretKey,
   loadSocialSecretKey,
   parseSecretKey,
   SecretBoxError,
@@ -130,5 +131,38 @@ describe('loadSocialSecretKey', () => {
     expect(() =>
       loadSocialSecretKey({ NODE_ENV: 'production', SOCIAL_SECRET_KEY: 'invalid' }),
     ).toThrow(/exactly 32 bytes/);
+  });
+});
+
+describe('loadMfaSecretKey', () => {
+  it('prefers the dedicated MFA key', () => {
+    const key = loadMfaSecretKey({ MFA_SECRET_KEY: keyA, SOCIAL_SECRET_KEY: keyB });
+    expect(key?.toString('base64')).toBe(keyA);
+  });
+
+  it('falls back to the social key for single-key deployments', () => {
+    const key = loadMfaSecretKey({ SOCIAL_SECRET_KEY: keyB });
+    expect(key?.toString('base64')).toBe(keyB);
+  });
+
+  it('allows a missing key outside production and fails closed in production', () => {
+    expect(loadMfaSecretKey({ NODE_ENV: 'development' })).toBeNull();
+    expect(() => loadMfaSecretKey({ NODE_ENV: 'production' })).toThrow(SecretBoxError);
+  });
+
+  it('rejects an invalid key', () => {
+    expect(() => loadMfaSecretKey({ MFA_SECRET_KEY: 'not-base64' })).toThrow(/exactly 32 bytes/);
+  });
+
+  it('roundtrips a generated TOTP secret and never stores it in plaintext', () => {
+    const key = loadMfaSecretKey({ MFA_SECRET_KEY: keyA });
+    expect(key).not.toBeNull();
+    const box = createSecretBox(key ?? Buffer.alloc(32));
+    const secret = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ';
+    const envelope = box.encrypt(secret);
+
+    expect(box.decrypt(envelope)).toBe(secret);
+    expect(envelope.toString('ascii')).not.toContain(secret);
+    expect(envelope.toString('base64')).not.toContain(Buffer.from(secret).toString('base64'));
   });
 });
