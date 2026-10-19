@@ -170,6 +170,16 @@ test.describe('module federation host', () => {
     await expect(page.locator('#host-paragraph')).toHaveCSS('display', 'block');
     await expect(page.locator('body')).toHaveCSS('font-family', /Georgia/);
 
+    // MFE utilities are scoped to `.idpn-root`; a host element carrying a class that only
+    // the remote stylesheet defines must keep the browser default.
+    await page.evaluate(() => {
+      const probe = document.createElement('div');
+      probe.id = 'host-unscoped-probe';
+      probe.className = 'start-4';
+      document.body.append(probe);
+    });
+    await expect(page.locator('#host-unscoped-probe')).toHaveCSS('inset-inline-start', 'auto');
+
     // The host does not restyle the MFE: its own typography and controls win.
     const mfeRoot = page.locator('[data-testid="idpn-host-slot-user-management"] .idpn-root');
     await expect(mfeRoot).toHaveCSS('font-family', /Vazirmatn/);
@@ -180,6 +190,10 @@ test.describe('module federation host', () => {
     );
     expect(inviteBackground).not.toBe('rgb(200, 0, 0)');
     expect(inviteBackground).not.toBe('rgba(0, 0, 0, 0)');
+    // Host Preflight resets button padding/font; the module's scoped utilities must win.
+    await expect(invite).toHaveCSS('padding-top', '8px');
+    await expect(invite).toHaveCSS('font-size', '14px');
+    await expect(invite).toHaveCSS('font-family', /Vazirmatn/);
 
     // Client theme tokens are scoped to `.idpn-root`, never to `:root`.
     const tokens = await page.evaluate(() => {
@@ -189,25 +203,42 @@ test.describe('module federation host', () => {
       const styles = root === null ? null : getComputedStyle(root);
       const documentStyles = getComputedStyle(document.documentElement);
       return {
-        rootBrand: styles?.getPropertyValue('--idpn-brand').trim() ?? '',
-        documentBrand: documentStyles.getPropertyValue('--idpn-brand').trim(),
+        rootPrimary: styles?.getPropertyValue('--idpn-primary').trim() ?? '',
+        documentPrimary: documentStyles.getPropertyValue('--idpn-primary').trim(),
       };
     });
-    expect(tokens.rootBrand).toBe('#0057b8');
-    expect(tokens.documentBrand).toBe('');
+    expect(tokens.rootPrimary).toBe('#0057b8');
+    expect(tokens.documentPrimary).toBe('');
 
     // Radix portals render inside the MFE root, not in the host body.
     await invite.click();
     await expect(page.getByRole('dialog', { name: 'دعوت عضو جدید' })).toBeVisible();
-    const dialogLocation = await page.evaluate(() => ({
-      insideMfeRoot:
-        document.querySelector(
-          '[data-testid="idpn-host-slot-user-management"] .idpn-root [role="dialog"]',
-        ) !== null,
-      inDocumentBody: document.body.querySelector(':scope > [role="dialog"]') !== null,
-    }));
-    expect(dialogLocation.insideMfeRoot).toBe(true);
-    expect(dialogLocation.inDocumentBody).toBe(false);
+    const dialogLocation = await page.evaluate(() => {
+      const root = document.querySelector(
+        '[data-testid="idpn-host-slot-user-management"] .idpn-root',
+      );
+      const dialog = root?.querySelector('[role="dialog"]') ?? null;
+      return {
+        insideMfeRoot: dialog !== null,
+        insidePortalRoot: dialog?.closest('[data-idpn-portal-root]') !== null,
+        inDocumentBody: document.body.querySelector(':scope > [role="dialog"]') !== null,
+      };
+    });
+    expect(dialogLocation).toEqual({
+      insideMfeRoot: true,
+      insidePortalRoot: true,
+      inDocumentBody: false,
+    });
+
+    // A host Preflight reset must not remove the module's own elevation/border styles.
+    await expect(page.getByRole('dialog', { name: 'دعوت عضو جدید' })).toHaveCSS(
+      'border-top-width',
+      '1px',
+    );
+    await expect(page.getByRole('dialog', { name: 'دعوت عضو جدید' })).not.toHaveCSS(
+      'box-shadow',
+      'none',
+    );
 
     await page.keyboard.press('Escape');
 

@@ -2,7 +2,6 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 
-import { usePortalContainer } from '@/app/idpn-root';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -40,8 +39,6 @@ export function LoginForm({
   onSubmit,
 }: LoginFormProps) {
   void dir;
-  const portalContainer = usePortalContainer();
-  void portalContainer;
   const t = (key: string): string => translate(locale, key);
 
   const schema = z.object({

@@ -187,14 +187,14 @@ test.describe('vanilla host + Web Component', () => {
     await expect(mfeRoot).toHaveAttribute('lang', 'fa-IR');
     await expect(mfeRoot).toHaveCSS('font-family', /Vazirmatn/);
 
-    const rootBrand = await page
+    const rootPrimary = await page
       .locator('#mfe .idpn-root')
-      .evaluate((root) => getComputedStyle(root).getPropertyValue('--idpn-brand').trim());
-    const documentBrand = await page.evaluate(() =>
-      getComputedStyle(document.documentElement).getPropertyValue('--idpn-brand').trim(),
+      .evaluate((root) => getComputedStyle(root).getPropertyValue('--idpn-primary').trim());
+    const documentPrimary = await page.evaluate(() =>
+      getComputedStyle(document.documentElement).getPropertyValue('--idpn-primary').trim(),
     );
-    expect(rootBrand).toBe('#0057b8');
-    expect(documentBrand).toBe('');
+    expect(rootPrimary).toBe('#0057b8');
+    expect(documentPrimary).toBe('');
 
     const invite = page.getByRole('button', { name: 'دعوت کاربر' });
     const inviteBackground = await invite.evaluate(
@@ -209,13 +209,30 @@ test.describe('vanilla host + Web Component', () => {
 
     const dialogLocation = await page.evaluate(() => {
       const host = document.querySelector('#mfe on4net-idpn-user-management');
+      const root = host?.shadowRoot?.querySelector('.idpn-root') ?? null;
+      const dialog = host?.shadowRoot?.querySelector('[role="dialog"]') ?? null;
       return {
-        insideShadowRoot: host?.shadowRoot?.querySelector('[role="dialog"]') != null,
-        inDocumentBody: document.body.querySelector('[role="dialog"]') != null,
+        insideShadowRoot: dialog !== null,
+        insideIdpnRoot: root !== null && dialog !== null && root.contains(dialog),
+        insidePortalRoot: dialog?.closest('[data-idpn-portal-root]') !== null,
+        inDocumentBody: document.body.querySelector('[role="dialog"]') !== null,
       };
     });
-    expect(dialogLocation.insideShadowRoot).toBe(true);
-    expect(dialogLocation.inDocumentBody).toBe(false);
+    expect(dialogLocation).toEqual({
+      insideShadowRoot: true,
+      insideIdpnRoot: true,
+      insidePortalRoot: true,
+      inDocumentBody: false,
+    });
+
+    // No theme or Tailwind defaults escaped to the host document.
+    const rootVariables = await page.evaluate(() => {
+      const style = getComputedStyle(document.documentElement);
+      return ['--idpn-primary', '--primary', '--spacing', '--color-black', '--animate-spin'].map(
+        (name) => style.getPropertyValue(name).trim(),
+      );
+    });
+    expect(rootVariables).toEqual(['', '', '', '', '']);
 
     // The account module owns its own shadow root and styles.
     const accountHost = page.getByTestId('host-slot-account').locator('on4net-idpn-account');

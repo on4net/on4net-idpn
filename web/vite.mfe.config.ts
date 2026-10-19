@@ -5,11 +5,15 @@ import { federation } from '@module-federation/vite';
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
+import { idpnScopeUtilities } from './src/styles/scope-utilities.ts';
+
 /** Module Federation remote exposing the authenticated MFE modules. */
 export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
+    // The remote CSS is injected into the host document; keep its utilities under `.idpn-root`.
+    idpnScopeUtilities(),
     federation({
       name: 'idpnMfe',
       dts: false,

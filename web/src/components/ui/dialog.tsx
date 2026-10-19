@@ -1,6 +1,7 @@
 import { Dialog as DialogPrimitive } from 'radix-ui';
 import * as React from 'react';
 
+import { resolvePortalTarget, usePortalScope } from '@/app/idpn-root';
 import { cn } from '@/lib/utils';
 
 const Dialog = DialogPrimitive.Root;
@@ -10,30 +11,44 @@ const DialogClose = DialogPrimitive.Close;
 export interface DialogContentProps extends React.ComponentPropsWithoutRef<
   typeof DialogPrimitive.Content
 > {
-  /** Portal target; the MFE always passes a node inside `.idpn-root`. */
+  /**
+   * Optional override. Inside `IdpnRoot` the overlay always targets the scoped portal host,
+   * so MFE code should leave this unset.
+   */
   container?: HTMLElement | null;
 }
 
 export const DialogContent = React.forwardRef<
   React.ComponentRef<typeof DialogPrimitive.Content>,
   DialogContentProps
->(({ className, children, container, ...props }, ref) => (
-  <DialogPrimitive.Portal container={container ?? undefined}>
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <DialogPrimitive.Overlay className="absolute inset-0 bg-black/50" />
-      <DialogPrimitive.Content
-        ref={ref}
-        className={cn(
-          'relative z-10 w-full max-w-md rounded-lg border border-border bg-background p-6 text-foreground shadow-lg',
-          className,
-        )}
-        {...props}
-      >
-        {children}
-      </DialogPrimitive.Content>
-    </div>
-  </DialogPrimitive.Portal>
-));
+>(({ className, children, container, ...props }, ref) => {
+  const scope = usePortalScope();
+  const target = resolvePortalTarget(container, scope, 'DialogContent');
+
+  // The root portal host is attached between commit and the following render. Rendering
+  // nothing keeps an initially-open dialog out of `document.body` during that tick.
+  if (target === null) {
+    return null;
+  }
+
+  return (
+    <DialogPrimitive.Portal container={target}>
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <DialogPrimitive.Overlay className="absolute inset-0 bg-black/50" />
+        <DialogPrimitive.Content
+          ref={ref}
+          className={cn(
+            'relative z-10 w-full max-w-md rounded-lg border border-border bg-background p-6 text-foreground shadow-lg',
+            className,
+          )}
+          {...props}
+        >
+          {children}
+        </DialogPrimitive.Content>
+      </div>
+    </DialogPrimitive.Portal>
+  );
+});
 DialogContent.displayName = 'DialogContent';
 
 export const DialogTitle = React.forwardRef<

@@ -2,11 +2,65 @@ import { idpnThemeToCssVariables, type IdpnTheme } from '@idpn/contracts/theme';
 import { Direction } from 'radix-ui';
 import * as React from 'react';
 
-const PortalContainerContext = React.createContext<HTMLElement | null>(null);
+/**
+ * Portal scope of one `.idpn-root`. `container` is `null` for the single render between
+ * the root commit and the portal host ref callback; overlays must wait for it instead of
+ * falling back to `document.body`.
+ */
+export interface PortalScope {
+  readonly container: HTMLElement | null;
+}
+
+const PortalContainerContext = React.createContext<PortalScope | null>(null);
+
+/** Returns `null` outside an `IdpnRoot` (standalone surfaces such as the admin panel). */
+export function usePortalScope(): PortalScope | null {
+  return React.useContext(PortalContainerContext);
+}
 
 /** Portal target used by Dialog/Select so overlays never attach to `document.body`. */
 export function usePortalContainer(): HTMLElement | null {
-  return React.useContext(PortalContainerContext);
+  return usePortalScope()?.container ?? null;
+}
+
+/** Raised when a portalled component is used without a valid portal target. */
+export class PortalContainerError extends Error {
+  constructor(component: string) {
+    super(
+      `[idpn] ${component} requires a portal container. Render it inside <IdpnRoot> or ` +
+        'pass an explicit `container` element; portalling to document.body is not allowed ' +
+        'for MFE surfaces.',
+    );
+    this.name = 'PortalContainerError';
+  }
+}
+
+/**
+ * Single portal contract for every overlay:
+ *
+ * - explicit container wins (must be an element, never `null`);
+ * - inside `IdpnRoot` the scoped portal host wins, and `null` means "not committed yet",
+ *   so the caller renders nothing for one tick instead of leaking to `document.body`;
+ * - outside `IdpnRoot` (standalone admin surface) the browser body remains the fallback.
+ */
+export function resolvePortalTarget(
+  explicitContainer: HTMLElement | null | undefined,
+  scope: PortalScope | null,
+  component: string,
+): HTMLElement | null {
+  if (explicitContainer === null) {
+    throw new PortalContainerError(component);
+  }
+  if (explicitContainer !== undefined) {
+    return explicitContainer;
+  }
+  if (scope !== null) {
+    return scope.container;
+  }
+  if (typeof document === 'undefined') {
+    throw new PortalContainerError(component);
+  }
+  return document.body;
 }
 
 export interface IdpnRootProps {
@@ -33,6 +87,10 @@ export interface IdpnRootProps {
  */
 export function IdpnRoot({ locale, dir, theme, dark = false, children, ...rest }: IdpnRootProps) {
   const [portalContainer, setPortalContainer] = React.useState<HTMLElement | null>(null);
+  const portalScope = React.useMemo<PortalScope>(
+    () => ({ container: portalContainer }),
+    [portalContainer],
+  );
 
   const style = React.useMemo(() => {
     const tokens: Record<string, string> = {
@@ -57,10 +115,10 @@ export function IdpnRoot({ locale, dir, theme, dark = false, children, ...rest }
         aria-busy={rest['aria-busy']}
         style={style}
       >
-        <PortalContainerContext.Provider value={portalContainer}>
+        <PortalContainerContext.Provider value={portalScope}>
           {children}
         </PortalContainerContext.Provider>
-        <div data-testid="idpn-portal-root" ref={setPortalContainer} />
+        <div data-testid="idpn-portal-root" data-idpn-portal-root="" ref={setPortalContainer} />
       </div>
     </Direction.Provider>
   );

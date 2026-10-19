@@ -1,7 +1,7 @@
 import type { IdpnTheme } from '@idpn/mfe-sdk';
 import * as React from 'react';
 
-import { IdpnRoot, usePortalContainer } from '@/app/idpn-root';
+import { IdpnRoot } from '@/app/idpn-root';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -119,7 +119,6 @@ export function UserManagement({
   onEvent,
   apiClient,
 }: UserManagementProps) {
-  const portalContainer = usePortalContainer();
   const api = React.useMemo(
     () =>
       apiClient ??
@@ -362,7 +361,7 @@ export function UserManagement({
           <DialogTrigger asChild>
             <Button>دعوت کاربر</Button>
           </DialogTrigger>
-          <DialogContent container={portalContainer} aria-describedby="invite-member-description">
+          <DialogContent aria-describedby="invite-member-description">
             <DialogTitle>دعوت عضو جدید</DialogTitle>
             <DialogDescription id="invite-member-description" className="mt-2">
               کاربر فقط به همین اپ اضافه می‌شود.
@@ -448,7 +447,7 @@ export function UserManagement({
             <SelectTrigger id="mfe-member-status" aria-label="وضعیت عضویت">
               <SelectValue />
             </SelectTrigger>
-            <SelectContent container={portalContainer}>
+            <SelectContent>
               {STATUS_OPTIONS.map((option) => (
                 <SelectItem key={option.value} value={option.value}>
                   {option.label}
@@ -591,7 +590,7 @@ export function UserManagement({
           }
         }}
       >
-        <DialogContent container={portalContainer} aria-describedby="member-roles-description">
+        <DialogContent aria-describedby="member-roles-description">
           <DialogTitle>نقش‌های {roleTarget?.displayName ?? ''}</DialogTitle>
           <DialogDescription id="member-roles-description" className="mt-2">
             فقط نقش‌های همین اپ قابل تخصیص هستند.

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { IdpnTheme } from '@idpn/contracts/theme';
 
-import { IdpnRoot } from './idpn-root';
+import { IdpnRoot, PortalContainerError, resolvePortalTarget, type PortalScope } from './idpn-root';
 
 describe('IdpnRoot theme application', () => {
   it('writes sanitized tokens only to the .idpn-root element', () => {
@@ -131,5 +131,40 @@ describe('IdpnRoot theme application', () => {
     expect(roots[0]?.style.getPropertyValue('--idpn-primary')).toBe('#111111');
     expect(roots[1]?.style.getPropertyValue('--idpn-primary')).toBe('#222222');
     expect(document.documentElement.getAttribute('style')).toBeNull();
+
+    const portalRoots = screen.getAllByTestId('idpn-portal-root');
+    expect(portalRoots).toHaveLength(2);
+    expect(portalRoots[0]?.parentElement).toBe(roots[0]);
+    expect(portalRoots[1]?.parentElement).toBe(roots[1]);
+  });
+});
+
+describe('portal container contract', () => {
+  it('uses an explicit container when provided', () => {
+    const explicit = document.createElement('section');
+    const scope: PortalScope = { container: document.createElement('div') };
+
+    expect(resolvePortalTarget(explicit, scope, 'DialogContent')).toBe(explicit);
+  });
+
+  it('never falls back to document.body inside an IdpnRoot', () => {
+    const scoped = document.createElement('div');
+    const scope: PortalScope = { container: scoped };
+
+    expect(resolvePortalTarget(undefined, scope, 'DialogContent')).toBe(scoped);
+
+    // The ref has not committed yet: return null so the overlay waits instead of leaking.
+    expect(resolvePortalTarget(undefined, { container: null }, 'DialogContent')).toBeNull();
+  });
+
+  it('keeps the document.body fallback for standalone surfaces only', () => {
+    expect(resolvePortalTarget(undefined, null, 'DialogContent')).toBe(document.body);
+  });
+
+  it('rejects an explicit null container instead of silently using document.body', () => {
+    expect(() => resolvePortalTarget(null, null, 'SelectContent')).toThrow(PortalContainerError);
+    expect(() => resolvePortalTarget(null, { container: null }, 'DialogContent')).toThrow(
+      /requires a portal container/,
+    );
   });
 });

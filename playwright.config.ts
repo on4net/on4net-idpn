@@ -103,7 +103,7 @@ export default defineConfig({
         VITE_IDPN_LOCALE: 'fa-IR',
         VITE_IDPN_DIR: 'rtl',
         VITE_IDPN_MODULE: 'all',
-        VITE_IDPN_THEME: JSON.stringify({ brand: '#0057b8' }),
+        VITE_IDPN_THEME: JSON.stringify({ primary: '#0057b8' }),
       },
     },
     {
@@ -121,7 +121,7 @@ export default defineConfig({
         VITE_IDPN_LOCALE: 'fa-IR',
         VITE_IDPN_DIR: 'auto',
         VITE_IDPN_MODULE: 'all',
-        VITE_IDPN_THEME: JSON.stringify({ brand: '#0057b8' }),
+        VITE_IDPN_THEME: JSON.stringify({ primary: '#0057b8' }),
         IDPN_REMOTE_ENTRY: '/remote/remoteEntry.js',
       },
     },
