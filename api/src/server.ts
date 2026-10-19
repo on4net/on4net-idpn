@@ -12,6 +12,8 @@ import type { RbacRoutesOptions } from './admin/rbac/routes.js';
 import { registerRbacAdminRoutes } from './admin/rbac/routes.js';
 import type { MemberRoutesOptions } from './admin/members/routes.js';
 import { registerMemberAdminRoutes } from './admin/members/routes.js';
+import type { SessionRoutesOptions } from './admin/sessions/routes.js';
+import { registerSessionAdminRoutes } from './admin/sessions/routes.js';
 import { MemorySigningKeyRepository, SigningKeyManager } from './oidc/keys.js';
 import { registerAuthorizeRoute } from './oidc/authorize-route.js';
 import type { LogoutRouteOptions } from './oidc/logout-route.js';
@@ -62,6 +64,8 @@ export interface BuildServerOptions {
   adminMembers?: Omit<MemberRoutesOptions, 'issuer' | 'verifier'>;
   /** Mounts the audit read and export endpoints (docs/api.md 3.8). */
   audit?: Omit<AuditRoutesOptions, 'issuer' | 'verifier'>;
+  /** Mounts session administration and self-service endpoints (docs/api.md 3.1, 3.7). */
+  adminSessions?: Omit<SessionRoutesOptions, 'issuer' | 'verifier'>;
 }
 
 /**
@@ -162,6 +166,10 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
 
   if (options.audit !== undefined) {
     registerAuditAdminRoutes(app, { ...options.audit, issuer, verifier: keys });
+  }
+
+  if (options.adminSessions !== undefined) {
+    registerSessionAdminRoutes(app, { ...options.adminSessions, issuer, verifier: keys });
   }
 
   return app;

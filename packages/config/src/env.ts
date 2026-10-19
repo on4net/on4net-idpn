@@ -87,6 +87,11 @@ export const serverEnvSchema = z.object({
   SESSION_IDLE_TTL_SECONDS: z.coerce.number().int().min(60).default(1800),
   /** Absolute lifetime of an IdP session (seconds). */
   SESSION_ABSOLUTE_TTL_SECONDS: z.coerce.number().int().min(300).default(28_800),
+  /**
+   * Maximum concurrent IdP sessions per user. Newest login wins: older sessions beyond the
+   * limit are revoked (`0` disables the limit).
+   */
+  SESSION_MAX_CONCURRENT: z.coerce.number().int().min(0).max(100).default(5),
   /** Optional server-side pepper for Argon2id; supply from KMS/Vault in production. */
   PASSWORD_PEPPER: z.preprocess(emptyToUndefined, z.string().min(32).optional()),
   ARGON2_MEMORY_KIB: z.coerce.number().int().min(8192).max(1_048_576).default(65_536),

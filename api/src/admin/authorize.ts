@@ -47,6 +47,11 @@ export interface AdminRequirement {
   allowDelegated?: boolean;
   /** Requires an authentication newer than `stepUpMaxAgeSeconds`. */
   stepUp?: boolean;
+  /**
+   * Accept any valid admin token without checking a fine-grained permission. Only for
+   * self-service endpoints that act on the caller's own resources (`/api/v1/me/*`).
+   */
+  authenticatedOnly?: boolean;
 }
 
 export type AdminAuthorization =
@@ -178,12 +183,14 @@ export async function authorizeAdminRequest(
     if (!scopes.includes(CLIENT_ADMIN_SCOPE)) {
       return denied(403, 'insufficient_scope', `scope ${CLIENT_ADMIN_SCOPE} is required`);
     }
-    const delegatedPermission = requirement.delegatedPermission ?? requirement.permission;
-    if (!delegatedPermission.startsWith('idp:client-')) {
-      return denied(403, 'forbidden', 'delegated tokens cannot perform this operation');
-    }
-    if (options.permissions.clientPermissionsForUser === undefined) {
-      return denied(403, 'forbidden', 'delegated administration is not configured');
+    if (requirement.authenticatedOnly !== true) {
+      const delegatedPermission = requirement.delegatedPermission ?? requirement.permission;
+      if (!delegatedPermission.startsWith('idp:client-')) {
+        return denied(403, 'forbidden', 'delegated tokens cannot perform this operation');
+      }
+      if (options.permissions.clientPermissionsForUser === undefined) {
+        return denied(403, 'forbidden', 'delegated administration is not configured');
+      }
     }
   }
 
@@ -198,6 +205,19 @@ export async function authorizeAdminRequest(
         'recent authentication is required for this operation',
       );
     }
+  }
+
+  if (requirement.authenticatedOnly === true) {
+    return {
+      ok: true,
+      principal: {
+        userId: subject,
+        clientId,
+        scopes,
+        permissions: new Set<string>(),
+        mode: delegated ? 'delegated' : 'global',
+      },
+    };
   }
 
   const requiredPermission = delegated

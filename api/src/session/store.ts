@@ -1,12 +1,15 @@
 import { randomUUID } from 'node:crypto';
 
 import type { SessionCache } from './cache.js';
+import type { ClientSessionRevoker, SessionRevocationHook } from './revocation.js';
 import type { CreateSessionInput, IdpSession, RevokeReason, SessionPolicy } from './types.js';
 
 export interface SessionStoreOptions {
   cache: SessionCache;
   policy: SessionPolicy;
   now?: () => Date;
+  /** Called after a session is revoked so the caller can audit it (never receives tokens). */
+  onRevoked?: SessionRevocationHook;
 }
 
 const SESSION_KEY = 'idpn:sess:';
@@ -26,15 +29,17 @@ const secondsBetween = (from: Date, to: Date): number =>
  * - idle timeout slides on each successful read, absolute timeout never does;
  * - revoked/expired sessions are deleted on read and treated as `null`.
  */
-export class RedisSessionStore {
+export class RedisSessionStore implements ClientSessionRevoker {
   private readonly cache: SessionCache;
   private readonly policy: SessionPolicy;
   private readonly now: () => Date;
+  private readonly onRevoked: SessionRevocationHook | undefined;
 
   constructor(options: SessionStoreOptions) {
     this.cache = options.cache;
     this.policy = options.policy;
     this.now = options.now ?? (() => new Date());
+    this.onRevoked = options.onRevoked;
   }
 
   async create(input: CreateSessionInput): Promise<IdpSession> {
@@ -60,6 +65,7 @@ export class RedisSessionStore {
 
     await this.persist(session);
     await this.cache.setAdd(userKey(session.userId), session.sid, this.policy.absoluteTtlSeconds);
+    await this.enforceConcurrentLimit(session.userId);
     return session;
   }
 
@@ -138,6 +144,71 @@ export class RedisSessionStore {
   }
 
   /**
+   * Revokes only the sessions that were created for one app. Used when an app membership is
+   * suspended: sessions belonging to other apps of the same user must stay valid.
+   */
+  async revokeForUserClient(
+    userId: string,
+    clientId: string,
+    reason: RevokeReason,
+  ): Promise<number> {
+    const sids = await this.cache.setMembers(userKey(userId));
+    let revoked = 0;
+    for (const sid of sids) {
+      const session = await this.load(sid);
+      if (session === null || session.revokedAt !== undefined) {
+        await this.cache.setRemove(userKey(userId), sid);
+        continue;
+      }
+      if (session.clientId === clientId) {
+        await this.markRevoked(session, reason);
+        revoked += 1;
+      }
+    }
+    return revoked;
+  }
+
+  /**
+   * Docs specify a maximum number of concurrent sessions but not the overflow behavior.
+   * We keep the newest sessions and revoke the oldest ones, so a new login always succeeds
+   * and the user is never locked out by stale sessions.
+   */
+  private async enforceConcurrentLimit(userId: string): Promise<void> {
+    const max = this.policy.maxConcurrentSessions ?? 0;
+    if (max <= 0) {
+      return;
+    }
+
+    const sids = await this.cache.setMembers(userKey(userId));
+    const now = this.now();
+    const active: IdpSession[] = [];
+    for (const sid of sids) {
+      const session = await this.load(sid);
+      if (session === null || session.revokedAt !== undefined) {
+        await this.cache.setRemove(userKey(userId), sid);
+        continue;
+      }
+      if (isExpired(session, now)) {
+        await this.delete(session);
+        continue;
+      }
+      active.push(session);
+    }
+
+    if (active.length <= max) {
+      return;
+    }
+
+    active.sort((left, right) => {
+      const byCreation = Date.parse(left.createdAt) - Date.parse(right.createdAt);
+      return byCreation === 0 ? left.sid.localeCompare(right.sid) : byCreation;
+    });
+    for (const session of active.slice(0, active.length - max)) {
+      await this.markRevoked(session, 'concurrent_limit');
+    }
+  }
+
+  /**
    * Keeps the revoked record for a short grace window so concurrent requests and
    * back-channel logout can observe the revoke reason, then it expires naturally.
    */
@@ -149,6 +220,13 @@ export class RedisSessionStore {
     };
     await this.cache.set(sessionKey(session.sid), JSON.stringify(revoked), REVOKE_GRACE_SECONDS);
     await this.cache.setRemove(userKey(session.userId), session.sid);
+    if (this.onRevoked !== undefined) {
+      try {
+        await this.onRevoked(revoked, reason);
+      } catch {
+        // Auditing must never turn a completed revocation into a failed login/logout.
+      }
+    }
   }
 
   private async persist(session: IdpSession): Promise<void> {

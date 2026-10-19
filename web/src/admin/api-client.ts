@@ -108,6 +108,40 @@ export interface ActionResult {
   temporaryPassword?: string;
 }
 
+export type AdminSessionStatus = 'active' | 'revoked' | 'expired';
+
+export interface AdminSession {
+  id: string;
+  userId: string;
+  clientId: string | null;
+  status: AdminSessionStatus;
+  createdAt: string;
+  lastSeenAt: string;
+  idleExpiresAt: string;
+  absoluteExpiresAt: string;
+  ip: string | null;
+  userAgent: string | null;
+  amr: string[];
+  acr: string;
+  revokedAt: string | null;
+  revokeReason: string | null;
+}
+
+export interface AdminSessionPage {
+  items: AdminSession[];
+  page: number;
+  limit: number;
+  total: number;
+}
+
+export interface ListSessionsParams {
+  page?: number;
+  limit?: number;
+  userId?: string;
+  clientId?: string;
+  status?: AdminSessionStatus;
+}
+
 export type AdminApiErrorKind =
   'unauthorized' | 'forbidden' | 'not_found' | 'conflict' | 'invalid' | 'network' | 'server';
 
@@ -159,6 +193,8 @@ export interface AdminApiClient {
   enableUser(userId: string): Promise<ActionResult>;
   unlockUser(userId: string): Promise<ActionResult>;
   resetPassword(userId: string, password?: string): Promise<ActionResult>;
+  listSessions(params?: ListSessionsParams): Promise<AdminSessionPage>;
+  revokeSession(sessionId: string): Promise<{ revoked: boolean; alreadyRevoked: boolean }>;
   listAuditEvents(params?: ListAuditEventsParams): Promise<AuditEventPage>;
   /** Downloads an export, keeping the token out of the returned data. */
   exportAuditEvents(params: ExportAuditEventsParams): Promise<Blob>;
@@ -210,6 +246,18 @@ export function createAdminApiClient(options: AdminApiOptions): AdminApiClient {
 
   const post = (path: string, body: unknown = {}): Promise<ActionResult> =>
     call<ActionResult>(path, { method: 'POST', body: JSON.stringify(body) });
+
+  const sessionQuery = (params: ListSessionsParams = {}): string => {
+    const search = new URLSearchParams();
+    if (params.page !== undefined) search.set('page', String(params.page));
+    if (params.limit !== undefined) search.set('limit', String(params.limit));
+    if (params.userId !== undefined && params.userId !== '') search.set('userId', params.userId);
+    if (params.clientId !== undefined && params.clientId !== '')
+      search.set('clientId', params.clientId);
+    if (params.status !== undefined) search.set('status', params.status);
+    const serialized = search.toString();
+    return serialized === '' ? '' : `?${serialized}`;
+  };
 
   const auditQuery = (
     params: AuditEventFilters & { page?: number; limit?: number; format?: AuditExportFormat },
@@ -285,6 +333,13 @@ export function createAdminApiClient(options: AdminApiOptions): AdminApiClient {
       post(
         `/api/v1/users/${encodeURIComponent(userId)}/reset-password`,
         password === undefined ? {} : { password },
+      ),
+    listSessions: (params = {}) =>
+      call<AdminSessionPage>(`/api/v1/sessions${sessionQuery(params)}`),
+    revokeSession: (sessionId) =>
+      call<{ revoked: boolean; alreadyRevoked: boolean }>(
+        `/api/v1/sessions/${encodeURIComponent(sessionId)}`,
+        { method: 'DELETE' },
       ),
     listAuditEvents: (params = {}) =>
       call<AuditEventPage>(`/api/v1/audit-events${auditQuery(params)}`),

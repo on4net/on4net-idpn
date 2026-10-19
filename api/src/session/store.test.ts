@@ -168,6 +168,92 @@ describe('RedisSessionStore', () => {
     expect(sets.get('idpn:user-sessions:user-1')?.size ?? 0).toBe(0);
   });
 
+  it('revokes the oldest sessions when the concurrent limit is exceeded', async () => {
+    const { cache } = createMemoryCache();
+    let now = new Date('2026-10-18T10:00:00Z');
+    const revoked: { sid: string; reason: string }[] = [];
+    const store = new RedisSessionStore({
+      cache,
+      policy: { ...policy, maxConcurrentSessions: 2 },
+      now: () => now,
+      onRevoked: (session, reason) => {
+        revoked.push({ sid: session.sid, reason });
+      },
+    });
+
+    const first = await store.create({ userId: 'user-1', amr: ['pwd'], acr: 'pwd' });
+    now = new Date('2026-10-18T10:01:00Z');
+    const second = await store.create({ userId: 'user-1', amr: ['pwd'], acr: 'pwd' });
+    now = new Date('2026-10-18T10:02:00Z');
+    const third = await store.create({ userId: 'user-1', amr: ['pwd'], acr: 'pwd' });
+
+    await expect(store.read(first.sid)).resolves.toBeNull();
+    await expect(store.read(second.sid)).resolves.not.toBeNull();
+    await expect(store.read(third.sid)).resolves.not.toBeNull();
+    expect(revoked).toEqual([{ sid: first.sid, reason: 'concurrent_limit' }]);
+  });
+
+  it('does not limit sessions when the configured maximum is zero', async () => {
+    const { cache } = createMemoryCache();
+    const store = new RedisSessionStore({
+      cache,
+      policy: { ...policy, maxConcurrentSessions: 0 },
+    });
+
+    const sessions = await Promise.all(
+      Array.from({ length: 6 }, () => store.create({ userId: 'user-1', amr: ['pwd'], acr: 'pwd' })),
+    );
+    for (const session of sessions) {
+      await expect(store.read(session.sid)).resolves.not.toBeNull();
+    }
+  });
+
+  it('revokes only the sessions of one app for a suspension', async () => {
+    const { cache } = createMemoryCache();
+    const store = new RedisSessionStore({ cache, policy });
+
+    const appA = await store.create({
+      userId: 'user-1',
+      clientId: 'app-a',
+      amr: ['pwd'],
+      acr: 'pwd',
+    });
+    const appB = await store.create({
+      userId: 'user-1',
+      clientId: 'app-b',
+      amr: ['pwd'],
+      acr: 'pwd',
+    });
+    const noApp = await store.create({ userId: 'user-1', amr: ['pwd'], acr: 'pwd' });
+    const otherUser = await store.create({
+      userId: 'user-2',
+      clientId: 'app-a',
+      amr: ['pwd'],
+      acr: 'pwd',
+    });
+
+    await expect(store.revokeForUserClient('user-1', 'app-a', 'admin')).resolves.toBe(1);
+    await expect(store.read(appA.sid)).resolves.toBeNull();
+    await expect(store.read(appB.sid)).resolves.not.toBeNull();
+    await expect(store.read(noApp.sid)).resolves.not.toBeNull();
+    await expect(store.read(otherUser.sid)).resolves.not.toBeNull();
+  });
+
+  it('keeps a completed revocation when the audit hook fails', async () => {
+    const { cache } = createMemoryCache();
+    const store = new RedisSessionStore({
+      cache,
+      policy,
+      onRevoked: () => {
+        throw new Error('audit store unavailable');
+      },
+    });
+    const session = await store.create({ userId: 'user-1', amr: ['pwd'], acr: 'pwd' });
+
+    await expect(store.revoke(session.sid, 'admin')).resolves.toBe(true);
+    await expect(store.read(session.sid)).resolves.toBeNull();
+  });
+
   it('drops a corrupted cached payload instead of throwing', async () => {
     const { cache, values } = createMemoryCache();
     const store = new RedisSessionStore({ cache, policy });

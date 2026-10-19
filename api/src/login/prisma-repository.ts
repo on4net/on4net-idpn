@@ -9,6 +9,8 @@ export function createPrismaLoginRepository(prisma: PrismaClient): LoginUserRepo
     sid: string;
     userId: string;
     tenantId: string;
+    /** Public client id that started the login; resolved to its UUID for the foreign key. */
+    clientId?: string;
     ip?: string;
     userAgent?: string;
     amr: string[];
@@ -20,10 +22,18 @@ export function createPrismaLoginRepository(prisma: PrismaClient): LoginUserRepo
 } {
   return {
     async persistSession(input) {
+      const client =
+        input.clientId === undefined || input.clientId === ''
+          ? null
+          : await prisma.client.findUnique({
+              where: { clientId: input.clientId },
+              select: { id: true },
+            });
       await prisma.session.create({
         data: {
           id: input.sid,
           userId: input.userId,
+          clientId: client?.id ?? null,
           ip: input.ip ?? null,
           userAgent: input.userAgent ?? null,
           amr: input.amr,

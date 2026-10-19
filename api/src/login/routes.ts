@@ -27,6 +27,8 @@ export interface LoginRouteOptions {
     sid: string;
     userId: string;
     tenantId: string;
+    /** Public client id; the repository resolves it to the app's UUID. */
+    clientId?: string;
     ip?: string;
     userAgent?: string;
     amr: string[];
@@ -142,6 +144,7 @@ export function registerLoginRoute(app: FastifyInstance, options: LoginRouteOpti
       sid: session.sid,
       userId: user.id,
       tenantId: user.tenantId,
+      ...(session.clientId === undefined ? {} : { clientId: session.clientId }),
       ...(session.ip === undefined ? {} : { ip: session.ip }),
       ...(session.userAgent === undefined ? {} : { userAgent: session.userAgent }),
       amr: session.amr,

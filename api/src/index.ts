@@ -8,6 +8,7 @@ import { createPrismaPermissionReader } from './admin/prisma-permission-reader.j
 import { createPrismaRbacRepository } from './admin/rbac/prisma-rbac-repository.js';
 import { createPrismaMemberRepository } from './admin/members/prisma-member-repository.js';
 import { createPrismaAuditEventRepository } from './admin/audit/prisma-audit-repository.js';
+import { createPrismaAdminSessionRepository } from './admin/sessions/prisma-session-repository.js';
 import { createPrismaEffectiveAccessSource } from './oidc/effective-access.js';
 import {
   BackchannelLogoutDispatcher,
@@ -27,6 +28,7 @@ import { createPrismaUserRepository } from './oidc/prisma-user-repository.js';
 import { createPrismaPublicConfigRepository } from './public-config/prisma-repository.js';
 import { createPrismaLoginRepository } from './login/prisma-repository.js';
 import { buildServer } from './server.js';
+import { createPrismaSessionRevocationHook } from './session/prisma-revocation.js';
 import { RedisSessionCache } from './session/redis-cache.js';
 import { RedisSessionStore } from './session/store.js';
 
@@ -44,7 +46,11 @@ const sessions = new RedisSessionStore({
   policy: {
     idleTtlSeconds: env.SESSION_IDLE_TTL_SECONDS,
     absoluteTtlSeconds: env.SESSION_ABSOLUTE_TTL_SECONDS,
+    maxConcurrentSessions: env.SESSION_MAX_CONCURRENT,
   },
+  // Automatic revocations (currently the concurrent-session limit) are mirrored and
+  // audited here; explicit admin/logout/password revocations are audited by their route.
+  onRevoked: createPrismaSessionRevocationHook(prisma),
 });
 
 const clientsRepository = createPrismaClientRepository(prisma);
@@ -52,7 +58,10 @@ const usersRepository = createPrismaUserRepository(prisma);
 const loginRepository = createPrismaLoginRepository(prisma);
 const permissionReader = createPrismaPermissionReader(prisma);
 const rbacRepository = createPrismaRbacRepository(prisma);
-const membersRepository = createPrismaMemberRepository(prisma, { rbac: rbacRepository });
+const membersRepository = createPrismaMemberRepository(prisma, {
+  rbac: rbacRepository,
+  sessions,
+});
 const effectiveAccess = createPrismaEffectiveAccessSource(prisma);
 
 /**
@@ -129,6 +138,7 @@ const app = buildServer({
     permissions: permissionReader,
     users: createPrismaAdminUserRepository(prisma),
     audit: createPrismaAdminAudit(prisma),
+    sessions,
   },
   adminClients: {
     adminClientId: env.ADMIN_CLIENT_ID,
@@ -152,6 +162,13 @@ const app = buildServer({
     adminClientId: env.ADMIN_CLIENT_ID,
     permissions: permissionReader,
     events: createPrismaAuditEventRepository(prisma),
+    audit: createPrismaAdminAudit(prisma),
+  },
+  adminSessions: {
+    adminClientId: env.ADMIN_CLIENT_ID,
+    permissions: permissionReader,
+    repository: createPrismaAdminSessionRepository(prisma),
+    revoker: sessions,
     audit: createPrismaAdminAudit(prisma),
   },
 });

@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 
 import type { PrismaClient } from '../../generated/prisma/client.js';
 import { normalizeEmail } from '../../auth/normalize.js';
+import type { ClientSessionRevoker } from '../../session/revocation.js';
 import type { AdminRbacRepository } from '../rbac/rbac-types.js';
 import { validateMembershipAttributes } from './member-validation.js';
 import type {
@@ -91,6 +92,8 @@ const usernameFromEmail = (email: string): string => {
 export interface PrismaMemberRepositoryOptions {
   /** Used to apply the client's `is_default` roles on the first membership. */
   rbac?: Pick<AdminRbacRepository, 'assignDefaultRoles'>;
+  /** Revokes the app's Redis sessions when a membership is suspended. */
+  sessions?: ClientSessionRevoker;
   now?: () => Date;
 }
 
@@ -420,6 +423,12 @@ export function createPrismaMemberRepository(
           where: { clientId: client.id, userId, revokedAt: null },
           data: { revokedAt: at },
         });
+        // Only this app's sessions: the user may still be a member of other apps.
+        await prisma.session.updateMany({
+          where: { userId, clientId: client.id, revokedAt: null },
+          data: { revokedAt: at, revokeReason: 'membership_suspend' },
+        });
+        await options.sessions?.revokeForUserClient(userId, clientId, 'admin');
       }
 
       const member = await loadMember(client.id, userId);

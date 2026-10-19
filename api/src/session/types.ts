@@ -28,7 +28,8 @@ export type RevokeReason =
   | 'reuse_detected'
   | 'password_change'
   | 'rotated'
-  | 'expired';
+  | 'expired'
+  | 'concurrent_limit';
 
 export interface CreateSessionInput {
   userId: string;
@@ -48,4 +49,9 @@ export interface SessionPolicy {
   idleTtlSeconds: number;
   /** Hard limit from creation in seconds. */
   absoluteTtlSeconds: number;
+  /**
+   * Maximum active sessions per user (`0`/undefined = unlimited). The oldest sessions beyond
+   * the limit are revoked whenever a new session is created.
+   */
+  maxConcurrentSessions?: number;
 }

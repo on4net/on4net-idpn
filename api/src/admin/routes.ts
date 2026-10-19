@@ -13,6 +13,7 @@ import {
   type TokenVerifier,
 } from './authorize.js';
 import { DuplicateUserError } from './prisma-user-repository.js';
+import type { SessionRevoker } from '../session/revocation.js';
 import {
   createUserSchema,
   listUsersQuerySchema,
@@ -27,6 +28,11 @@ export interface AdminRoutesOptions {
   permissions: PermissionReader;
   users: AdminUserRepository;
   audit: AdminAudit;
+  /**
+   * Redis session revoker. Redis is what authorize/token read, so every administrative
+   * revocation must also invalidate it (the PostgreSQL row alone is not enough).
+   */
+  sessions?: SessionRevoker;
   /** Hash used for bootstrap/temporary passwords; defaults to Argon2id. */
   hashPassword?: (plain: string) => Promise<string>;
   /** Temporary password factory; injectable for deterministic tests. */
@@ -325,6 +331,9 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
           reason: status === 'disabled' ? 'admin_disabled' : 'admin_action',
         });
         await options.users.revokeRefreshTokens(user.id, now());
+        // Invalidate the authoritative Redis sessions as well; otherwise the next
+        // authorize/token request would still accept a disabled user's session.
+        await options.sessions?.revokeAllForUser(user.id, 'admin');
       }
       await audit(request, principal, action, user.id, { status, revokedSessions });
       return reply.send({ user, revokedSessions });
@@ -383,6 +392,7 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
         reason: 'password_reset',
       });
       await options.users.revokeRefreshTokens(updated.id, now());
+      await options.sessions?.revokeAllForUser(updated.id, 'password_change');
       await audit(request, principal, 'user.reset_password', updated.id, { revokedSessions });
       return reply.send({
         user: updated,
@@ -418,6 +428,7 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
       reason: 'admin_revoked',
     });
     await options.users.revokeRefreshTokens(user.id, now());
+    await options.sessions?.revokeAllForUser(user.id, 'admin');
     await audit(request, principal, 'session.revoke_all', user.id, { revoked });
     return reply.send({ revoked });
   });
@@ -441,6 +452,8 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
       if (revoked === 0) {
         return sendProblem(reply, 404, 'not-found', 'Not found', 'session does not exist');
       }
+      await options.sessions?.revoke(request.params.sid, 'admin');
+      await options.users.revokeRefreshTokensForSession(request.params.sid, now());
       await audit(request, principal, 'session.revoke', user.id, {
         sessionId: request.params.sid,
       });

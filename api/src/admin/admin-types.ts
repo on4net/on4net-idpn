@@ -105,6 +105,7 @@ export interface AdminUserRepository {
     options: { revokedAt: Date; reason: string; sessionId?: string },
   ): Promise<number>;
   revokeRefreshTokens(userId: string, revokedAt: Date): Promise<number>;
+  revokeRefreshTokensForSession(sessionId: string, revokedAt: Date): Promise<number>;
 }
 
 export interface AdminAudit {

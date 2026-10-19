@@ -8,6 +8,7 @@ import {
   AdminApiError,
   createAdminApiClient,
   type AdminApiClient,
+  type AdminSession,
   type AdminUser,
 } from '@/admin/api-client';
 
@@ -25,6 +26,24 @@ const user = (overrides: Partial<AdminUser> = {}): AdminUser => ({
   lastLoginAt: null,
   createdAt: '2026-10-19T08:00:00.000Z',
   updatedAt: '2026-10-19T08:00:00.000Z',
+  ...overrides,
+});
+
+const session = (overrides: Partial<AdminSession> = {}): AdminSession => ({
+  id: 'session-1',
+  userId: 'user-1',
+  clientId: 'app-a',
+  status: 'active',
+  createdAt: '2026-10-19T08:00:00.000Z',
+  lastSeenAt: '2026-10-19T08:05:00.000Z',
+  idleExpiresAt: '2026-10-19T08:35:00.000Z',
+  absoluteExpiresAt: '2026-10-19T20:00:00.000Z',
+  ip: '10.0.0.1',
+  userAgent: 'vitest-agent',
+  amr: ['pwd'],
+  acr: 'urn:on4net:acr:pwd',
+  revokedAt: null,
+  revokeReason: null,
   ...overrides,
 });
 
@@ -47,6 +66,13 @@ function fakeClient(overrides: Partial<AdminApiClient> = {}): AdminApiClient {
       revokedSessions: 1,
       temporaryPassword: 'tmp-123',
     })),
+    listSessions: vi.fn(async () => ({
+      items: [session()],
+      page: 1,
+      limit: 25,
+      total: 1,
+    })),
+    revokeSession: vi.fn(async () => ({ revoked: true, alreadyRevoked: false })),
     listAuditEvents: vi.fn(async () => ({ items: [], page: 1, limit: 25, total: 0 })),
     exportAuditEvents: vi.fn(async () => new Blob([''], { type: 'text/csv' })),
     ...overrides,
@@ -193,6 +219,63 @@ describe('AdminConsole', () => {
     expect(await screen.findByTestId('admin-audit-empty')).toBeTruthy();
   });
 
+  it('lists sessions with filters and revokes one from the sessions tab', async () => {
+    const client = fakeClient();
+    render(<AdminConsole client={client} locale="en-US" />);
+    await screen.findByText('Ali Rezaei');
+    expect(client.listSessions).not.toHaveBeenCalled();
+
+    await userEvent
+      .setup({ pointerEventsCheck: 0 })
+      .click(screen.getByRole('tab', { name: 'Sessions' }));
+
+    expect(await screen.findByTestId('session-row-session-1')).toBeTruthy();
+    expect(client.listSessions).toHaveBeenCalledWith(
+      expect.objectContaining({ page: 1, limit: 25 }),
+    );
+
+    fireEvent.change(screen.getByLabelText('User ID'), { target: { value: ' user-1 ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply filters' }));
+    await waitFor(() =>
+      expect(client.listSessions).toHaveBeenLastCalledWith(
+        expect.objectContaining({ userId: 'user-1', page: 1 }),
+      ),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Revoke session session-1' }));
+    await waitFor(() => expect(client.revokeSession).toHaveBeenCalledWith('session-1'));
+    expect(await screen.findByTestId('sessions-notice')).toHaveTextContent('session-1');
+  });
+
+  it('shows empty and error states for sessions', async () => {
+    const empty = fakeClient({
+      listSessions: vi.fn(async () => ({ items: [], page: 1, limit: 25, total: 0 })),
+    });
+    const { unmount } = render(<AdminConsole client={empty} locale="fa-IR" />);
+    await screen.findByText('Ali Rezaei');
+    await userEvent
+      .setup({ pointerEventsCheck: 0 })
+      .click(screen.getByRole('tab', { name: 'نشست‌ها' }));
+    expect(await screen.findByTestId('sessions-empty')).toHaveTextContent('نشستی یافت نشد');
+    expect(screen.getByLabelText('شناسه کاربر')).toBeTruthy();
+    unmount();
+
+    const failing = fakeClient({
+      listSessions: vi.fn(async () => {
+        throw new AdminApiError('forbidden', 403, 'Forbidden');
+      }),
+    });
+    render(<AdminConsole client={failing} locale="en-US" />);
+    await screen.findByText('Ali Rezaei');
+    await userEvent
+      .setup({ pointerEventsCheck: 0 })
+      .click(screen.getByRole('tab', { name: 'Sessions' }));
+    expect(await screen.findByTestId('sessions-error')).toHaveTextContent(
+      'do not have the permission',
+    );
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
+  });
+
   it('pages forward when more users exist', async () => {
     const listUsers = vi.fn(async ({ page }: { page?: number }) => ({
       items: [
@@ -246,6 +329,33 @@ describe('createAdminApiClient', () => {
     );
     expect((init.headers as Record<string, string>).Authorization).toBe('Bearer token-abc');
     expect((init.headers as Record<string, string>)['Content-Type']).toBeUndefined();
+  });
+
+  it('lists sessions with filters and revokes the selected session', async () => {
+    const fetchImpl = vi.fn(jsonFetch(200, { items: [session()], page: 1, limit: 25, total: 1 }));
+    const client = createAdminApiClient({ getToken: () => 'token', fetchImpl });
+
+    await client.listSessions({
+      page: 1,
+      limit: 25,
+      userId: 'user-1',
+      clientId: 'app-a',
+      status: 'active',
+    });
+    expect((fetchImpl.mock.calls[0] as unknown as [string])[0]).toBe(
+      '/api/v1/sessions?page=1&limit=25&userId=user-1&clientId=app-a&status=active',
+    );
+
+    fetchImpl.mockResolvedValueOnce(
+      new Response(JSON.stringify({ revoked: true, alreadyRevoked: false }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    await expect(client.revokeSession('session/1')).resolves.toMatchObject({ revoked: true });
+    expect((fetchImpl.mock.calls[1] as unknown as [string])[0]).toBe(
+      '/api/v1/sessions/session%2F1',
+    );
   });
 
   it('omits the query string when no parameters are given', async () => {

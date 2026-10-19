@@ -29,7 +29,9 @@ const BASE_PERMISSIONS = [
   { key: 'idp:social-provider:write', description: 'Change social provider credentials of an app' },
   { key: 'idp:social-provider:manage', description: 'Manage per-client social providers' },
   { key: 'idp:client-session:read', description: 'View sessions of members of an app' },
+  { key: 'idp:client-session:write', description: 'Revoke sessions of members of an app' },
   { key: 'idp:session:read', description: 'View active sessions' },
+  { key: 'idp:session:write', description: 'Revoke sessions and close all user sessions' },
   { key: 'idp:session:revoke', description: 'Revoke sessions' },
   { key: 'idp:audit:read', description: 'Read audit events' },
   { key: 'idp:audit:export', description: 'Export audit events' },
@@ -48,6 +50,7 @@ const CLIENT_ADMIN_PERMISSIONS = [
   'idp:social-provider:read',
   'idp:social-provider:write',
   'idp:client-session:read',
+  'idp:client-session:write',
 ] as const;
 
 const BASE_ROLES = [
@@ -63,6 +66,7 @@ const BASE_ROLES = [
     description: 'Signing keys, sessions, MFA and audit access',
     permissions: [
       'idp:session:read',
+      'idp:session:write',
       'idp:session:revoke',
       'idp:audit:read',
       'idp:key:manage',

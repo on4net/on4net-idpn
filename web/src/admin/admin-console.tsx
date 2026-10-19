@@ -2,6 +2,7 @@ import * as React from 'react';
 
 import { AuditViewer } from '@/admin/audit-viewer';
 import type { AdminApiClient, AdminUser } from '@/admin/api-client';
+import { SessionsView } from '@/admin/sessions-view';
 import { adminErrorMessage } from '@/admin/error-message';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -152,6 +153,7 @@ export function AdminConsole({
       <Tabs defaultValue="users" className="flex flex-col gap-4">
         <TabsList>
           <TabsTrigger value="users">{t('admin.tabs.users')}</TabsTrigger>
+          <TabsTrigger value="sessions">{t('admin.tabs.sessions')}</TabsTrigger>
           <TabsTrigger value="audit">{t('admin.tabs.audit')}</TabsTrigger>
         </TabsList>
         <TabsContent value="users">
@@ -328,6 +330,9 @@ export function AdminConsole({
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+        <TabsContent value="sessions">
+          <SessionsView client={client} locale={locale} signedOut={signedOut} pageSize={pageSize} />
         </TabsContent>
         <TabsContent value="audit">
           <AuditViewer client={client} locale={locale} signedOut={signedOut} pageSize={pageSize} />

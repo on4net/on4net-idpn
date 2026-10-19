@@ -35,6 +35,7 @@ describe('parseServerEnv', () => {
       LOG_LEVEL: 'info',
       MFE_ALLOWED_ORIGINS: [],
       TRUSTED_PROXY_CIDRS: [],
+      SESSION_MAX_CONCURRENT: 5,
     });
     expect(env.ADMIN_URL).toBeUndefined();
     expect(env.SIGNING_KEY_REF).toBeUndefined();

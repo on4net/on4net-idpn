@@ -279,6 +279,14 @@ export function createPrismaAdminUserRepository(
       });
       return result.count;
     },
+
+    async revokeRefreshTokensForSession(sessionId, revokedAt) {
+      const result = await prisma.refreshToken.updateMany({
+        where: { sessionId, revokedAt: null },
+        data: { revokedAt },
+      });
+      return result.count;
+    },
   };
 }
 

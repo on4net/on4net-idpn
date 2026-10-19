@@ -1,5 +1,6 @@
 import { sanitizeAuditMetadata, type AuditEventInput } from './sanitize.js';
 import type { PrismaClient } from '../generated/prisma/client.js';
+import type { SessionRevoker } from '../session/revocation.js';
 import type { PasswordStore } from '../users/change-password.js';
 
 /** Persists an audit event with credentials stripped from metadata. */
@@ -23,8 +24,17 @@ export async function recordAuditEvent(
   });
 }
 
-/** Prisma-backed implementation of the password change workflow. */
-export function createPrismaPasswordStore(prisma: PrismaClient): PasswordStore {
+/**
+ * Prisma-backed implementation of the password change workflow.
+ *
+ * `sessions` must be supplied in production so a password change also invalidates the Redis
+ * sessions that `/oauth2/authorize` and refresh grants read (the database row alone is not
+ * enough to reject the next request).
+ */
+export function createPrismaPasswordStore(
+  prisma: PrismaClient,
+  options: { sessions?: Pick<SessionRevoker, 'revokeAllForUser'> } = {},
+): PasswordStore {
   return {
     async findUser(userId) {
       return prisma.user.findUnique({
@@ -53,6 +63,7 @@ export function createPrismaPasswordStore(prisma: PrismaClient): PasswordStore {
         where: { userId, revokedAt: null },
         data: { revokedAt, revokeReason: reason },
       });
+      await options.sessions?.revokeAllForUser(userId, 'password_change');
       return result.count;
     },
 
