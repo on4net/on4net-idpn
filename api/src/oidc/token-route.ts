@@ -40,8 +40,16 @@ export interface TokenRouteOptions {
   keys: SigningKeyManager;
   /** Optional session lookup so revocation invalidates refresh grants immediately. */
   sessions?: { read(sid: string): Promise<IdpSession | null> };
+  /**
+   * Eligibility for the `idp.client-admin` scope. The scope is never issued to a user who
+   * holds no `idp:client-*` permission for the app, even if an old code or refresh token
+   * still carries it.
+   */
+  isClientAdminEligible?: (userId: string, clientId: string) => Promise<boolean>;
   now?: () => Date;
 }
+
+const CLIENT_ADMIN_SCOPE = 'idp.client-admin';
 
 interface TokenRequestBody {
   grant_type?: string;
@@ -145,6 +153,17 @@ async function authorizationCodeGrant(
     return tokenError(reply, oauthError('invalid_grant', 'unknown subject'));
   }
 
+  if (
+    exchange.record.scope.includes(CLIENT_ADMIN_SCOPE) &&
+    options.isClientAdminEligible !== undefined &&
+    !(await options.isClientAdminEligible(profile.id, client.clientId))
+  ) {
+    return tokenError(
+      reply,
+      oauthError('access_denied', 'client administration permission is required'),
+    );
+  }
+
   const issuedAt = Math.floor(at.getTime() / 1000);
   const accessToken = await signAccessToken(
     options,
@@ -205,6 +224,17 @@ async function refreshTokenGrant(
   const profile = await options.users.findProfile(rotation.record.userId);
   if (profile === null) {
     return tokenError(reply, oauthError('invalid_grant', 'unknown subject'));
+  }
+
+  if (
+    rotation.record.scope.includes(CLIENT_ADMIN_SCOPE) &&
+    options.isClientAdminEligible !== undefined &&
+    !(await options.isClientAdminEligible(profile.id, client.clientId))
+  ) {
+    return tokenError(
+      reply,
+      oauthError('access_denied', 'client administration permission is required'),
+    );
   }
 
   const session =

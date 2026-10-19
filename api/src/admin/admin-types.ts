@@ -2,12 +2,16 @@ import type { AuditEventInput } from '../audit/sanitize.js';
 
 export type UserStatus = 'active' | 'locked' | 'disabled' | 'pending';
 
-/** Authenticated global-admin caller, resolved from the access token and the database. */
+export type AdminMode = 'global' | 'delegated';
+
+/** Authenticated admin caller, resolved from the access token and the database. */
 export interface AdminPrincipal {
   userId: string;
+  /** Token client: the admin panel for Global Admin, the app itself for Delegated Admin. */
   clientId: string;
   scopes: readonly string[];
   permissions: ReadonlySet<string>;
+  mode: AdminMode;
 }
 
 export interface AdminUser {

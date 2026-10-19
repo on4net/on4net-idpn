@@ -43,7 +43,7 @@ async function migrateDeploy(): Promise<void> {
 
 const token = async (userId: string, scope = 'openid idp.admin'): Promise<string> => {
   const accessToken = await keys.signAccessToken(
-    { scope, client_id: adminClientId },
+    { scope, client_id: adminClientId, auth_time: Math.floor(Date.now() / 1000) },
     { issuer, audience: adminClientId, subject: userId, expiresInSeconds: 300 },
   );
   return 'Bearer ' + accessToken;

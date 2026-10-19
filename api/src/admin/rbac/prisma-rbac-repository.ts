@@ -99,6 +99,7 @@ export function createPrismaRbacRepository(prisma: PrismaClient): AdminRbacRepos
   const linkablePermissions = async (
     keys: string[],
     roleClientId: string | null,
+    allowGlobalPermissions: boolean,
   ): Promise<CatalogResult<{ id: string }[]>> => {
     const unique = [...new Set(keys)];
     if (unique.length === 0) {
@@ -120,7 +121,15 @@ export function createPrismaRbacRepository(prisma: PrismaClient): AdminRbacRepos
     }
 
     for (const row of rows) {
-      const problem = permissionOwnershipProblem(row.client?.clientId ?? null, roleClientId);
+      const permissionClientId = row.client?.clientId ?? null;
+      if (!allowGlobalPermissions && permissionClientId !== roleClientId) {
+        return {
+          ok: false,
+          reason: 'cross-client-permission',
+          detail: `permission "${row.key}" does not belong to client "${roleClientId ?? 'global'}"`,
+        };
+      }
+      const problem = permissionOwnershipProblem(permissionClientId, roleClientId);
       if (problem !== null) {
         return { ok: false, reason: 'cross-client-permission', detail: problem };
       }
@@ -183,6 +192,14 @@ export function createPrismaRbacRepository(prisma: PrismaClient): AdminRbacRepos
       }
     },
 
+    async findPermission(permissionId: string) {
+      const row = await prisma.permission.findUnique({
+        where: { id: permissionId },
+        select: PERMISSION_SELECT,
+      });
+      return row === null ? null : toPermission(row);
+    },
+
     async deletePermission(permissionId: string) {
       const permission = await prisma.permission.findUnique({
         where: { id: permissionId },
@@ -227,7 +244,7 @@ export function createPrismaRbacRepository(prisma: PrismaClient): AdminRbacRepos
 
     findRole: loadRole,
 
-    async createRole(input: CreateRoleInput) {
+    async createRole(input: CreateRoleInput, options: { allowGlobalPermissions?: boolean } = {}) {
       const clientUuid = input.clientId === null ? null : await resolveClient(input.clientId);
       if (input.clientId !== null && clientUuid === null) {
         return {
@@ -237,7 +254,11 @@ export function createPrismaRbacRepository(prisma: PrismaClient): AdminRbacRepos
         };
       }
 
-      const linked = await linkablePermissions(input.permissionKeys, input.clientId);
+      const linked = await linkablePermissions(
+        input.permissionKeys,
+        input.clientId,
+        options.allowGlobalPermissions ?? true,
+      );
       if (!linked.ok) {
         return linked;
       }
@@ -283,7 +304,11 @@ export function createPrismaRbacRepository(prisma: PrismaClient): AdminRbacRepos
       }
     },
 
-    async replaceRolePermissions(roleId: string, permissionKeys: string[]) {
+    async replaceRolePermissions(
+      roleId: string,
+      permissionKeys: string[],
+      options: { allowGlobalPermissions?: boolean } = {},
+    ) {
       const role = await prisma.role.findUnique({
         where: { id: roleId },
         select: { id: true, client: { select: { clientId: true } } },
@@ -293,7 +318,11 @@ export function createPrismaRbacRepository(prisma: PrismaClient): AdminRbacRepos
       }
 
       const roleClientId = role.client?.clientId ?? null;
-      const linked = await linkablePermissions(permissionKeys, roleClientId);
+      const linked = await linkablePermissions(
+        permissionKeys,
+        roleClientId,
+        options.allowGlobalPermissions ?? true,
+      );
       if (!linked.ok) {
         return linked;
       }

@@ -139,6 +139,7 @@ async function buildClients(): Promise<ClientAuthRepository> {
 interface HarnessOptions {
   now?: Date;
   sessionValid?: boolean;
+  clientAdminEligible?: boolean;
 }
 
 async function harness(options: HarnessOptions = {}) {
@@ -178,6 +179,7 @@ async function harness(options: HarnessOptions = {}) {
       },
     },
     now: () => options.now ?? new Date('2026-10-18T12:00:00Z'),
+    isClientAdminEligible: async () => options.clientAdminEligible ?? true,
   });
   await app.ready();
   return { app, codes, refreshTokens, keys };
@@ -271,6 +273,39 @@ describe('POST /oauth2/token — authorization_code', () => {
     expect(idToken).not.toHaveProperty('roles');
 
     await app.close();
+  });
+
+  it('refuses the delegated admin scope when the user is no longer eligible', async () => {
+    const denied = await harness({ clientAdminEligible: false });
+    const code = await seedCode(denied.codes, ['openid', 'idp.client-admin']);
+
+    const response = await request(denied.app.server)
+      .post('/oauth2/token')
+      .send({
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: 'https://spa.example.com/cb',
+        code_verifier: verifier,
+        client_id: 'spa-app',
+      })
+      .expect(400);
+    expect(response.body).toMatchObject({ error: 'access_denied' });
+    await denied.app.close();
+
+    const allowed = await harness({ clientAdminEligible: true });
+    const allowedCode = await seedCode(allowed.codes, ['openid', 'idp.client-admin']);
+    const issued = await request(allowed.app.server)
+      .post('/oauth2/token')
+      .send({
+        grant_type: 'authorization_code',
+        code: allowedCode,
+        redirect_uri: 'https://spa.example.com/cb',
+        code_verifier: verifier,
+        client_id: 'spa-app',
+      })
+      .expect(200);
+    expect(issued.body.scope).toBe('openid idp.client-admin');
+    await allowed.app.close();
   });
 
   it('issues a refresh token only with offline_access', async () => {

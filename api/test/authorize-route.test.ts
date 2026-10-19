@@ -19,7 +19,7 @@ const client: OAuthClient = {
   status: 'active',
   type: 'spa',
   redirectUris: ['https://app-a.example.com/callback'],
-  scopes: ['openid', 'profile'],
+  scopes: ['openid', 'profile', 'idp.client-admin'],
   requirePkce: true,
   registrationPolicy: 'invite_only',
   mfaPolicy: 'optional',
@@ -84,6 +84,7 @@ const baseQuery = {
 function buildApp(options: {
   currentSession: IdpSession | null;
   consentGranted?: boolean;
+  clientAdminEligible?: boolean;
   now?: Date;
 }) {
   const app = Fastify({ logger: false });
@@ -100,6 +101,7 @@ function buildApp(options: {
       },
     },
     isConsentGranted: async () => options.consentGranted ?? true,
+    isClientAdminEligible: async () => options.clientAdminEligible ?? true,
     now: () => options.now ?? new Date('2026-10-18T12:00:00Z'),
   });
   return { app, codes };
@@ -135,6 +137,32 @@ describe('GET /oauth2/authorize', () => {
     expect(stored?.codeHash).not.toBe(code);
 
     await app.close();
+  });
+
+  it('issues the delegated admin scope only to an eligible user', async () => {
+    const allowed = buildApp({ currentSession: session(), clientAdminEligible: true });
+    await allowed.app.ready();
+    const granted = await request(allowed.app.server)
+      .get('/oauth2/authorize')
+      .query({ ...baseQuery, scope: 'openid idp.client-admin' })
+      .set('Cookie', 'idpn_session=session-abc')
+      .expect(302);
+    const grantedLocation = new URL(granted.headers.location ?? '');
+    expect(grantedLocation.searchParams.get('code')).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    await allowed.app.close();
+
+    const denied = buildApp({ currentSession: session(), clientAdminEligible: false });
+    await denied.app.ready();
+    const refusal = await request(denied.app.server)
+      .get('/oauth2/authorize')
+      .query({ ...baseQuery, scope: 'openid idp.client-admin' })
+      .set('Cookie', 'idpn_session=session-abc')
+      .expect(302);
+    const refusalLocation = new URL(refusal.headers.location ?? '');
+    expect(refusalLocation.searchParams.get('error')).toBe('access_denied');
+    expect(refusalLocation.searchParams.get('code')).toBeNull();
+    expect(denied.codes.records.size).toBe(0);
+    await denied.app.close();
   });
 
   it('returns invalid_request to the user agent for an unregistered redirect_uri', async () => {

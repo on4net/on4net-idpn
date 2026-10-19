@@ -1,10 +1,11 @@
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+﻿import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { z } from 'zod';
 
 import type { AdminAudit } from '../admin-types.js';
 import {
   authorizeAdminRequest,
   type AdminAuthorization,
+  type AdminRequirement,
   type PermissionReader,
   type TokenVerifier,
 } from '../authorize.js';
@@ -30,17 +31,24 @@ export interface RbacRoutesOptions {
 
 const READ_PERMISSION = 'idp:role:read';
 const WRITE_PERMISSION = 'idp:role:write';
+const DELEGATED_READ = 'idp:client-role:read';
+const DELEGATED_WRITE = 'idp:client-role:write';
+
+type GuardedPrincipal = { userId: string; clientId: string; mode: 'global' | 'delegated' };
 
 const validationDetail = (error: z.ZodError): string =>
   error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; ');
+
+const forbidden = (reply: FastifyReply, detail: string): FastifyReply =>
+  sendProblem(reply, 403, 'forbidden', 'Forbidden', detail);
 
 /** Registers the permission catalog and role endpoints (docs/api.md 3.4). */
 export function registerRbacAdminRoutes(app: FastifyInstance, options: RbacRoutesOptions): void {
   const authorize = async (
     request: FastifyRequest,
     reply: FastifyReply,
-    permission: string,
-  ): Promise<{ userId: string; clientId: string } | null> => {
+    requirement: string | AdminRequirement,
+  ): Promise<GuardedPrincipal | null> => {
     const auth: AdminAuthorization = await authorizeAdminRequest(
       request,
       {
@@ -49,11 +57,11 @@ export function registerRbacAdminRoutes(app: FastifyInstance, options: RbacRoute
         verifier: options.verifier,
         permissions: options.permissions,
       },
-      permission,
+      requirement,
     );
     if (!auth.ok) {
       if (auth.status === 401) {
-        reply.header('WWW-Authenticate', '******"invalid_token"');
+        reply.header('WWW-Authenticate', 'Bearer error="invalid_token"');
       }
       void sendProblem(
         reply,
@@ -64,7 +72,11 @@ export function registerRbacAdminRoutes(app: FastifyInstance, options: RbacRoute
       );
       return null;
     }
-    return { userId: auth.principal.userId, clientId: auth.principal.clientId };
+    return {
+      userId: auth.principal.userId,
+      clientId: auth.principal.clientId,
+      mode: auth.principal.mode,
+    };
   };
 
   const audit = async (
@@ -107,7 +119,12 @@ export function registerRbacAdminRoutes(app: FastifyInstance, options: RbacRoute
   };
 
   app.get('/api/v1/permissions', async (request, reply) => {
-    if ((await authorize(request, reply, READ_PERMISSION)) === null) {
+    const principal = await authorize(request, reply, {
+      permission: READ_PERMISSION,
+      delegatedPermission: DELEGATED_READ,
+      allowDelegated: true,
+    });
+    if (principal === null) {
       return reply;
     }
     const parsed = catalogQuerySchema.safeParse(request.query);
@@ -121,17 +138,29 @@ export function registerRbacAdminRoutes(app: FastifyInstance, options: RbacRoute
       );
     }
     const { page, limit, clientId, q } = parsed.data;
+    if (
+      principal.mode === 'delegated' &&
+      clientId !== undefined &&
+      clientId !== principal.clientId
+    ) {
+      return forbidden(reply, 'token was issued to a different client');
+    }
+    const scopedClientId = principal.mode === 'delegated' ? principal.clientId : clientId;
     const result = await options.rbac.listPermissions({
       page,
       limit,
-      ...(clientId === undefined ? {} : { clientId }),
+      ...(scopedClientId === undefined ? {} : { clientId: scopedClientId }),
       ...(q === undefined ? {} : { query: q }),
     });
     return reply.send({ items: result.items, page, limit, total: result.total });
   });
 
   app.post('/api/v1/permissions', async (request, reply) => {
-    const principal = await authorize(request, reply, WRITE_PERMISSION);
+    const principal = await authorize(request, reply, {
+      permission: WRITE_PERMISSION,
+      delegatedPermission: DELEGATED_WRITE,
+      allowDelegated: true,
+    });
     if (principal === null) {
       return reply;
     }
@@ -146,6 +175,9 @@ export function registerRbacAdminRoutes(app: FastifyInstance, options: RbacRoute
       );
     }
     const body = parsed.data;
+    if (principal.mode === 'delegated' && body.clientId !== principal.clientId) {
+      return forbidden(reply, 'token was issued to a different client');
+    }
     const keyProblems = permissionKeyProblems(body.key, body.clientId);
     if (keyProblems.length > 0) {
       return sendProblem(
@@ -174,9 +206,20 @@ export function registerRbacAdminRoutes(app: FastifyInstance, options: RbacRoute
   });
 
   app.delete<{ Params: { id: string } }>('/api/v1/permissions/:id', async (request, reply) => {
-    const principal = await authorize(request, reply, WRITE_PERMISSION);
+    const principal = await authorize(request, reply, {
+      permission: WRITE_PERMISSION,
+      delegatedPermission: DELEGATED_WRITE,
+      allowDelegated: true,
+    });
     if (principal === null) {
       return reply;
+    }
+    const permission = await options.rbac.findPermission(request.params.id);
+    if (permission === null) {
+      return sendProblem(reply, 404, 'not-found', 'Not found', 'permission does not exist');
+    }
+    if (principal.mode === 'delegated' && permission.clientId !== principal.clientId) {
+      return forbidden(reply, 'token was issued to a different client');
     }
     const outcome = await options.rbac.deletePermission(request.params.id);
     if (outcome === 'not-found') {
@@ -191,12 +234,24 @@ export function registerRbacAdminRoutes(app: FastifyInstance, options: RbacRoute
         'permission is still linked to a role',
       );
     }
-    await audit(request, principal, 'permission.delete', 'permission', request.params.id, null);
+    await audit(
+      request,
+      principal,
+      'permission.delete',
+      'permission',
+      request.params.id,
+      permission.clientId,
+    );
     return reply.code(204).send();
   });
 
   app.get('/api/v1/roles', async (request, reply) => {
-    if ((await authorize(request, reply, READ_PERMISSION)) === null) {
+    const principal = await authorize(request, reply, {
+      permission: READ_PERMISSION,
+      delegatedPermission: DELEGATED_READ,
+      allowDelegated: true,
+    });
+    if (principal === null) {
       return reply;
     }
     const parsed = catalogQuerySchema.safeParse(request.query);
@@ -210,17 +265,29 @@ export function registerRbacAdminRoutes(app: FastifyInstance, options: RbacRoute
       );
     }
     const { page, limit, clientId, q } = parsed.data;
+    if (
+      principal.mode === 'delegated' &&
+      clientId !== undefined &&
+      clientId !== principal.clientId
+    ) {
+      return forbidden(reply, 'token was issued to a different client');
+    }
+    const scopedClientId = principal.mode === 'delegated' ? principal.clientId : clientId;
     const result = await options.rbac.listRoles({
       page,
       limit,
-      ...(clientId === undefined ? {} : { clientId }),
+      ...(scopedClientId === undefined ? {} : { clientId: scopedClientId }),
       ...(q === undefined ? {} : { query: q }),
     });
     return reply.send({ items: result.items, page, limit, total: result.total });
   });
 
   app.post('/api/v1/roles', async (request, reply) => {
-    const principal = await authorize(request, reply, WRITE_PERMISSION);
+    const principal = await authorize(request, reply, {
+      permission: WRITE_PERMISSION,
+      delegatedPermission: DELEGATED_WRITE,
+      allowDelegated: true,
+    });
     if (principal === null) {
       return reply;
     }
@@ -235,6 +302,9 @@ export function registerRbacAdminRoutes(app: FastifyInstance, options: RbacRoute
       );
     }
     const body = parsed.data;
+    if (principal.mode === 'delegated' && body.clientId !== principal.clientId) {
+      return forbidden(reply, 'token was issued to a different client');
+    }
     const keyProblems = roleKeyProblems(body.key, body.clientId);
     if (keyProblems.length > 0) {
       return sendProblem(
@@ -246,14 +316,17 @@ export function registerRbacAdminRoutes(app: FastifyInstance, options: RbacRoute
       );
     }
 
-    const created = await options.rbac.createRole({
-      key: body.key,
-      name: body.name,
-      description: body.description,
-      clientId: body.clientId,
-      isDefault: body.isDefault,
-      permissionKeys: body.permissions,
-    });
+    const created = await options.rbac.createRole(
+      {
+        key: body.key,
+        name: body.name,
+        description: body.description,
+        clientId: body.clientId,
+        isDefault: body.isDefault,
+        permissionKeys: body.permissions,
+      },
+      { allowGlobalPermissions: principal.mode === 'global' },
+    );
     if (!created.ok) {
       return sendFailure(reply, created);
     }
@@ -270,18 +343,30 @@ export function registerRbacAdminRoutes(app: FastifyInstance, options: RbacRoute
   });
 
   app.get<{ Params: { id: string } }>('/api/v1/roles/:id', async (request, reply) => {
-    if ((await authorize(request, reply, READ_PERMISSION)) === null) {
+    const principal = await authorize(request, reply, {
+      permission: READ_PERMISSION,
+      delegatedPermission: DELEGATED_READ,
+      allowDelegated: true,
+    });
+    if (principal === null) {
       return reply;
     }
     const role = await options.rbac.findRole(request.params.id);
     if (role === null) {
       return sendProblem(reply, 404, 'not-found', 'Not found', 'role does not exist');
     }
+    if (principal.mode === 'delegated' && role.clientId !== principal.clientId) {
+      return forbidden(reply, 'token was issued to a different client');
+    }
     return reply.send(role);
   });
 
   app.patch<{ Params: { id: string } }>('/api/v1/roles/:id', async (request, reply) => {
-    const principal = await authorize(request, reply, WRITE_PERMISSION);
+    const principal = await authorize(request, reply, {
+      permission: WRITE_PERMISSION,
+      delegatedPermission: DELEGATED_WRITE,
+      allowDelegated: true,
+    });
     if (principal === null) {
       return reply;
     }
@@ -294,6 +379,13 @@ export function registerRbacAdminRoutes(app: FastifyInstance, options: RbacRoute
         'Validation failed',
         validationDetail(parsed.error),
       );
+    }
+    const existing = await options.rbac.findRole(request.params.id);
+    if (existing === null) {
+      return sendProblem(reply, 404, 'not-found', 'Not found', 'role does not exist');
+    }
+    if (principal.mode === 'delegated' && existing.clientId !== principal.clientId) {
+      return forbidden(reply, 'token was issued to a different client');
     }
     const updated = await options.rbac.updateRole(request.params.id, parsed.data);
     if (!updated.ok) {
@@ -312,7 +404,11 @@ export function registerRbacAdminRoutes(app: FastifyInstance, options: RbacRoute
   });
 
   app.put<{ Params: { id: string } }>('/api/v1/roles/:id/permissions', async (request, reply) => {
-    const principal = await authorize(request, reply, WRITE_PERMISSION);
+    const principal = await authorize(request, reply, {
+      permission: WRITE_PERMISSION,
+      delegatedPermission: DELEGATED_WRITE,
+      allowDelegated: true,
+    });
     if (principal === null) {
       return reply;
     }
@@ -326,9 +422,17 @@ export function registerRbacAdminRoutes(app: FastifyInstance, options: RbacRoute
         validationDetail(parsed.error),
       );
     }
+    const existing = await options.rbac.findRole(request.params.id);
+    if (existing === null) {
+      return sendProblem(reply, 404, 'not-found', 'Not found', 'role does not exist');
+    }
+    if (principal.mode === 'delegated' && existing.clientId !== principal.clientId) {
+      return forbidden(reply, 'token was issued to a different client');
+    }
     const updated = await options.rbac.replaceRolePermissions(
       request.params.id,
       parsed.data.permissions,
+      { allowGlobalPermissions: principal.mode === 'global' },
     );
     if (!updated.ok) {
       return sendFailure(reply, updated);
@@ -346,13 +450,21 @@ export function registerRbacAdminRoutes(app: FastifyInstance, options: RbacRoute
   });
 
   app.delete<{ Params: { id: string } }>('/api/v1/roles/:id', async (request, reply) => {
-    const principal = await authorize(request, reply, WRITE_PERMISSION);
+    const principal = await authorize(request, reply, {
+      permission: WRITE_PERMISSION,
+      delegatedPermission: DELEGATED_WRITE,
+      allowDelegated: true,
+      stepUp: true,
+    });
     if (principal === null) {
       return reply;
     }
     const role = await options.rbac.findRole(request.params.id);
     if (role === null) {
       return sendProblem(reply, 404, 'not-found', 'Not found', 'role does not exist');
+    }
+    if (principal.mode === 'delegated' && role.clientId !== principal.clientId) {
+      return forbidden(reply, 'token was issued to a different client');
     }
     const outcome = await options.rbac.deleteRole(request.params.id);
     if (outcome === 'in-use') {

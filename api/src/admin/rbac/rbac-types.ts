@@ -66,16 +66,21 @@ export type CatalogResult<T> =
 /** Persistence port for the permission catalog and role management endpoints. */
 export interface AdminRbacRepository {
   listPermissions(query: ListCatalogQuery): Promise<{ items: AdminPermission[]; total: number }>;
+  findPermission(permissionId: string): Promise<AdminPermission | null>;
   createPermission(input: CreatePermissionInput): Promise<CatalogResult<AdminPermission>>;
   deletePermission(permissionId: string): Promise<'deleted' | 'not-found' | 'in-use'>;
 
   listRoles(query: ListCatalogQuery): Promise<{ items: AdminRole[]; total: number }>;
   findRole(roleId: string): Promise<AdminRole | null>;
-  createRole(input: CreateRoleInput): Promise<CatalogResult<AdminRole>>;
+  createRole(
+    input: CreateRoleInput,
+    options?: { allowGlobalPermissions?: boolean },
+  ): Promise<CatalogResult<AdminRole>>;
   updateRole(roleId: string, input: UpdateRoleInput): Promise<CatalogResult<AdminRole>>;
   replaceRolePermissions(
     roleId: string,
     permissionKeys: string[],
+    options?: { allowGlobalPermissions?: boolean },
   ): Promise<CatalogResult<AdminRole>>;
   deleteRole(roleId: string): Promise<'deleted' | 'not-found' | 'in-use'>;
 

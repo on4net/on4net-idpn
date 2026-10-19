@@ -40,6 +40,11 @@ const sessions = new RedisSessionStore({
 const clientsRepository = createPrismaClientRepository(prisma);
 const usersRepository = createPrismaUserRepository(prisma);
 const loginRepository = createPrismaLoginRepository(prisma);
+const permissionReader = createPrismaPermissionReader(prisma);
+
+/** A user may receive `idp.client-admin` only with at least one scoped admin permission. */
+const isClientAdminEligible = async (userId: string, clientId: string): Promise<boolean> =>
+  ((await permissionReader.clientPermissionsForUser?.(userId, clientId)) ?? []).length > 0;
 
 const app = buildServer({
   issuer: env.APP_URL,
@@ -50,11 +55,13 @@ const app = buildServer({
     refreshTokens: createPrismaRefreshTokenRepository(prisma),
     users: usersRepository,
     sessions,
+    isClientAdminEligible,
   },
   userInfo: { users: usersRepository },
   authorize: {
     clients: clientsRepository,
     loginUrl: `${(env.HOSTED_UI_URL ?? env.APP_URL).replace(/\/+$/, '')}/`,
+    isClientAdminEligible,
   },
   login: {
     users: loginRepository,
@@ -78,19 +85,19 @@ const app = buildServer({
   },
   admin: {
     adminClientId: env.ADMIN_CLIENT_ID,
-    permissions: createPrismaPermissionReader(prisma),
+    permissions: permissionReader,
     users: createPrismaAdminUserRepository(prisma),
     audit: createPrismaAdminAudit(prisma),
   },
   adminClients: {
     adminClientId: env.ADMIN_CLIENT_ID,
-    permissions: createPrismaPermissionReader(prisma),
+    permissions: permissionReader,
     clients: createPrismaAdminClientRepository(prisma),
     audit: createPrismaAdminAudit(prisma),
   },
   rbac: {
     adminClientId: env.ADMIN_CLIENT_ID,
-    permissions: createPrismaPermissionReader(prisma),
+    permissions: permissionReader,
     rbac: createPrismaRbacRepository(prisma),
     audit: createPrismaAdminAudit(prisma),
   },

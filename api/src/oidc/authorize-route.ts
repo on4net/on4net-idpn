@@ -26,6 +26,12 @@ export interface AuthorizeRouteOptions {
   sessions: SessionReader;
   /** Consent gate; trusted first-party clients can always return `true`. */
   isConsentGranted?: (userId: string, clientId: string, scopes: string[]) => Promise<boolean>;
+  /**
+   * Whether the user may receive the `idp.client-admin` scope for this client. The scope is
+   * only issued to users that hold at least one `idp:client-*` permission for the app
+   * (docs/api.md 3).
+   */
+  isClientAdminEligible?: (userId: string, clientId: string) => Promise<boolean>;
   /** Hosted login URL for interactive requests (Hosted UI arrives in a later card). */
   loginUrl?: string;
   consentUrl?: string;
@@ -33,6 +39,8 @@ export interface AuthorizeRouteOptions {
 }
 
 type Query = Record<string, string | undefined>;
+
+const CLIENT_ADMIN_SCOPE = 'idp.client-admin';
 
 const asQuery = (query: Query): AuthorizeQuery => ({
   response_type: query['response_type'],
@@ -135,6 +143,21 @@ export function registerAuthorizeRoute(app: FastifyInstance, options: AuthorizeR
         ? oauthError('login_required', 're-authentication required')
         : oauthError('interaction_required', 're-authentication required');
       return redirect(reply, buildErrorRedirect(authorize.redirectUri, error, authorize.state));
+    }
+
+    if (
+      authorize.scopes.includes(CLIENT_ADMIN_SCOPE) &&
+      options.isClientAdminEligible !== undefined &&
+      !(await options.isClientAdminEligible(session.userId, authorize.client.clientId))
+    ) {
+      return redirect(
+        reply,
+        buildErrorRedirect(
+          authorize.redirectUri,
+          oauthError('access_denied', 'client administration permission is required'),
+          authorize.state,
+        ),
+      );
     }
 
     const consentNeeded = !(await isConsentGranted(

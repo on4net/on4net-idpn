@@ -37,6 +37,7 @@ export interface BuildServerOptions {
     clients: Parameters<typeof registerAuthorizeRoute>[1]['clients'];
     /** Hosted Auth UI used for interactive requests; defaults to `${issuer}/login`. */
     loginUrl?: string;
+    isClientAdminEligible?: (userId: string, clientId: string) => Promise<boolean>;
   };
   /** Mounts the global Admin API user endpoints (docs/api.md 3). */
   admin?: Omit<AdminRoutesOptions, 'issuer' | 'verifier'>;
@@ -85,6 +86,9 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
         ...(options.authorize.loginUrl === undefined
           ? {}
           : { loginUrl: options.authorize.loginUrl }),
+        ...(options.authorize.isClientAdminEligible === undefined
+          ? {}
+          : { isClientAdminEligible: options.authorize.isClientAdminEligible }),
       });
     }
   }
