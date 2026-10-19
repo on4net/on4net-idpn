@@ -20,6 +20,8 @@ import type { RbacRoutesOptions } from './admin/rbac/routes.js';
 import { registerRbacAdminRoutes } from './admin/rbac/routes.js';
 import type { MemberRoutesOptions } from './admin/members/routes.js';
 import { registerMemberAdminRoutes } from './admin/members/routes.js';
+import type { LoginContextRoutesOptions } from './admin/login-contexts/routes.js';
+import { registerLoginContextAdminRoutes } from './admin/login-contexts/routes.js';
 import type { SessionRoutesOptions } from './admin/sessions/routes.js';
 import { registerSessionAdminRoutes } from './admin/sessions/routes.js';
 import type { KeyRoutesOptions } from './admin/keys/routes.js';
@@ -94,6 +96,8 @@ export interface BuildServerOptions {
   rbac?: Omit<RbacRoutesOptions, 'issuer' | 'verifier'>;
   /** Mounts the client membership endpoints (docs/api.md 3.3.1). */
   adminMembers?: Omit<MemberRoutesOptions, 'issuer' | 'verifier'>;
+  /** Mounts the per-app login context endpoints (docs/api.md 3.3.3). */
+  adminLoginContexts?: Omit<LoginContextRoutesOptions, 'issuer' | 'verifier'>;
   /** Mounts the audit read and export endpoints (docs/api.md 3.8). */
   audit?: Omit<AuditRoutesOptions, 'issuer' | 'verifier'>;
   /** Mounts session administration and self-service endpoints (docs/api.md 3.1, 3.7). */
@@ -259,6 +263,14 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
 
   if (options.adminMembers !== undefined) {
     registerMemberAdminRoutes(app, { ...options.adminMembers, issuer, verifier: keys });
+  }
+
+  if (options.adminLoginContexts !== undefined) {
+    registerLoginContextAdminRoutes(app, {
+      ...options.adminLoginContexts,
+      issuer,
+      verifier: keys,
+    });
   }
 
   if (options.audit !== undefined) {

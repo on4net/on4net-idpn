@@ -384,9 +384,15 @@ describe('initial schema', () => {
       expect(first.clients).toBe(1);
       expect(first.users).toBe(3);
       expect(first.roles).toBe(6);
-      expect(first.permissions).toBe(34);
+      expect(first.permissions).toBe(36);
+      expect(first.loginContexts).toBe(1);
       expect(first.assignments).toBe(2);
       expect(first.rolePermissions).toBeGreaterThan(0);
+      const adminClient = await prisma.client.findUnique({
+        where: { clientId: 'admin-panel' },
+        select: { defaultLoginContextKey: true },
+      });
+      expect(adminClient?.defaultLoginContextKey).toBe('default');
     } finally {
       await prisma.$disconnect();
     }
@@ -399,19 +405,30 @@ async function countSeededRows(prisma: PrismaClient): Promise<{
   users: number;
   roles: number;
   permissions: number;
+  loginContexts: number;
   assignments: number;
   rolePermissions: number;
 }> {
-  const [tenants, clients, users, roles, permissions, assignments, rolePermissions] =
+  const [tenants, clients, users, roles, permissions, loginContexts, assignments, rolePermissions] =
     await Promise.all([
       prisma.tenant.count(),
       prisma.client.count(),
       prisma.user.count(),
       prisma.role.count(),
       prisma.permission.count(),
+      prisma.clientLoginContext.count(),
       prisma.assignment.count(),
       prisma.rolePermission.count(),
     ]);
 
-  return { tenants, clients, users, roles, permissions, assignments, rolePermissions };
+  return {
+    tenants,
+    clients,
+    users,
+    roles,
+    permissions,
+    loginContexts,
+    assignments,
+    rolePermissions,
+  };
 }

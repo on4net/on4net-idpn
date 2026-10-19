@@ -154,6 +154,24 @@ export function buildPublicClientConfig(
     ...(client.branding.fontFamily === undefined ? {} : { fontFamily: client.branding.fontFamily }),
   });
 
+  const loginContexts = client.loginContexts.map((context) => ({
+    key: context.key,
+    name: context.name,
+    ...(context.description === undefined || context.description === null
+      ? {}
+      : { description: context.description }),
+    methods: context.methods.filter(isLoginMethod),
+    mfaPolicy: context.mfaPolicy,
+  }));
+  // The client row mirrors the default context key. Only publish it when that context is
+  // actually active, otherwise the UI would offer a definition that no longer exists
+  // (docs/login-contexts.md 7.1).
+  const defaultLoginContext =
+    client.defaultLoginContextKey !== null &&
+    loginContexts.some((context) => context.key === client.defaultLoginContextKey)
+      ? client.defaultLoginContextKey
+      : undefined;
+
   const config: PublicClientConfig = {
     clientId: client.clientId,
     name: client.name,
@@ -169,18 +187,8 @@ export function buildPublicClientConfig(
     theme,
     registrationPolicy: client.registrationPolicy,
     mfaPolicy: client.mfaPolicy,
-    loginContexts: client.loginContexts.map((context) => ({
-      key: context.key,
-      name: context.name,
-      ...(context.description === undefined || context.description === null
-        ? {}
-        : { description: context.description }),
-      methods: context.methods.filter(isLoginMethod),
-      mfaPolicy: context.mfaPolicy,
-    })),
-    ...(client.defaultLoginContextKey === null
-      ? {}
-      : { defaultLoginContext: client.defaultLoginContextKey }),
+    loginContexts,
+    ...(defaultLoginContext === undefined ? {} : { defaultLoginContext }),
     socialProviders: client.socialProviders
       .filter((provider) => provider.provider === 'google' || provider.provider === 'facebook')
       .map((provider) => ({

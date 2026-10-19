@@ -32,6 +32,8 @@ const BASE_PERMISSIONS = [
   { key: 'idp:client-session:write', description: 'Revoke sessions of members of an app' },
   { key: 'idp:client-locale:read', description: 'View locales and translations of an app' },
   { key: 'idp:client-locale:write', description: 'Change locales and translations of an app' },
+  { key: 'idp:client-context:read', description: 'View login contexts of an app' },
+  { key: 'idp:client-context:write', description: 'Create or change login contexts of an app' },
   { key: 'idp:session:read', description: 'View active sessions' },
   { key: 'idp:session:write', description: 'Revoke sessions and close all user sessions' },
   { key: 'idp:session:revoke', description: 'Revoke sessions' },
@@ -57,6 +59,8 @@ const CLIENT_ADMIN_PERMISSIONS = [
   'idp:client-session:write',
   'idp:client-locale:read',
   'idp:client-locale:write',
+  'idp:client-context:read',
+  'idp:client-context:write',
 ] as const;
 
 const BASE_ROLES = [
@@ -128,6 +132,77 @@ const ADMIN_CLIENT = {
   mfaPolicy: 'required_all' as const,
   registrationPolicy: 'disabled' as const,
 };
+
+/**
+ * Ensures every client has exactly one default login context (docs/roadmap.md Phase 2,
+ * docs/api.md 3.3.3). Existing contexts are kept; a missing default is promoted to the
+ * first defined context and `clients.default_login_context_key` is kept in sync so the
+ * public config always names a context that exists. Idempotent.
+ */
+async function seedDefaultLoginContext(prisma: PrismaClient, clientId: string): Promise<void> {
+  const client = await prisma.client.findUniqueOrThrow({
+    where: { clientId },
+    select: {
+      id: true,
+      clientId: true,
+      mfaPolicy: true,
+      registrationPolicy: true,
+      defaultLoginContextKey: true,
+    },
+  });
+
+  const existing = await prisma.clientLoginContext.findMany({
+    where: { clientId: client.id },
+    select: { id: true, key: true, isDefault: true },
+    orderBy: [{ sortOrder: 'asc' }, { key: 'asc' }],
+  });
+
+  if (existing.length === 0) {
+    await prisma.clientLoginContext.create({
+      data: {
+        clientId: client.id,
+        key: 'default',
+        name: 'Default',
+        description: `Default login for ${client.clientId}`,
+        status: 'active',
+        isDefault: true,
+        allowedRoles: [
+          `${client.clientId}:member`,
+          `${client.clientId}:viewer`,
+          `${client.clientId}:user-admin`,
+        ],
+        defaultRoles: [`${client.clientId}:member`],
+        loginMethods: ['password'],
+        mfaPolicy: client.mfaPolicy,
+        registrationPolicy: client.registrationPolicy,
+        allowedEmailDomains: [],
+        sessionIdleTtl: 1800,
+        sessionAbsoluteTtl: 28_800,
+        stepUpRequired: false,
+        sortOrder: 0,
+      },
+    });
+  } else if (!existing.some((context) => context.isDefault)) {
+    const target = existing[0];
+    if (target !== undefined) {
+      await prisma.clientLoginContext.update({
+        where: { id: target.id },
+        data: { isDefault: true },
+      });
+    }
+  }
+
+  const defaultContext = await prisma.clientLoginContext.findFirst({
+    where: { clientId: client.id, isDefault: true },
+    select: { key: true },
+  });
+  if (defaultContext !== null && client.defaultLoginContextKey !== defaultContext.key) {
+    await prisma.client.update({
+      where: { id: client.id },
+      data: { defaultLoginContextKey: defaultContext.key },
+    });
+  }
+}
 
 /**
  * Creates the base roles every client owns. `member` is the default role that is assigned
@@ -266,6 +341,7 @@ export async function seedDatabase(prisma: PrismaClient): Promise<void> {
   const clients = await prisma.client.findMany({ select: { clientId: true } });
   for (const client of clients) {
     await seedClientRoles(prisma, client.clientId, permissionIds);
+    await seedDefaultLoginContext(prisma, client.clientId);
   }
 
   for (const user of SEED_USERS) {

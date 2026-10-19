@@ -31,7 +31,7 @@ const source: PublicClientSource = {
   },
   registrationPolicy: 'invite_only',
   mfaPolicy: 'required_admins',
-  defaultLoginContextKey: 'customer-team',
+  defaultLoginContextKey: 'customer-admin',
   mfeFeatures: { userManagement: true },
   loginContexts: [
     {
@@ -55,7 +55,7 @@ describe('buildPublicClientConfig', () => {
     expect(config).toMatchObject({
       clientId: 'app-a',
       locale: 'fa-IR',
-      defaultLoginContext: 'customer-team',
+      defaultLoginContext: 'customer-admin',
       theme: { primary: '#0f766e', radius: '8px' },
       features: { userManagement: true, selfServiceRegistration: false, mfa: true },
       mfe: deps.mfe,
@@ -66,6 +66,16 @@ describe('buildPublicClientConfig', () => {
       { provider: 'google', label: 'Google' },
       { provider: 'facebook', label: 'Facebook' },
     ]);
+  });
+
+  it('omits a default context key that is not among the active contexts', () => {
+    const config = buildPublicClientConfig(
+      { ...source, defaultLoginContextKey: 'customer-team' },
+      deps,
+    );
+
+    expect(config.loginContexts.map((context) => context.key)).toEqual(['customer-admin']);
+    expect(config).not.toHaveProperty('defaultLoginContext');
   });
 
   it('sanitizes hostile locale rows deterministically', () => {
