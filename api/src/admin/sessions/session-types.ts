@@ -7,6 +7,8 @@ export interface AdminSession {
   userId: string;
   /** Public client id of the app that created the session, if any. */
   clientId: string | null;
+  /** Login Context the session acts in (`null` = client-wide session). */
+  loginContext: string | null;
   status: AdminSessionStatus;
   createdAt: string;
   lastSeenAt: string;
@@ -26,6 +28,8 @@ export interface ListSessionsQuery {
   userId?: string;
   /** Public client id (docs/api.md 3.7). */
   clientId?: string;
+  /** Login Context key of the session (docs/login-contexts.md 3.4). */
+  loginContext?: string;
   status?: AdminSessionStatus;
 }
 
@@ -60,6 +64,8 @@ export interface AdminSessionRepository {
     revokedAt: Date,
   ): Promise<number>;
   revokeRefreshTokensForSession(sessionId: string, revokedAt: Date): Promise<number>;
+  /** Records the context a session currently acts in; the mirror of `rebindContext`. */
+  updateLoginContext?(sid: string, loginContext: string | null): Promise<boolean>;
   resolveClientUuid(publicClientId: string): Promise<string | null>;
   /** Whether the user has a default-context membership in the app. */
   isMember(clientUuid: string, userId: string): Promise<boolean>;

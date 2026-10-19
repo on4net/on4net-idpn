@@ -32,6 +32,8 @@ export interface LoginRouteOptions {
     tenantId: string;
     /** Public client id; the repository resolves it to the app's UUID. */
     clientId?: string;
+    /** Login Context the session was established for (omitted = client-wide). */
+    loginContext?: string;
     ip?: string;
     userAgent?: string;
     amr: string[];
@@ -203,6 +205,7 @@ export function registerLoginRoute(app: FastifyInstance, options: LoginRouteOpti
       userId: user.id,
       tenantId: user.tenantId,
       ...(body.clientId === undefined ? {} : { clientId: body.clientId }),
+      ...(loginContext === undefined ? {} : { loginContext }),
       ip: request.ip,
       userAgent: request.headers['user-agent'] ?? '',
       amr: ['pwd'],
@@ -215,6 +218,7 @@ export function registerLoginRoute(app: FastifyInstance, options: LoginRouteOpti
       userId: user.id,
       tenantId: user.tenantId,
       ...(session.clientId === undefined ? {} : { clientId: session.clientId }),
+      ...(session.loginContext === undefined ? {} : { loginContext: session.loginContext }),
       ...(session.ip === undefined ? {} : { ip: session.ip }),
       ...(session.userAgent === undefined ? {} : { userAgent: session.userAgent }),
       amr: session.amr,

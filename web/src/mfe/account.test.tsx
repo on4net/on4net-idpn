@@ -31,6 +31,7 @@ const sessions: AccountSession[] = [
     id: 's1',
     userId: 'u1',
     clientId: 'app-a',
+    loginContext: 'customer-admin',
     status: 'active',
     createdAt: '2026-10-19T09:00:00.000Z',
     lastSeenAt: '2026-10-19T10:00:00.000Z',
@@ -48,6 +49,7 @@ const sessions: AccountSession[] = [
     id: 's2',
     userId: 'u1',
     clientId: 'app-b',
+    loginContext: null,
     status: 'active',
     createdAt: '2026-10-18T09:00:00.000Z',
     lastSeenAt: '2026-10-18T10:00:00.000Z',
@@ -70,6 +72,7 @@ interface FakeClient {
   changePassword: ReturnType<typeof vi.fn>;
   listSessions: ReturnType<typeof vi.fn>;
   closeSession: ReturnType<typeof vi.fn>;
+  switchContext: ReturnType<typeof vi.fn>;
   getMfaStatus: ReturnType<typeof vi.fn>;
   enrollTotp: ReturnType<typeof vi.fn>;
   verifyTotpEnrollment: ReturnType<typeof vi.fn>;
@@ -140,6 +143,12 @@ function fakeClient(overrides: Partial<Record<keyof AccountApiClient, unknown>> 
   });
   const listSessions = vi.fn().mockResolvedValue({ items: sessions, page: 1, limit: 25, total: 2 });
   const closeSession = vi.fn().mockResolvedValue({ revoked: true, alreadyRevoked: false });
+  const switchContext = vi.fn().mockResolvedValue({
+    ok: true,
+    loginContext: 'customer-team',
+    previousLoginContext: 'customer-admin',
+    session: { id: 's1', loginContext: 'customer-team' },
+  });
   const getMfaStatus = vi.fn().mockResolvedValue(disabledMfa);
   const enrollTotp = vi.fn().mockResolvedValue({
     factorId: 'factor-1',
@@ -179,6 +188,7 @@ function fakeClient(overrides: Partial<Record<keyof AccountApiClient, unknown>> 
     changePassword,
     listSessions,
     closeSession,
+    switchContext,
     getMfaStatus,
     enrollTotp,
     verifyTotpEnrollment,
@@ -241,6 +251,69 @@ describe('Account MFE', () => {
     expect(screen.getByTestId('mfa-badge')).toHaveTextContent('غیرفعال');
     expect(screen.getByRole('button', { name: 'فعال‌سازی' })).toBeEnabled();
     expect(container.querySelector('[data-testid="account-module"]')).toHaveAttribute('dir', 'rtl');
+  });
+
+  it('offers the server-approved context switch and reports the new context', async () => {
+    const fake = fakeClient({
+      listSessions: vi.fn().mockResolvedValue({
+        items: [
+          {
+            ...sessions[0],
+            switchableContexts: [
+              { key: 'customer-team', name: 'تیم مشتری', allowed: true },
+              {
+                key: 'ledger-admin',
+                name: 'دفتر کل',
+                allowed: false,
+                reason: 'interaction_required',
+              },
+            ],
+          },
+          sessions[1],
+        ],
+        page: 1,
+        limit: 25,
+        total: 2,
+      }),
+    });
+    renderAccount(fake);
+
+    await screen.findByText('نشست فعلی');
+    const allowed = screen.getByTestId('session-switch-customer-team');
+    expect(allowed).toBeEnabled();
+    // A step-up context is advertised but cannot be entered from this session.
+    expect(screen.getByTestId('session-switch-ledger-admin')).toBeDisabled();
+
+    await userEvent.setup().click(allowed);
+
+    expect(fake.switchContext).toHaveBeenCalledWith('customer-team');
+    expect(await screen.findByText('نشست به customer-team تغییر کرد.')).toBeVisible();
+  });
+
+  it('explains that a refused switch needs a fresh two-step sign-in', async () => {
+    const fake = fakeClient({
+      listSessions: vi.fn().mockResolvedValue({
+        items: [
+          {
+            ...sessions[0],
+            switchableContexts: [{ key: 'customer-team', name: 'تیم مشتری', allowed: true }],
+          },
+        ],
+        page: 1,
+        limit: 25,
+        total: 1,
+      }),
+      switchContext: vi
+        .fn()
+        .mockRejectedValue(
+          new AccountApiError('forbidden', 403, 'Forbidden', { code: 'interaction_required' }),
+        ),
+    });
+    renderAccount(fake);
+
+    await userEvent.setup().click(await screen.findByTestId('session-switch-customer-team'));
+
+    expect(await screen.findByTestId('sessions-error')).toHaveTextContent('ورود دومرحله‌ای تازه');
   });
 
   it('shows an unverified email and resends the verification link', async () => {

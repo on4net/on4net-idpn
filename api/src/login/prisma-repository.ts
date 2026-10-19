@@ -11,6 +11,8 @@ export function createPrismaLoginRepository(prisma: PrismaClient): LoginUserRepo
     tenantId: string;
     /** Public client id that started the login; resolved to its UUID for the foreign key. */
     clientId?: string;
+    /** Login Context the session was established for (null/omitted = client-wide). */
+    loginContext?: string;
     ip?: string;
     userAgent?: string;
     amr: string[];
@@ -34,6 +36,7 @@ export function createPrismaLoginRepository(prisma: PrismaClient): LoginUserRepo
           id: input.sid,
           userId: input.userId,
           clientId: client?.id ?? null,
+          loginContext: input.loginContext ?? null,
           ip: input.ip ?? null,
           userAgent: input.userAgent ?? null,
           amr: input.amr,

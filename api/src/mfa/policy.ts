@@ -1,4 +1,15 @@
-import type { MfaPolicy } from './mfa-types.js';
+import { MFA_ACR, MFA_AMR_METHODS, type MfaPolicy } from './mfa-types.js';
+
+/**
+ * True when the session proves a second factor: the documented ACR or an AMR entry for a
+ * factor that was actually used (`docs/auth-flows.md` 7.3).
+ */
+export function sessionProvesMultiFactor(state: { amr: readonly string[]; acr: string }): boolean {
+  if (state.acr === MFA_ACR) {
+    return true;
+  }
+  return state.amr.some((method) => (MFA_AMR_METHODS as readonly string[]).includes(method));
+}
 
 /**
  * What a login must do about MFA once the password is verified.

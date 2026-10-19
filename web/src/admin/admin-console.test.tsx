@@ -33,6 +33,7 @@ const session = (overrides: Partial<AdminSession> = {}): AdminSession => ({
   id: 'session-1',
   userId: 'user-1',
   clientId: 'app-a',
+  loginContext: null,
   status: 'active',
   createdAt: '2026-10-19T08:00:00.000Z',
   lastSeenAt: '2026-10-19T08:05:00.000Z',
@@ -266,6 +267,39 @@ describe('AdminConsole', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Revoke session session-1' }));
     await waitFor(() => expect(client.revokeSession).toHaveBeenCalledWith('session-1'));
     expect(await screen.findByTestId('sessions-notice')).toHaveTextContent('session-1');
+  });
+
+  it('shows the login context of every session and filters by it', async () => {
+    const listSessions = vi.fn(async () => ({
+      items: [
+        session({ id: 'session-1', loginContext: 'customer-admin' }),
+        session({ id: 'session-2', loginContext: null }),
+      ],
+      page: 1,
+      limit: 25,
+      total: 2,
+    }));
+    render(<AdminConsole client={fakeClient({ listSessions })} locale="en-US" />);
+    await screen.findByText('Ali Rezaei');
+    await userEvent
+      .setup({ pointerEventsCheck: 0 })
+      .click(screen.getByRole('tab', { name: 'Sessions' }));
+
+    expect(await screen.findByTestId('session-context-session-1')).toHaveTextContent(
+      'customer-admin',
+    );
+    expect(screen.getByTestId('session-context-session-2')).toHaveTextContent('Whole app');
+
+    fireEvent.change(screen.getByLabelText('Context'), {
+      target: { value: 'customer-admin' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Apply filters' }));
+    await waitFor(() =>
+      expect(listSessions).toHaveBeenLastCalledWith(
+        expect.objectContaining({ loginContext: 'customer-admin', page: 1 }),
+      ),
+    );
+    expect(screen.getByRole('columnheader', { name: 'Context' })).toBeTruthy();
   });
 
   it('shows empty and error states for sessions', async () => {

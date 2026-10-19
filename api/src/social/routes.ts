@@ -590,6 +590,7 @@ export function registerSocialLoginRoutes(
         userId: user.id,
         tenantId: user.tenantId,
         clientId: client.clientId,
+        ...(session.loginContext === undefined ? {} : { loginContext: session.loginContext }),
         ...(session.ip === undefined ? {} : { ip: session.ip }),
         ...(session.userAgent === undefined ? {} : { userAgent: session.userAgent }),
         amr: session.amr,

@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 
-import { MFA_ACR, MFA_AMR_METHODS } from '../mfa/mfa-types.js';
+import { MFA_ACR } from '../mfa/mfa-types.js';
+import { sessionProvesMultiFactor } from '../mfa/policy.js';
 import { readSessionId } from '../session/cookie.js';
 import type { IdpSession } from '../session/types.js';
 import {
@@ -18,6 +19,12 @@ import { buildCodeRedirect, buildErrorRedirect, oauthError } from './oauth-error
 
 export interface SessionReader {
   read(sid: string): Promise<IdpSession | null>;
+  /**
+   * Records the Login Context the session now acts in (`docs/login-contexts.md` 3.4). When a
+   * session switches context the new context is stored so listings, revocation scoping and
+   * the next switch all see the same value.
+   */
+  rebindContext?(sid: string, loginContext: string): Promise<IdpSession | null>;
 }
 
 /**
@@ -84,6 +91,26 @@ export interface AuthorizeRouteOptions {
   membershipStatus?: (input: AuthorizeSubjectInput) => Promise<AuthorizeMembershipStatus | null>;
   /** When present, the login redirect carries a single-use `login_request` handle. */
   loginRequests?: AuthorizeLoginRequestIssuer;
+  /**
+   * Audit hook for a context switch: an existing session obtaining a code for another
+   * context of the same app (`docs/login-contexts.md` 6, 8).
+   */
+  audit?: {
+    record(event: {
+      actorType: 'user' | 'admin';
+      actorId: string;
+      action: string;
+      targetType: string;
+      targetId: string;
+      clientId: string | null;
+      ip?: string | null;
+      userAgent?: string | null;
+      result: 'success' | 'failure';
+      metadata?: Record<string, unknown>;
+    }): Promise<void>;
+  };
+  /** Mirrors the new context into the PostgreSQL session row used by the Admin API. */
+  persistContextSwitch?: (sid: string, loginContext: string) => Promise<void>;
   now?: () => Date;
 }
 
@@ -184,7 +211,10 @@ export function registerAuthorizeRoute(app: FastifyInstance, options: AuthorizeR
     const session = sid === null ? null : await options.sessions.read(sid);
     const wantsSilent = authorize.prompt.includes('none');
 
-    if (session === null) {
+    // `prompt=login` (docs/auth-flows.md 2.1) and a missing session both demand an
+    // interactive authentication: an existing session must not be silently reused, which is
+    // also what makes an explicit context switch auditable rather than invisible.
+    if (session === null || authorize.prompt.includes('login')) {
       if (wantsSilent) {
         return redirect(
           reply,
@@ -275,7 +305,7 @@ export function registerAuthorizeRoute(app: FastifyInstance, options: AuthorizeR
           : await options.authenticationRequirement(subject);
       // An explicit `acr_values` request for the MFA ACR is honoured as well.
       const mfaRequired = requirement.mfaRequired || authorize.acrValues.includes(MFA_ACR);
-      const mfaSatisfied = sessionHasMultiFactor(session);
+      const mfaSatisfied = sessionProvesMultiFactor(session);
       const freshEnough =
         !requirement.freshAuthenticationRequired ||
         !isAuthenticationTooOld(session, STEP_UP_MAX_AGE_SECONDS, now());
@@ -353,6 +383,34 @@ export function registerAuthorizeRoute(app: FastifyInstance, options: AuthorizeR
       now: now(),
     });
 
+    // A code issued for another context of the same app is a context switch: the session
+    // records the context it now acts in and the change is audited
+    // (docs/login-contexts.md 3.4, 6). A client-wide session that binds to a context for the
+    // first time is recorded the same way, so the session never claims a stale context.
+    if (authorize.loginContext !== undefined && authorize.loginContext !== session.loginContext) {
+      const previous = session.loginContext ?? null;
+      const nextContext = authorize.loginContext;
+      try {
+        const rebound = await options.sessions.rebindContext?.(session.sid, nextContext);
+        if (rebound !== null && rebound !== undefined) {
+          await options.persistContextSwitch?.(rebound.sid, nextContext);
+        }
+        await options.audit?.record({
+          actorType: 'user',
+          actorId: session.userId,
+          action: 'session.context_switch',
+          targetType: 'session',
+          targetId: session.sid,
+          clientId: authorize.client.clientId,
+          result: 'success',
+          metadata: { from: previous, to: nextContext, source: 'authorize' },
+        });
+      } catch {
+        // The authorization code is already issued: a bookkeeping failure must not turn a
+        // successful authorization into an error redirect.
+      }
+    }
+
     return reply
       .header('Cache-Control', 'no-store')
       .header('X-Authorization-Code-TTL', String(AUTHORIZATION_CODE_TTL_SECONDS))
@@ -362,13 +420,4 @@ export function registerAuthorizeRoute(app: FastifyInstance, options: AuthorizeR
 
 function isAuthenticationTooOld(session: IdpSession, maxAgeSeconds: number, now: Date): boolean {
   return now.getTime() - new Date(session.authTime).getTime() > maxAgeSeconds * 1000;
-}
-
-/** A session proves a second factor through its ACR or one of the MFA AMR methods. */
-function sessionHasMultiFactor(session: IdpSession): boolean {
-  if (session.acr === MFA_ACR) {
-    return true;
-  }
-  const methods: readonly string[] = MFA_AMR_METHODS;
-  return session.amr.some((method) => methods.includes(method));
 }

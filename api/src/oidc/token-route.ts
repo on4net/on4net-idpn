@@ -45,7 +45,11 @@ export interface TokenRouteOptions {
   users: UserProfileRepository;
   keys: SigningKeyManager;
   /** Optional session lookup so revocation invalidates refresh grants immediately. */
-  sessions?: { read(sid: string): Promise<IdpSession | null> };
+  sessions?: {
+    read(sid: string): Promise<IdpSession | null>;
+    /** Records the context a session now acts in after an audited context switch. */
+    rebindContext?(sid: string, loginContext: string): Promise<IdpSession | null>;
+  };
   /**
    * Eligibility for the `idp.client-admin` scope. The scope is never issued to a user who
    * holds no `idp:client-*` permission for the app, even if an old code or refresh token

@@ -81,6 +81,10 @@ export interface BuildServerOptions {
     membershipStatus?: Parameters<typeof registerAuthorizeRoute>[1]['membershipStatus'];
     /** Issues the opaque `login_request` used by the per-client social start endpoint. */
     loginRequests?: Parameters<typeof registerAuthorizeRoute>[1]['loginRequests'];
+    /** Audit hook for an audited context switch at code issuance. */
+    audit?: Parameters<typeof registerAuthorizeRoute>[1]['audit'];
+    /** Mirrors a context switch into the PostgreSQL session row. */
+    persistContextSwitch?: Parameters<typeof registerAuthorizeRoute>[1]['persistContextSwitch'];
   };
   /** Mounts the per-client social start/callback endpoints (docs/api.md 2.8). */
   social?: Omit<SocialLoginRouteOptions, 'issuer'>;
@@ -176,6 +180,10 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
         ...(options.authorize.loginRequests === undefined
           ? {}
           : { loginRequests: options.authorize.loginRequests }),
+        ...(options.authorize.audit === undefined ? {} : { audit: options.authorize.audit }),
+        ...(options.authorize.persistContextSwitch === undefined
+          ? {}
+          : { persistContextSwitch: options.authorize.persistContextSwitch }),
       });
     }
   }

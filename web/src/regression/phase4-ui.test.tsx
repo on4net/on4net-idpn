@@ -68,6 +68,7 @@ function fakeAccountClient(overrides: Partial<AccountApiClient> = {}): AccountAp
     changePassword: vi.fn(),
     listSessions: vi.fn().mockResolvedValue({ items: [], page: 1, limit: 10, total: 0 }),
     closeSession: vi.fn(),
+    switchContext: vi.fn(),
     getMfaStatus: vi.fn().mockResolvedValue(enabledMfa),
     enrollTotp: vi.fn(),
     verifyTotpEnrollment: vi.fn(),

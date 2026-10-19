@@ -34,6 +34,7 @@ const user = async (overrides: Partial<LoginUserRecord> = {}): Promise<LoginUser
 interface Harness {
   app: ReturnType<typeof Fastify>;
   sessions: IdpSession[];
+  persisted: { sid: string; clientId?: string; loginContext?: string }[];
   audits: Parameters<LoginUserRepository['registerFailedAttempt']>[0][];
   failures: { userId: string; attempts: number; lockedUntil: Date | null }[];
 }
@@ -44,6 +45,7 @@ async function harness(
 ) {
   const app = Fastify({ logger: false });
   const sessions: IdpSession[] = [];
+  const persisted: { sid: string; clientId?: string; loginContext?: string }[] = [];
   const failures: { userId: string; attempts: number; lockedUntil: Date | null }[] = [];
   const audits: unknown[] = [];
 
@@ -63,6 +65,8 @@ async function harness(
         const session: IdpSession = {
           sid: `sid-${sessions.length + 1}`,
           userId: input.userId,
+          ...(input.clientId === undefined ? {} : { clientId: input.clientId }),
+          ...(input.loginContext === undefined ? {} : { loginContext: input.loginContext }),
           createdAt: now.toISOString(),
           lastSeenAt: now.toISOString(),
           authTime: now.toISOString(),
@@ -80,12 +84,14 @@ async function harness(
         audits.push(event);
       },
     },
-    persistSession: async () => {},
+    persistSession: async (input) => {
+      persisted.push(input);
+    },
     cookie: { secure: true, idleTtlSeconds: 1800, absoluteTtlSeconds: 28800 },
     now: () => now,
   });
   await app.ready();
-  return { app, sessions, audits, failures } as unknown as Harness;
+  return { app, sessions, persisted, audits, failures } as unknown as Harness;
 }
 
 describe('POST /api/v1/login', () => {
@@ -214,6 +220,48 @@ describe('helpers', () => {
     expect(sanitizeReturnTo('https://evil.example/x', appUrl)).toBeUndefined();
     expect(sanitizeReturnTo('https://auth.example.com/x', appUrl)).toBe(`${appUrl}/x`);
     expect(sanitizeReturnTo(undefined, appUrl)).toBeUndefined();
+  });
+});
+
+describe('POST /api/v1/login — session login context', () => {
+  it('records the login context on the session and its PostgreSQL mirror', async () => {
+    const { app, sessions, persisted } = await harness(await user());
+
+    await request(app.server)
+      .post('/api/v1/login')
+      .send({
+        identifier: 'sara@example.com',
+        password,
+        clientId: 'app-a',
+        loginContext: 'customer-admin',
+      })
+      .expect(200);
+
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]).toMatchObject({
+      clientId: 'app-a',
+      loginContext: 'customer-admin',
+    });
+    expect(persisted).toHaveLength(1);
+    expect(persisted[0]).toMatchObject({
+      sid: sessions[0]?.sid,
+      clientId: 'app-a',
+      loginContext: 'customer-admin',
+    });
+    await app.close();
+  });
+
+  it('leaves a client-wide session unbound when no context is supplied', async () => {
+    const { app, sessions, persisted } = await harness(await user());
+
+    await request(app.server)
+      .post('/api/v1/login')
+      .send({ identifier: 'sara@example.com', password, clientId: 'app-a' })
+      .expect(200);
+
+    expect(sessions[0]?.loginContext).toBeUndefined();
+    expect(persisted[0]?.loginContext).toBeUndefined();
+    await app.close();
   });
 });
 

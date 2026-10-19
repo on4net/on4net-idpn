@@ -43,6 +43,7 @@ import {
   createAuthorizeMembershipStatus,
 } from './oidc/authorize-enforcement.js';
 import { createPrismaLoginContextAccessSource } from './oidc/login-context-access.js';
+import { createPrismaContextSwitchRepository } from './login/context-switch.js';
 import { createPrismaCodeRepository } from './oidc/prisma-code-repository.js';
 import { createPrismaRefreshTokenRepository } from './oidc/prisma-refresh-repository.js';
 import { createPrismaUserRepository } from './oidc/prisma-user-repository.js';
@@ -237,6 +238,10 @@ const app = buildServer({
     authenticationRequirement: authorizeAuthenticationRequirement,
     membershipStatus: authorizeMembershipStatus,
     loginRequests: authorizeLoginRequests,
+    audit: createPrismaAdminAudit(prisma),
+    persistContextSwitch: async (sid, loginContext) => {
+      await adminSessionsRepository.updateLoginContext?.(sid, loginContext);
+    },
   },
   social: {
     ...(env.SOCIAL_CALLBACK_BASE_URL === undefined
@@ -366,6 +371,12 @@ const app = buildServer({
       verify: verifyPassword,
     },
     webauthn: webauthnDependencies,
+    // Context switching is decided from the context status, the membership and the
+    // authentication the session already proves (`docs/login-contexts.md` 4.1, 6).
+    contextSwitch: {
+      repository: createPrismaContextSwitchRepository(prisma),
+      isAdmin: (userId, clientId) => mfaRepository.isAdmin(userId, clientId),
+    },
   },
   adminKeys: {
     adminClientId: env.ADMIN_CLIENT_ID,

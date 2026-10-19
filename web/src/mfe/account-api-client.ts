@@ -33,6 +33,8 @@ export interface AccountSession {
   id: string;
   userId: string;
   clientId: string | null;
+  /** Login Context the session acts in; `null` for a client-wide session. */
+  loginContext: string | null;
   status: 'active' | 'revoked' | 'expired';
   createdAt: string;
   lastSeenAt: string;
@@ -46,6 +48,26 @@ export interface AccountSession {
   revokeReason: string | null;
   /** `true` for the session that issued the current cookie. */
   current: boolean;
+  /**
+   * Contexts the server would let the current session switch into
+   * (`docs/login-contexts.md` 4.1). Absent for every other session.
+   */
+  switchableContexts?: SwitchableContext[];
+}
+
+/** Server-side answer for one switch target; the UI never decides this on its own. */
+export interface SwitchableContext {
+  key: string;
+  name: string;
+  allowed: boolean;
+  reason?: string;
+}
+
+export interface SwitchContextResult {
+  ok: true;
+  loginContext: string;
+  previousLoginContext: string | null;
+  session: { id: string; loginContext: string | null };
 }
 
 export interface AccountSessionPage {
@@ -173,6 +195,8 @@ export interface AccountApiClient {
     options?: { signal?: AbortSignal },
   ): Promise<AccountSessionPage>;
   closeSession(sid: string): Promise<{ revoked: boolean; alreadyRevoked: boolean }>;
+  /** Switches the current session to another context of the same app (no password). */
+  switchContext(loginContext: string): Promise<SwitchContextResult>;
   getMfaStatus(options?: { signal?: AbortSignal }): Promise<AccountMfaStatus>;
   enrollTotp(input?: { name?: string }): Promise<TotpEnrollment>;
   verifyTotpEnrollment(input: { factorId: string; code: string }): Promise<{
@@ -288,6 +312,11 @@ export function createAccountApiClient(options: AccountApiClientOptions = {}): A
         `/api/v1/account/sessions/${encodeURIComponent(sid)}`,
         { method: 'DELETE' },
       ),
+    switchContext: (loginContext) =>
+      call<SwitchContextResult>('/api/v1/account/sessions/switch-context', {
+        method: 'POST',
+        body: JSON.stringify({ loginContext }),
+      }),
     getMfaStatus: (callOptions = {}) =>
       call<AccountMfaStatus>('/api/v1/account/mfa', { method: 'GET' }, callOptions.signal),
     enrollTotp: (input = {}) =>

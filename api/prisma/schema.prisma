@@ -474,6 +474,8 @@ model Session {
   id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   userId            String    @map("user_id") @db.Uuid
   clientId          String?   @map("client_id") @db.Uuid
+  /// Login context the session was established for (null = client-wide session).
+  loginContext      String?   @map("login_context") @db.VarChar(64)
   createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   lastSeenAt        DateTime  @default(now()) @map("last_seen_at") @db.Timestamptz(6)
   idleExpiresAt     DateTime  @map("idle_expires_at") @db.Timestamptz(6)
@@ -493,6 +495,7 @@ model Session {
   @@index([userId, revokedAt])
   @@index([idleExpiresAt])
   @@index([absoluteExpiresAt])
+  @@index([clientId, loginContext])
   @@map("sessions")
 }
 

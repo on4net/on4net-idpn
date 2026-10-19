@@ -18,6 +18,7 @@ import {
   enrollTotpSchema,
   regenerateRecoveryCodesSchema,
   renameMfaFactorSchema,
+  switchContextSchema,
   verifyTotpEnrollmentSchema,
   verifyWebauthnAuthenticationSchema,
   verifyWebauthnRegistrationSchema,
@@ -36,6 +37,12 @@ import {
 import { readSessionId, serializeSessionCookie } from '../session/cookie.js';
 import type { IdpSession, RevokeReason } from '../session/types.js';
 import { changePassword, type PasswordStore } from '../users/change-password.js';
+import {
+  evaluateContextSwitch,
+  type ContextSwitchEvaluationFailure,
+  type ContextSwitchFailure,
+  type ContextSwitchRepository,
+} from '../login/context-switch.js';
 
 export interface AccountRoutesOptions {
   /** Public IdP origin; mutating calls must be same-origin (CSRF defence). */
@@ -49,6 +56,8 @@ export interface AccountRoutesOptions {
       sid: string,
       input: { amr: string[]; acr: string; authTime: Date },
     ): Promise<IdpSession | null>;
+    /** Records the Login Context the session now acts in (`docs/login-contexts.md` 3.4). */
+    rebindContext?(sid: string, loginContext: string): Promise<IdpSession | null>;
   };
   /** PostgreSQL session mirror, shared with the Admin API (docs/api.md 3.1). */
   repository: AdminSessionRepository;
@@ -58,6 +67,7 @@ export interface AccountRoutesOptions {
     userId: string;
     tenantId: string;
     clientId?: string;
+    loginContext?: string;
     ip?: string;
     userAgent?: string;
     amr: string[];
@@ -73,6 +83,15 @@ export interface AccountRoutesOptions {
   mfa?: AccountMfaDependencies;
   /** WebAuthn/passkey ceremonies (docs/security.md 3.3). */
   webauthn?: WebauthnServiceDependencies;
+  /**
+   * Server-side context switch decision (`docs/login-contexts.md` 4.1, 6). Without it the
+   * switch endpoint stays disabled and the sessions list advertises no switch targets.
+   */
+  contextSwitch?: {
+    repository: ContextSwitchRepository;
+    /** Whether the user administers the app (`mfaPolicy = required_admins`). */
+    isAdmin?: (userId: string, clientId: string) => Promise<boolean>;
+  };
   hash?: (password: string, params: Argon2Params) => Promise<string>;
   now?: () => Date;
 }
@@ -339,14 +358,127 @@ export function registerAccountRoutes(app: FastifyInstance, options: AccountRout
       userId: auth.profile.id,
       status: 'active',
     });
+    // Only the current session can be switched: it is the one that owns the cookie. The
+    // list is limited to contexts the user may actually use, so no foreign context key leaks
+    // (`docs/login-contexts.md` 6, 7.1).
+    const switchable =
+      options.contextSwitch === undefined
+        ? []
+        : await listSwitchableContexts(options.contextSwitch, auth.session, now);
     return noStore(reply).send({
       items: result.items.map((session) => ({
         ...session,
         current: session.id === auth.session.sid,
+        ...(session.id === auth.session.sid ? { switchableContexts: switchable } : {}),
       })),
       page,
       limit,
       total: result.total,
+    });
+  });
+
+  /**
+   * Moves the current IdP session into another Login Context of the same app without asking
+   * for the password again (`docs/login-contexts.md` 4.1). The decision is made server-side
+   * from the context status, the user's membership and the authentication the session already
+   * proves; a step-up context answers `interaction_required` instead of issuing anything.
+   */
+  app.post('/api/v1/account/sessions/switch-context', async (request, reply) => {
+    if (!isSameOriginRequest(request, options.appUrl) || !hasJsonContentType(request)) {
+      return sendProblem(
+        reply,
+        403,
+        'forbidden',
+        'Forbidden',
+        'same-origin JSON request required',
+        { code: 'cross_origin_request' },
+      );
+    }
+    const auth = await authenticate(request, reply);
+    if (auth === null) {
+      return reply;
+    }
+    if (options.contextSwitch === undefined || options.sessions.rebindContext === undefined) {
+      return sendProblem(
+        reply,
+        503,
+        'service-unavailable',
+        'Unavailable',
+        'context switching is not available',
+        { code: 'context_switch_unavailable' },
+      );
+    }
+    const parsed = switchContextSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return sendProblem(
+        reply,
+        422,
+        'validation-error',
+        'Validation failed',
+        parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; '),
+        { instance: '/api/v1/account/sessions/switch-context' },
+      );
+    }
+
+    const target = parsed.data.loginContext;
+    const previous = auth.session.loginContext ?? null;
+    const clientId = auth.session.clientId;
+    if (clientId === undefined) {
+      return sendProblem(
+        reply,
+        400,
+        'validation-error',
+        'Validation failed',
+        'the session is not bound to an app',
+        { code: 'no_client_context' },
+      );
+    }
+
+    const { repository } = options.contextSwitch;
+    const at = now();
+    const clientUuid = await repository.resolveClientId(clientId);
+    const context = clientUuid === null ? null : await repository.findContext(clientUuid, target);
+    if (clientUuid === null || context === null) {
+      await recordSwitch(request, options, auth, target, previous, 'context_not_found');
+      return sendProblem(reply, 404, 'not-found', 'Not found', 'login context does not exist', {
+        code: 'context_not_found',
+      });
+    }
+    const membership = await repository.membershipStatus(clientUuid, context.id, auth.profile.id);
+    const adminScoped =
+      options.contextSwitch.isAdmin === undefined
+        ? context.mfaPolicy === 'required_admins'
+        : await options.contextSwitch.isAdmin(auth.profile.id, clientId);
+    const decision = evaluateContextSwitch({
+      session: {
+        loginContext: auth.session.loginContext,
+        amr: auth.session.amr,
+        acr: auth.session.acr,
+        authTime: new Date(auth.session.authTime),
+      },
+      target: context,
+      membership,
+      adminScoped,
+      now: at,
+    });
+    if (!decision.ok) {
+      await recordSwitch(request, options, auth, target, previous, decision.reason);
+      return switchFailure(reply, decision.reason);
+    }
+
+    const rebound = await options.sessions.rebindContext(auth.session.sid, context.key);
+    if (rebound === null) {
+      return sendProblem(reply, 401, 'unauthorized', 'Unauthorized', 'session is not active', {
+        code: 'login_required',
+      });
+    }
+    await options.repository.updateLoginContext?.(rebound.sid, context.key);
+    await recordSwitch(request, options, auth, target, previous, 'switched');
+    return noStore(reply).send({
+      ok: true,
+      loginContext: context.key,
+      previousLoginContext: previous,
+      session: { id: rebound.sid, loginContext: rebound.loginContext ?? null },
     });
   });
 
@@ -891,6 +1023,7 @@ export function registerAccountRoutes(app: FastifyInstance, options: AccountRout
       userId: upgraded.userId,
       tenantId,
       ...(upgraded.clientId === undefined ? {} : { clientId: upgraded.clientId }),
+      ...(upgraded.loginContext === undefined ? {} : { loginContext: upgraded.loginContext }),
       ...(upgraded.ip === undefined ? {} : { ip: upgraded.ip }),
       ...(upgraded.userAgent === undefined ? {} : { userAgent: upgraded.userAgent }),
       amr: upgraded.amr,
@@ -1014,4 +1147,154 @@ export function registerAccountRoutes(app: FastifyInstance, options: AccountRout
       return noStore(reply).send({ ok: true });
     },
   );
+}
+
+/** A context the signed-in user may switch into, as reported to the MFE. */
+export interface SwitchableContext {
+  key: string;
+  name: string;
+  allowed: boolean;
+  reason?: string;
+}
+
+type ContextSwitchConfig = NonNullable<AccountRoutesOptions['contextSwitch']>;
+
+/**
+ * The switch affordance is server-driven: only active contexts with an active membership are
+ * listed (a foreign context key must not leak), and `allowed` reflects the same decision the
+ * switch endpoint makes — a step-up context is still listed but marked as not allowed.
+ */
+async function listSwitchableContexts(
+  config: ContextSwitchConfig,
+  session: IdpSession,
+  now: () => Date,
+): Promise<SwitchableContext[]> {
+  const clientId = session.clientId;
+  if (clientId === undefined) {
+    return [];
+  }
+  const clientUuid = await config.repository.resolveClientId(clientId);
+  if (clientUuid === null) {
+    return [];
+  }
+  const contexts = await config.repository.listContexts(clientUuid);
+  const adminScoped = await resolveAdminScoped(config, session.userId, clientId);
+  const at = now();
+  const switchable: SwitchableContext[] = [];
+  for (const target of contexts) {
+    if (target.key === session.loginContext) {
+      continue;
+    }
+    const membership = await config.repository.membershipStatus(
+      clientUuid,
+      target.id,
+      session.userId,
+    );
+    if (membership !== 'active') {
+      continue;
+    }
+    const decision = evaluateContextSwitch({
+      session: {
+        loginContext: session.loginContext,
+        amr: session.amr,
+        acr: session.acr,
+        authTime: new Date(session.authTime),
+      },
+      target,
+      membership,
+      adminScoped,
+      now: at,
+    });
+    switchable.push({
+      key: target.key,
+      name: target.name,
+      allowed: decision.ok,
+      ...(decision.ok ? {} : { reason: decision.reason }),
+    });
+  }
+  return switchable;
+}
+
+async function resolveAdminScoped(
+  config: ContextSwitchConfig,
+  userId: string,
+  clientId: string,
+): Promise<boolean> {
+  if (config.isAdmin === undefined) {
+    // Fail closed: without a permission reader `required_admins` is treated as MFA-required.
+    return true;
+  }
+  return config.isAdmin(userId, clientId);
+}
+
+/** Maps a refused switch to the standard interaction/access problem (never a downgrade). */
+function switchFailure(reply: FastifyReply, reason: ContextSwitchEvaluationFailure): FastifyReply {
+  switch (reason) {
+    case 'context_disabled':
+      return sendProblem(reply, 403, 'forbidden', 'Forbidden', 'the login context is disabled', {
+        code: 'context_disabled',
+      });
+    case 'already_in_context':
+      return sendProblem(
+        reply,
+        409,
+        'conflict',
+        'Conflict',
+        'the session already acts in this login context',
+        { code: 'already_in_context' },
+      );
+    case 'membership_required':
+      return sendProblem(
+        reply,
+        403,
+        'forbidden',
+        'Forbidden',
+        'an active membership is required for this login context',
+        { code: 'context_membership_required' },
+      );
+    case 'membership_suspended':
+      return sendProblem(
+        reply,
+        403,
+        'forbidden',
+        'Forbidden',
+        'the membership for this login context is suspended',
+        { code: 'context_membership_suspended' },
+      );
+    case 'interaction_required':
+      return sendProblem(
+        reply,
+        403,
+        'forbidden',
+        'Forbidden',
+        'a stronger authentication is required for this login context',
+        { code: 'interaction_required' },
+      );
+  }
+}
+
+/**
+ * Every switch result — allowed or refused — is audited with the app and both context keys
+ * (`docs/login-contexts.md` 6, 8). The audit never receives tokens or session secrets.
+ */
+async function recordSwitch(
+  request: FastifyRequest,
+  options: AccountRoutesOptions,
+  auth: { session: IdpSession; profile: AccountProfile },
+  target: string,
+  previous: string | null,
+  outcome: 'switched' | ContextSwitchFailure,
+): Promise<void> {
+  await options.audit.record({
+    actorType: 'user',
+    actorId: auth.profile.id,
+    action: 'session.context_switch',
+    targetType: 'session',
+    targetId: auth.session.sid,
+    clientId: auth.session.clientId ?? null,
+    ip: request.ip ?? null,
+    userAgent: request.headers['user-agent'] ?? null,
+    result: outcome === 'switched' ? 'success' : 'failure',
+    metadata: { userId: auth.profile.id, from: previous, to: target, reason: outcome },
+  });
 }

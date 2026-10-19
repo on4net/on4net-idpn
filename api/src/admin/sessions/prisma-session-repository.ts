@@ -14,6 +14,7 @@ interface SessionRow {
   lastSeenAt: Date;
   idleExpiresAt: Date;
   absoluteExpiresAt: Date;
+  loginContext: string | null;
   ip: string | null;
   userAgent: string | null;
   amr: string[];
@@ -30,6 +31,7 @@ const SELECT = {
   lastSeenAt: true,
   idleExpiresAt: true,
   absoluteExpiresAt: true,
+  loginContext: true,
   ip: true,
   userAgent: true,
   amr: true,
@@ -50,6 +52,7 @@ const toSession = (row: SessionRow, now: Date): AdminSession => ({
   id: row.id,
   userId: row.userId,
   clientId: row.client?.clientId ?? null,
+  loginContext: row.loginContext ?? null,
   status: statusOf(row, now),
   createdAt: row.createdAt.toISOString(),
   lastSeenAt: row.lastSeenAt.toISOString(),
@@ -92,6 +95,7 @@ export function createPrismaAdminSessionRepository(
       const where = {
         ...(input.userId === undefined ? {} : { userId: input.userId }),
         ...(input.clientId === undefined ? {} : { client: { clientId: input.clientId } }),
+        ...(input.loginContext === undefined ? {} : { loginContext: input.loginContext }),
         ...statusFilter(input.status, at),
         ...(scope === undefined
           ? {}
@@ -176,6 +180,14 @@ export function createPrismaAdminSessionRepository(
         data: { revokedAt },
       });
       return result.count;
+    },
+
+    async updateLoginContext(sid: string, loginContext: string | null) {
+      const result = await prisma.session.updateMany({
+        where: { id: sid, revokedAt: null },
+        data: { loginContext },
+      });
+      return result.count > 0;
     },
 
     async resolveClientUuid(publicClientId: string) {

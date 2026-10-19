@@ -25,6 +25,7 @@ import {
   type AccountApiClient,
   type AccountProfile,
   type AccountSession,
+  type SwitchableContext,
 } from './account-api-client';
 import { MfaSection } from './mfa-section';
 import type { PasskeyDriver } from './passkey-client';
@@ -126,6 +127,7 @@ export function Account({
   const [sessionsError, setSessionsError] = React.useState<string | null>(null);
   const [sessionsReload, setSessionsReload] = React.useState(0);
   const [closingId, setClosingId] = React.useState<string | null>(null);
+  const [switchingTo, setSwitchingTo] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
   const [verificationNotice, setVerificationNotice] = React.useState<string | null>(null);
   const [verificationError, setVerificationError] = React.useState<string | null>(null);
@@ -306,6 +308,43 @@ export function Account({
       }
     } finally {
       setClosingId(null);
+    }
+  };
+
+  /**
+   * The server decides whether the switch is allowed; a step-up context answers
+   * `interaction_required` and the user is told to authenticate instead of being moved.
+   */
+  const switchContext = async (context: SwitchableContext): Promise<void> => {
+    if (!context.allowed) {
+      setSessionsError(t('account.sessions.switchStepUp'));
+      return;
+    }
+    setSwitchingTo(context.key);
+    setSessionsError(null);
+    setNotice(null);
+    try {
+      const result = await api.switchContext(context.key);
+      setNotice(t('account.sessions.switched', { context: result.loginContext }));
+      setSessionsReload((value) => value + 1);
+    } catch (caught) {
+      if (caught instanceof AccountApiError && caught.code === 'interaction_required') {
+        onEvent?.({ type: 'auth:error', code: caught.code });
+        setSessionsError(t('account.sessions.switchStepUp'));
+      } else if (
+        caught instanceof AccountApiError &&
+        (caught.code === 'context_membership_required' ||
+          caught.code === 'context_membership_suspended' ||
+          caught.code === 'context_disabled' ||
+          caught.code === 'already_in_context')
+      ) {
+        onEvent?.({ type: 'auth:error', code: caught.code });
+        setSessionsError(t('account.sessions.switchUnavailable'));
+      } else {
+        setSessionsError(report(caught));
+      }
+    } finally {
+      setSwitchingTo(null);
     }
   };
 
@@ -557,6 +596,7 @@ export function Account({
               <TableHeader>
                 <TableRow>
                   <TableHead>{t('account.sessions.columnClient')}</TableHead>
+                  <TableHead>{t('account.sessions.columnContext')}</TableHead>
                   <TableHead>{t('account.sessions.columnCreated')}</TableHead>
                   <TableHead>{t('account.sessions.columnLastSeen')}</TableHead>
                   <TableHead>{t('account.sessions.columnAddress')}</TableHead>
@@ -569,6 +609,11 @@ export function Account({
                     <TableCell>
                       <bdi>{session.clientId ?? t('account.none')}</bdi>
                     </TableCell>
+                    <TableCell>
+                      <bdi data-testid={`session-context-${session.id}`}>
+                        {session.loginContext ?? t('account.sessions.contextWide')}
+                      </bdi>
+                    </TableCell>
                     <TableCell>{formatDate(session.createdAt)}</TableCell>
                     <TableCell>{formatDate(session.lastSeenAt)}</TableCell>
                     <TableCell>
@@ -577,7 +622,28 @@ export function Account({
                     </TableCell>
                     <TableCell>
                       {session.current ? (
-                        <Badge variant="secondary">{t('account.sessions.current')}</Badge>
+                        <div className="flex flex-col items-start gap-2">
+                          <Badge variant="secondary">{t('account.sessions.current')}</Badge>
+                          {(session.switchableContexts ?? []).map((context) => (
+                            <Button
+                              key={context.key}
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              disabled={!context.allowed || switchingTo !== null}
+                              title={
+                                context.allowed ? undefined : t('account.sessions.switchStepUp')
+                              }
+                              aria-label={t('account.sessions.switchTo', { context: context.name })}
+                              data-testid={`session-switch-${context.key}`}
+                              onClick={() => void switchContext(context)}
+                            >
+                              {switchingTo === context.key
+                                ? t('account.sessions.switching')
+                                : t('account.sessions.switchTo', { context: context.name })}
+                            </Button>
+                          ))}
+                        </div>
                       ) : (
                         <Button
                           type="button"

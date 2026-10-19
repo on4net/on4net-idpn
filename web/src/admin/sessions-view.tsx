@@ -40,10 +40,11 @@ type StatusFilter = 'all' | AdminSessionStatus;
 interface Filters {
   userId: string;
   clientId: string;
+  loginContext: string;
   status: StatusFilter;
 }
 
-const EMPTY_FILTERS: Filters = { userId: '', clientId: '', status: 'all' };
+const EMPTY_FILTERS: Filters = { userId: '', clientId: '', loginContext: '', status: 'all' };
 
 const statusVariant = (status: AdminSessionStatus) =>
   status === 'active' ? 'secondary' : status === 'revoked' ? 'destructive' : 'outline';
@@ -92,6 +93,9 @@ export function SessionsView({
           limit: pageSize,
           ...(active.userId.trim() === '' ? {} : { userId: active.userId.trim() }),
           ...(active.clientId.trim() === '' ? {} : { clientId: active.clientId.trim() }),
+          ...(active.loginContext.trim() === ''
+            ? {}
+            : { loginContext: active.loginContext.trim() }),
           ...(active.status === 'all' ? {} : { status: active.status }),
         });
         setSessions(result.items);
@@ -182,6 +186,16 @@ export function SessionsView({
             />
           </div>
           <div className="flex flex-col gap-1">
+            <Label htmlFor="sessions-context">{t('sessions.loginContext')}</Label>
+            <Input
+              id="sessions-context"
+              value={filters.loginContext}
+              onChange={(event) => setFilters({ ...filters, loginContext: event.target.value })}
+              autoComplete="off"
+              dir="ltr"
+            />
+          </div>
+          <div className="flex flex-col gap-1">
             <Label htmlFor="sessions-status">{t('sessions.status')}</Label>
             <Select
               value={filters.status}
@@ -245,6 +259,7 @@ export function SessionsView({
               <TableRow>
                 <TableHead>{t('sessions.columnUser')}</TableHead>
                 <TableHead>{t('sessions.columnClient')}</TableHead>
+                <TableHead>{t('sessions.columnContext')}</TableHead>
                 <TableHead>{t('sessions.columnStatus')}</TableHead>
                 <TableHead>{t('sessions.columnCreated')}</TableHead>
                 <TableHead>{t('sessions.columnLastSeen')}</TableHead>
@@ -255,7 +270,7 @@ export function SessionsView({
             <TableBody>
               {sessions.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} data-testid="sessions-empty">
+                  <TableCell colSpan={8} data-testid="sessions-empty">
                     {t('sessions.empty')}
                   </TableCell>
                 </TableRow>
@@ -269,6 +284,11 @@ export function SessionsView({
                     </TableCell>
                     <TableCell>
                       <bdi>{session.clientId ?? t('audit.none')}</bdi>
+                    </TableCell>
+                    <TableCell>
+                      <bdi data-testid={`session-context-${session.id}`}>
+                        {session.loginContext ?? t('sessions.contextWide')}
+                      </bdi>
                     </TableCell>
                     <TableCell>
                       <Badge variant={statusVariant(session.status)}>

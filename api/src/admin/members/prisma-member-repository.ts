@@ -560,9 +560,9 @@ export function createPrismaMemberRepository(
             },
             data: { revokedAt: at },
           });
-          // Sessions are identity-based and their PostgreSQL mirror does not store the
-          // context; revoking every session of the client would cut the other contexts too.
-          // The store revokes the exact sids and those are mirrored here.
+          // Sessions now record the context they act in, so revoking this context only cuts
+          // the sessions that are currently bound to it; the same user stays signed in to the
+          // other contexts of this app (`docs/login-contexts.md` 7.3).
           const revokedSids = await options.sessions?.revokeForUserClientContext?.(
             userId,
             clientId,

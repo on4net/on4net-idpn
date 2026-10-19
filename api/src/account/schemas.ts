@@ -15,6 +15,19 @@ export const accountSessionsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(25),
 });
 
+/** Context keys are short slugs for one client (`docs/login-contexts.md` 3.1). */
+const loginContextKey = z
+  .string()
+  .trim()
+  .min(1)
+  .max(64)
+  .regex(/^[a-z0-9][a-z0-9._-]*$/i, 'letters, digits, dot, dash and underscore only');
+
+/** Body of the self-service context switch (`docs/login-contexts.md` 4.1). */
+export const switchContextSchema = z.object({ loginContext: loginContextKey }).strict();
+
+export type SwitchContextBody = z.infer<typeof switchContextSchema>;
+
 /** MFA enrollment and management bodies (docs/account-api.md). */
 export const enrollTotpSchema = z
   .object({

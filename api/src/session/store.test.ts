@@ -90,6 +90,40 @@ describe('RedisSessionStore', () => {
     expect(await store.read(rotated?.sid ?? '')).not.toBeNull();
   });
 
+  it('records the context a session switches into without rotating or re-authenticating', async () => {
+    const { cache } = createMemoryCache();
+    const store = new RedisSessionStore({ cache, policy });
+
+    const session = await store.create({
+      userId: 'user-1',
+      clientId: 'app-a',
+      loginContext: 'customer-admin',
+      amr: ['pwd'],
+      acr: 'pwd',
+      authTime: new Date('2026-10-19T08:00:00.000Z'),
+    });
+
+    const rebound = await store.rebindContext(session.sid, 'customer-team');
+
+    expect(rebound?.sid).toBe(session.sid);
+    expect(rebound?.loginContext).toBe('customer-team');
+    // Switching is not a new authentication: the freshness inputs must survive.
+    expect(rebound?.authTime).toBe('2026-10-19T08:00:00.000Z');
+    expect(rebound?.amr).toEqual(['pwd']);
+    expect(rebound?.acr).toBe('pwd');
+    await expect(store.read(session.sid)).resolves.toMatchObject({
+      loginContext: 'customer-team',
+    });
+    // The move is context-scoped: the old context no longer owns the session.
+    await expect(
+      store.revokeForUserClientContext('user-1', 'app-a', 'customer-admin', 'admin'),
+    ).resolves.toEqual([]);
+    await expect(
+      store.revokeForUserClientContext('user-1', 'app-a', 'customer-team', 'admin'),
+    ).resolves.toEqual([session.sid]);
+    await expect(store.rebindContext(session.sid, 'customer-admin')).resolves.toBeNull();
+  });
+
   it('returns null for an unknown sid', async () => {
     const { cache } = createMemoryCache();
     const store = new RedisSessionStore({ cache, policy });

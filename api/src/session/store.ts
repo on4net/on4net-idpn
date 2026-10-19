@@ -146,6 +146,22 @@ export class RedisSessionStore implements ClientSessionRevoker {
     });
   }
 
+  /**
+   * Records the Login Context the session is currently acting in
+   * (`docs/login-contexts.md` 3.4). The session id, `auth_time`, `acr` and `amr` are kept:
+   * switching context is not a new authentication, and the step-up checks keep looking at
+   * the time the user actually proved a factor. Returns `null` for an inactive session.
+   */
+  async rebindContext(sid: string, loginContext: string): Promise<IdpSession | null> {
+    const current = await this.read(sid);
+    if (current === null) {
+      return null;
+    }
+    const next: IdpSession = { ...current, loginContext };
+    await this.persist(next);
+    return next;
+  }
+
   async revoke(sid: string, reason: RevokeReason): Promise<boolean> {
     const session = await this.load(sid);
     if (session === null) {

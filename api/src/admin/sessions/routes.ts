@@ -156,13 +156,14 @@ export function registerSessionAdminRoutes(
       return forbidden(reply, 'a delegated admin can only read its own app sessions');
     }
 
-    const { page, limit, userId, clientId, status } = parsed.data;
+    const { page, limit, userId, clientId, loginContext, status } = parsed.data;
     const result = await options.repository.list(
       {
         page,
         limit,
         ...(userId === undefined ? {} : { userId }),
         ...(clientId === undefined ? {} : { clientId }),
+        ...(loginContext === undefined ? {} : { loginContext }),
         ...(status === undefined ? {} : { status }),
       },
       scoped.scope ?? undefined,
@@ -213,6 +214,7 @@ export function registerSessionAdminRoutes(
       metadata: {
         userId: session.userId,
         reason: 'admin_revoked',
+        ...(session.loginContext === null ? {} : { loginContext: session.loginContext }),
         ...(scoped.scope === null ? {} : { appScoped: true }),
         revokedRefreshTokens,
       },
@@ -307,11 +309,12 @@ export function registerSessionAdminRoutes(
         '/api/v1/me/sessions',
       );
     }
-    const { page, limit, status } = parsed.data;
+    const { page, limit, loginContext, status } = parsed.data;
     const result = await options.repository.list({
       page,
       limit,
       userId: principal.userId,
+      ...(loginContext === undefined ? {} : { loginContext }),
       // The self-service surface lists active sessions by default (docs/api.md 3.1).
       status: status ?? 'active',
     });

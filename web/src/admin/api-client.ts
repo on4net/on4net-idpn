@@ -114,6 +114,8 @@ export interface AdminSession {
   id: string;
   userId: string;
   clientId: string | null;
+  /** Login Context the session acts in; `null` for a client-wide session. */
+  loginContext: string | null;
   status: AdminSessionStatus;
   createdAt: string;
   lastSeenAt: string;
@@ -139,6 +141,7 @@ export interface ListSessionsParams {
   limit?: number;
   userId?: string;
   clientId?: string;
+  loginContext?: string;
   status?: AdminSessionStatus;
 }
 
@@ -254,6 +257,8 @@ export function createAdminApiClient(options: AdminApiOptions): AdminApiClient {
     if (params.userId !== undefined && params.userId !== '') search.set('userId', params.userId);
     if (params.clientId !== undefined && params.clientId !== '')
       search.set('clientId', params.clientId);
+    if (params.loginContext !== undefined && params.loginContext !== '')
+      search.set('loginContext', params.loginContext);
     if (params.status !== undefined) search.set('status', params.status);
     const serialized = search.toString();
     return serialized === '' ? '' : `?${serialized}`;
