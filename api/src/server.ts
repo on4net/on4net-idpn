@@ -32,7 +32,10 @@ export interface BuildServerOptions {
     mfe: { version: string; remoteEntry: string };
     translationsUrlTemplate?: string;
   };
-  userInfo?: { users: Parameters<typeof registerUserInfoRoute>[1]['users'] };
+  userInfo?: {
+    users: Parameters<typeof registerUserInfoRoute>[1]['users'];
+    access?: Parameters<typeof registerUserInfoRoute>[1]['access'];
+  };
   login?: Omit<LoginRouteOptions, 'appUrl'>;
   /** Mounts GET /oauth2/authorize; requires a client repository and the code store. */
   authorize?: {
@@ -111,7 +114,12 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   }
 
   if (options.userInfo !== undefined) {
-    registerUserInfoRoute(app, { issuer, keys, users: options.userInfo.users });
+    registerUserInfoRoute(app, {
+      issuer,
+      keys,
+      users: options.userInfo.users,
+      ...(options.userInfo.access === undefined ? {} : { access: options.userInfo.access }),
+    });
   }
 
   if (options.login !== undefined) {

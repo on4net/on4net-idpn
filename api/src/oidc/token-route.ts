@@ -23,6 +23,7 @@ import {
   type RefreshTokenRepository,
 } from './refresh-token.js';
 import {
+  accessClaimsFor,
   buildAccessTokenClaims,
   buildIdTokenClaims,
   ID_TOKEN_TTL_SECONDS,
@@ -30,6 +31,7 @@ import {
   type TokenResponse,
   type UserProfileRepository,
 } from './token-claims.js';
+import type { EffectiveAccess, EffectiveAccessSource } from './effective-access.js';
 
 export interface TokenRouteOptions {
   issuer: string;
@@ -46,6 +48,8 @@ export interface TokenRouteOptions {
    * still carries it.
    */
   isClientAdminEligible?: (userId: string, clientId: string) => Promise<boolean>;
+  /** Effective roles/permissions/membership claim source (docs/domain-model.md 3.2). */
+  access?: EffectiveAccessSource;
   now?: () => Date;
 }
 
@@ -165,6 +169,12 @@ async function authorizationCodeGrant(
   }
 
   const issuedAt = Math.floor(at.getTime() / 1000);
+  const access = await resolveAccess(
+    options,
+    profile.id,
+    client.clientId,
+    exchange.record.loginContext,
+  );
   const accessToken = await signAccessToken(
     options,
     client,
@@ -172,6 +182,7 @@ async function authorizationCodeGrant(
     exchange.record,
     issuedAt,
     at,
+    access,
   );
   const idToken = await signIdToken(options, client, profile, exchange.record, issuedAt);
 
@@ -244,6 +255,7 @@ async function refreshTokenGrant(
   }
 
   const issuedAt = Math.floor(at.getTime() / 1000);
+  const access = await resolveAccess(options, profile.id, client.clientId);
   const accessToken = await options.keys.signAccessToken(
     {
       iss: options.issuer,
@@ -259,6 +271,7 @@ async function refreshTokenGrant(
       jti: randomUUID(),
       scope: rotation.record.scope.join(' '),
       tenant_id: profile.tenantId,
+      ...accessClaimsFor(access),
     },
     {
       issuer: options.issuer,
@@ -333,6 +346,22 @@ async function clientCredentialsGrant(
   });
 }
 
+async function resolveAccess(
+  options: TokenRouteOptions,
+  userId: string,
+  clientId: string,
+  loginContext?: string,
+): Promise<EffectiveAccess | undefined> {
+  if (options.access === undefined) {
+    return undefined;
+  }
+  return options.access.resolve({
+    userId,
+    clientId,
+    ...(loginContext === undefined ? {} : { loginContext }),
+  });
+}
+
 function signAccessToken(
   options: TokenRouteOptions,
   client: AuthenticatedClient,
@@ -340,6 +369,7 @@ function signAccessToken(
   code: AuthorizationCodeRecord,
   issuedAt: number,
   at: Date,
+  access?: EffectiveAccess,
 ): Promise<string> {
   void at;
   return options.keys.signAccessToken(
@@ -351,6 +381,7 @@ function signAccessToken(
       expiresInSeconds: client.accessTokenTtl,
       issuedAt,
       jti: randomUUID(),
+      ...(access === undefined ? {} : { access }),
     }),
     {
       issuer: options.issuer,

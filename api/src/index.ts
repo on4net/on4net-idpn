@@ -7,6 +7,7 @@ import { createPrismaAdminClientRepository } from './admin/clients/prisma-client
 import { createPrismaPermissionReader } from './admin/prisma-permission-reader.js';
 import { createPrismaRbacRepository } from './admin/rbac/prisma-rbac-repository.js';
 import { createPrismaMemberRepository } from './admin/members/prisma-member-repository.js';
+import { createPrismaEffectiveAccessSource } from './oidc/effective-access.js';
 import { createPrismaAdminUserRepository } from './admin/prisma-user-repository.js';
 import { PrismaClient } from './generated/prisma/client.js';
 import { FileSigningKeyRepository } from './oidc/file-key-repository.js';
@@ -44,6 +45,7 @@ const loginRepository = createPrismaLoginRepository(prisma);
 const permissionReader = createPrismaPermissionReader(prisma);
 const rbacRepository = createPrismaRbacRepository(prisma);
 const membersRepository = createPrismaMemberRepository(prisma, { rbac: rbacRepository });
+const effectiveAccess = createPrismaEffectiveAccessSource(prisma);
 
 /** A user may receive `idp.client-admin` only with at least one scoped admin permission. */
 const isClientAdminEligible = async (userId: string, clientId: string): Promise<boolean> =>
@@ -59,8 +61,9 @@ const app = buildServer({
     users: usersRepository,
     sessions,
     isClientAdminEligible,
+    access: effectiveAccess,
   },
-  userInfo: { users: usersRepository },
+  userInfo: { users: usersRepository, access: effectiveAccess },
   authorize: {
     clients: clientsRepository,
     loginUrl: `${(env.HOSTED_UI_URL ?? env.APP_URL).replace(/\/+$/, '')}/`,

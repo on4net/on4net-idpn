@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 
+import type { EffectiveAccessSource } from './effective-access.js';
 import type { SigningKeyManager } from './keys.js';
 import { buildUserInfo } from './userinfo.js';
 
@@ -18,6 +19,8 @@ export interface UserInfoRouteOptions {
   issuer: string;
   keys: SigningKeyManager;
   users: { findUserInfoProfile(userId: string): Promise<UserProfileSource | null> };
+  /** Used only when the token says `permissions_source=userinfo`. */
+  access?: EffectiveAccessSource;
 }
 
 /**
@@ -67,6 +70,26 @@ export function registerUserInfoRoute(app: FastifyInstance, options: UserInfoRou
         .send({ error: 'invalid_token' });
     }
 
-    return reply.header('Cache-Control', 'no-store').send(buildUserInfo(claims, profile));
+    const response = buildUserInfo(claims, profile);
+
+    if (
+      claims.permissions_source === 'userinfo' &&
+      options.access !== undefined &&
+      typeof claims.sub === 'string' &&
+      typeof claims.client_id === 'string'
+    ) {
+      const access = await options.access.resolve({
+        userId: claims.sub,
+        clientId: claims.client_id,
+        ...(typeof claims.login_context === 'string' ? { loginContext: claims.login_context } : {}),
+      });
+      response.roles = access.roles;
+      response.permissions = access.permissions;
+      if (access.membership !== null) {
+        response.membership = access.membership;
+      }
+    }
+
+    return reply.header('Cache-Control', 'no-store').send(response);
   });
 }
