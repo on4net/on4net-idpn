@@ -3,6 +3,7 @@ import { Redis } from 'ioredis';
 
 import { loadApiEnv } from './config/env.js';
 import { createPrismaAdminAudit } from './admin/prisma-audit.js';
+import { createPrismaAdminClientRepository } from './admin/clients/prisma-client-repository.js';
 import { createPrismaPermissionReader } from './admin/prisma-permission-reader.js';
 import { createPrismaAdminUserRepository } from './admin/prisma-user-repository.js';
 import { PrismaClient } from './generated/prisma/client.js';
@@ -78,6 +79,12 @@ const app = buildServer({
     adminClientId: env.ADMIN_CLIENT_ID,
     permissions: createPrismaPermissionReader(prisma),
     users: createPrismaAdminUserRepository(prisma),
+    audit: createPrismaAdminAudit(prisma),
+  },
+  adminClients: {
+    adminClientId: env.ADMIN_CLIENT_ID,
+    permissions: createPrismaPermissionReader(prisma),
+    clients: createPrismaAdminClientRepository(prisma),
     audit: createPrismaAdminAudit(prisma),
   },
 });

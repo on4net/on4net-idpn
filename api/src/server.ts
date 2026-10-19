@@ -4,6 +4,8 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { registerFormBodyParser } from './http/form-body.js';
 import type { AdminRoutesOptions } from './admin/routes.js';
 import { registerAdminRoutes } from './admin/routes.js';
+import type { ClientRoutesOptions } from './admin/clients/routes.js';
+import { registerClientAdminRoutes } from './admin/clients/routes.js';
 import { MemorySigningKeyRepository, SigningKeyManager } from './oidc/keys.js';
 import { registerAuthorizeRoute } from './oidc/authorize-route.js';
 import { registerOidcRoutes } from './oidc/routes.js';
@@ -36,6 +38,8 @@ export interface BuildServerOptions {
   };
   /** Mounts the global Admin API user endpoints (docs/api.md 3). */
   admin?: Omit<AdminRoutesOptions, 'issuer' | 'verifier'>;
+  /** Mounts the client administration endpoints (docs/api.md 3.3). */
+  adminClients?: Omit<ClientRoutesOptions, 'issuer' | 'verifier'>;
 }
 
 /**
@@ -104,6 +108,10 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
 
   if (options.admin !== undefined) {
     registerAdminRoutes(app, { ...options.admin, issuer, verifier: keys });
+  }
+
+  if (options.adminClients !== undefined) {
+    registerClientAdminRoutes(app, { ...options.adminClients, issuer, verifier: keys });
   }
 
   return app;

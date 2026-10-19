@@ -12,6 +12,8 @@ const BASE_PERMISSIONS = [
   { key: 'idp:user:reset-password', description: 'Trigger a password reset for a user' },
   { key: 'idp:role:manage', description: 'Manage roles and role assignments' },
   { key: 'idp:client:manage', description: 'Manage clients and their configuration' },
+  { key: 'idp:client:read', description: 'View clients and their configuration' },
+  { key: 'idp:client:write', description: 'Create or change clients, secrets and MFE settings' },
   { key: 'idp:client-member:manage', description: 'Manage client memberships' },
   { key: 'idp:client-role:manage', description: 'Manage per-client roles' },
   { key: 'idp:social-provider:manage', description: 'Manage per-client social providers' },

@@ -291,7 +291,7 @@ describe('initial schema', () => {
       expect(first.clients).toBe(1);
       expect(first.users).toBe(3);
       expect(first.roles).toBe(3);
-      expect(first.permissions).toBe(13);
+      expect(first.permissions).toBe(15);
       expect(first.assignments).toBe(2);
       expect(first.rolePermissions).toBeGreaterThan(0);
     } finally {
