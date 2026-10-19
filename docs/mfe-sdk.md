@@ -347,6 +347,124 @@ pnpm test:e2e --project=mf-chromium               # Mount، Isolation، Fallback
 Portal داخل `.idpn-root`، Fallback Hosted پس از خطای Remote، و بنر `auth:error` بدون
 توکن در لاگ‌ها.
 
+### 3.6 میزبان غیر-React (Web Component)
+
+مرجع اجراشدنی این بخش `web/host` است: یک اپ **Vanilla TypeScript** بدون React، بدون
+shadcn/Tailwind و بدون Router که فقط از API عمومی `@idpn/mfe-sdk` استفاده می‌کند، Bundle
+ساخته‌شده (`dist-wc/web-component.js`) را بارگذاری می‌کند و هر دو ماژول را برای `clientId`
+تنظیم‌شده Mount می‌کند.
+
+| فایل | نقش |
+|---|---|
+| `host/index.html` | Shell میزبان، Slot هر ماژول، لاگ رویداد و بنر Fallback |
+| `host/host.ts` | Bootstrap؛ Config را از `VITE_IDPN_*` (زمان Build) می‌خواند |
+| `host/host-bootstrap.ts` | بارگذاری Bundle، Mount/Unmount هر دو ماژول، رویدادها، Fallback |
+| `host/bundle-loader.ts` | بارگذاری ES Module و بررسی ثبت Custom Elementها |
+| `host/mfe-config.ts` | ساخت `IdpnMfeConfig` هر ماژول (Same-origin و Getter فقط در SPA) |
+| `host/broken.html` | Fixture عمداً خراب برای اثبات Fallback |
+
+Config parsing، Redaction رویداد و Token Holder حافظه‌ای از ماژول‌های Framework-agnostic
+همان میزبان React (`web/host-mf/host-config.ts`، `host-events.ts`، `token-provider.ts`)
+استفاده می‌شوند تا هر دو میزبان دقیقاً یک قرارداد `VITE_IDPN_*` را اعتبارسنجی کنند؛ Mount
+ماژول‌ها فقط از طریق `@idpn/mfe-sdk` انجام می‌شود.
+
+همان متغیرهای `VITE_IDPN_*` بخش ۳.۵ استفاده می‌شوند؛ تنها کلید اضافه
+`VITE_IDPN_WC_URL` است (پیش‌فرض `/dist-wc/web-component.js`، در تولید URL پین‌شدهٔ CDN).
+
+روش اتصال، مستقل از فریم‌ورک:
+
+```html
+<!doctype html>
+<html lang="fa" dir="rtl">
+  <body>
+    <div id="idpn-user-management"></div>
+    <div id="idpn-account"></div>
+
+    <script type="module" src="https://cdn.example.com/idpn-mfe/1.4.0/web-component.js"></script>
+    <script type="module">
+      import { mountIdpnModule } from '@idpn/mfe-sdk';
+
+      // از تنظیمات اپ؛ هرگز از Query String یا ورودی کاربر.
+      const base = {
+        clientId: 'app-a',
+        mode: 'bff', // پیش‌فرض: کوکی نشست، بدون توکن
+        apiBaseUrl: '/', // Same-origin؛ یا پیشوند BFF مثل /auth
+        locale: 'fa-IR',
+        dir: 'rtl',
+        theme: { brand: '#0057b8' },
+        onEvent(event) {
+          if (event.type === 'auth:logout') window.location.assign('/login');
+        },
+      };
+
+      const mounted = [
+        mountIdpnModule(document.querySelector('#idpn-user-management'), {
+          ...base,
+          module: 'user-management',
+        }),
+        mountIdpnModule(document.querySelector('#idpn-account'), { ...base, module: 'account' }),
+      ];
+
+      window.addEventListener('pagehide', () => mounted.forEach((handle) => handle.unmount()));
+    </script>
+  </body>
+</html>
+```
+
+نکات اتصال:
+
+- **ترتیب بارگذاری:** اسکریپت Bundle (چه Static و چه داینامیک) باید قبل از اولین
+  `mountIdpnModule` اجرا شده باشد. اگر Bundle را در زمان Route/تعامل بارگذاری می‌کنید،
+  ابتدا رویداد `load` را Await کنید و سپس ثبت المان‌ها را بررسی کنید؛
+  `customElements.whenDefined` در حالت Block شدن توسط CSP یا ۴۰۴ هرگز Resolve نمی‌شود،
+  پس الگوی `web/host/bundle-loader.ts` را ترجیح دهید.
+- **BFF (پیش‌فرض):** `mode: 'bff'` بگذارید و هیچ Getter توکنی ندهید. مرورگر فقط کوکی
+  `HttpOnly` را به مسیرهای BFF/IdP می‌فرستد؛ هیچ هدر `Authorization` و هیچ Storage‌ای
+  لازم نیست (E2E همین را بررسی می‌کند).
+- **SPA (فقط میزبان مورد اعتماد):** `mode: 'spa'` و `getAccessToken` حافظه‌ای بدهید.
+  SDK آن را فقط به‌صورت Property و فقط برای `user-management` منتقل می‌کند؛ در `bff` پاک
+  می‌شود و هیچ‌وقت Attribute، DOM، Storage یا `detail` رویداد نمی‌شود. ماژول `account`
+  در SPA پشتیبانی نمی‌شود و روی Origin خود IdP با کوکی اجرا می‌شود.
+- **Fallback:** اگر Bundle بارگذاری نشود یا Config نامعتبر باشد (یا `clientId` خالی باشد)،
+  میزبان باید یک `role="alert"` کوتاه و بدون Secret با لینک صفحهٔ Hosted نشان دهد
+  (`config.loginUrl`) و هرگز فرم رمز یا دکمهٔ سوشال داخل اپ نسازد.
+- **Lifecycle:** هر Slot دقیقاً یک Handle دارد؛ `mounted.update(...)` برای تغییر
+  `clientId`/`locale`/`dir`/`theme` و `mounted.unmount()` برای خروج از Route. پس از
+  Unmount، دیگر المان، Listener یا Root تکراری در Slot نمی‌ماند.
+- **رویدادها:** علاوه بر `onEvent`، هر رویداد به‌صورت `CustomEvent<IdpnEvent>` با نام
+  `idpn:event` و `bubbles: true, composed: true` منتشر می‌شود (بخش ۵)؛ میزبان می‌تواند
+  بدون Import کردن SDK هم روی `document` گوش بدهد. `detail` هیچ توکنی ندارد.
+
+CSP لازم برای این حالت (جزئیات کامل در بخش ۷):
+
+```http
+Content-Security-Policy:
+  default-src 'self';
+  script-src 'self' https://cdn.example.com;
+  style-src 'self' 'unsafe-inline';
+  connect-src 'self' https://auth.example.com;
+  img-src 'self' data: https://auth.example.com;
+  font-src 'self' https://cdn.example.com;
+  frame-ancestors 'none';
+  base-uri 'self';
+  form-action 'self' https://auth.example.com
+```
+
+- `script-src` باید Origin همان Bundle پین‌شده باشد؛ بارگذاری با `<script type="module">`
+  نیازی به `'unsafe-eval'` ندارد.
+- `style-src 'unsafe-inline'` برای `<style>` تزریق‌شده داخل Shadow Root لازم است؛ اگر
+  Nonce/Hash پشتیبانی می‌کنید، آن را جایگزین کنید.
+- `connect-src` باید Origin BFF (در BFF معمولاً `'self'`) و IdP را داشته باشد.
+- `font-src`/`img-src` باید Origin فونت و Avatar را داشته باشند؛ MFE به فونت میزبان
+  وابسته نیست.
+
+تست‌ها:
+
+```bash
+pnpm --filter @idpn/web exec vitest run host   # Config mapping، Bundle loader، رویداد المان
+pnpm test:e2e --project=wc-host-chromium       # Mount، Isolation، Event، Lifecycle، Fallback
+```
+
 ## 4. قرارداد تنظیمات
 
 | فیلد | الزامی | نوع | کاربرد |
@@ -404,6 +522,22 @@ const element = document.querySelector('on4net-idpn-account')!;
   if (event.type === 'locale:changed') document.documentElement.dir = event.dir;
 };
 ```
+
+- برای Web Component، همان رویداد به‌صورت `CustomEvent<IdpnEvent>` با نام
+  `idpn:event` و `bubbles: true, composed: true` هم منتشر می‌شود؛ میزبان‌هایی که SDK را
+  Import نمی‌کنند می‌توانند روی المان یا `document` گوش بدهند:
+
+```ts
+import { IDPN_MFE_EVENT_NAME, type IdpnEvent } from '@idpn/mfe-sdk';
+
+document.addEventListener(IDPN_MFE_EVENT_NAME, (event) => {
+  const detail = (event as CustomEvent<IdpnEvent>).detail;
+  if (detail.type === 'auth:logout') window.location.assign('/login');
+});
+```
+
+- نام ثابت `IDPN_MFE_EVENT_NAME` بخشی از قرارداد عمومی است؛ تغییر آن یک تغییر ناسازگار
+  (Major) محسوب می‌شود.
 
 - `navigation:request` یعنی MFE درخواست عبور به مسیر Hosted را دارد؛ تصمیم نهایی با
   میزبان است و باید فقط به Origin مجاز هدایت کند.

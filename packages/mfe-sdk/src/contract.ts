@@ -71,6 +71,22 @@ export type IdpnEvent =
 export type IdpnEventHandler = (event: IdpnEvent) => void;
 
 /**
+ * DOM event name the Web Component dispatches for every {@link IdpnEvent}.
+ *
+ * The event is a `CustomEvent<IdpnEvent>` with `bubbles: true` and `composed: true`, so a
+ * host that does not use the SDK can still listen on the element or on `document`:
+ *
+ * ```ts
+ * document.addEventListener(IDPN_MFE_EVENT_NAME, (event) => {
+ *   console.info((event as CustomEvent<IdpnEvent>).detail.type);
+ * });
+ * ```
+ *
+ * `detail` never contains a token (docs/micro-frontend.md 6).
+ */
+export const IDPN_MFE_EVENT_NAME = 'idpn:event';
+
+/**
  * Configuration contract shared by Module Federation hosts and Web Component hosts.
  *
  * The Web Component helper forwards `clientId`, `module`, `apiBaseUrl`, `locale`, `dir`

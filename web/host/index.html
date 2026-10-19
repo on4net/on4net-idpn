@@ -3,20 +3,66 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Host application (isolation fixture)</title>
+    <title>Vanilla host — IDPN Web Component</title>
     <link rel="stylesheet" href="/host/host.css" />
   </head>
   <body>
-    <h1 id="host-title">Host application</h1>
-    <button id="host-button" type="button" class="flex p-4">Host button</button>
-    <p id="host-paragraph">Host paragraph text.</p>
+    <header class="host-header">
+      <h1 id="host-title">Host application</h1>
+      <p id="host-paragraph">Host paragraph text.</p>
+      <button id="host-button" type="button" class="flex p-4">Host button</button>
+    </header>
 
-    <on4net-idpn-user-management
-      id="mfe"
-      client-id="app-a"
-      locale="fa-IR"
-      dir="rtl"
-    ></on4net-idpn-user-management>
+    <section class="host-panel" aria-labelledby="host-config-heading">
+      <h2 id="host-config-heading">Host configuration</h2>
+      <!-- Values are build-time host configuration, never read from the URL. -->
+      <dl class="host-config" data-testid="host-config">
+        <dt>Client</dt>
+        <dd data-testid="host-client-id" id="host-client-id">—</dd>
+        <dt>Mode</dt>
+        <dd data-testid="host-mode" id="host-mode">—</dd>
+        <dt>Locale</dt>
+        <dd data-testid="host-locale" id="host-locale">—</dd>
+      </dl>
+      <p id="host-status-message" role="status" data-testid="host-status">
+        Loading the IDPN modules…
+      </p>
+      <div class="host-actions">
+        <button id="host-unmount" type="button">Unmount modules</button>
+        <button id="host-mount" type="button">Mount modules</button>
+      </div>
+    </section>
+
+    <div id="host-fallback" class="host-alert" role="alert" hidden data-testid="host-fallback">
+      <p id="host-fallback-message" data-testid="host-fallback-message">
+        The IDPN modules are unavailable.
+      </p>
+      <a id="host-fallback-link" data-testid="host-fallback-link" href="/oauth2/authorize" hidden>
+        Open the hosted account page
+      </a>
+    </div>
+
+    <main class="host-modules">
+      <section aria-labelledby="host-user-management-heading">
+        <h2 id="host-user-management-heading">User management</h2>
+        <div id="mfe" data-testid="host-slot-user-management"></div>
+      </section>
+
+      <section aria-labelledby="host-account-heading">
+        <h2 id="host-account-heading">Account</h2>
+        <div id="host-account" data-testid="host-slot-account"></div>
+      </section>
+    </main>
+
+    <section class="host-panel" aria-labelledby="host-events-heading">
+      <h2 id="host-events-heading">Module events</h2>
+      <p>
+        SDK handler: <output id="host-event-count" data-testid="host-event-count">0</output> · DOM
+        <code>idpn:event</code>:
+        <output id="host-bubbled-events" data-testid="host-bubbled-events">0</output>
+      </p>
+      <ul id="host-events" data-testid="host-events" aria-live="polite"></ul>
+    </section>
 
     <script type="module" src="/host/host.ts"></script>
   </body>

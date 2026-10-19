@@ -37,6 +37,41 @@ async function mockApi(page: Page): Promise<void> {
       }),
     }),
   );
+  // The fixture mounts the account module next to user-management; keep both deterministic.
+  await page.route('**/api/v1/account/profile', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        id: 'u1',
+        username: 'negar',
+        email: 'negar@example.com',
+        displayName: 'نگار کریمی',
+        phone: null,
+        avatarUrl: null,
+        locale: 'fa-IR',
+        status: 'active',
+        emailVerified: true,
+        mustChangePassword: false,
+        createdAt: '2026-10-19T09:00:00.000Z',
+        passwordChangedAt: null,
+      }),
+    }),
+  );
+  await page.route('**/api/v1/account/sessions**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ items: [], page: 1, limit: 25, total: 0 }),
+    }),
+  );
+  await page.route('**/api/v1/account/mfa', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ enabled: false, factors: [] }),
+    }),
+  );
 }
 
 test.describe('web component isolation (spike)', () => {
@@ -62,7 +97,8 @@ test.describe('web component isolation (spike)', () => {
 
     const invite = page.getByRole('button', { name: 'دعوت کاربر' });
     await expect(invite).toBeVisible();
-    await expect(page.getByText('نگار کریمی')).toBeVisible();
+    // Scope to the user-management module: the account fixture renders the same person.
+    await expect(page.locator('#mfe').getByText('نگار کریمی')).toBeVisible();
 
     const mfeButtonBackground = await invite.evaluate(
       (element) => getComputedStyle(element).backgroundColor,
@@ -74,7 +110,8 @@ test.describe('web component isolation (spike)', () => {
     await expect(page.getByRole('dialog', { name: 'دعوت عضو جدید' })).toBeVisible();
 
     const dialogLocation = await page.evaluate(() => {
-      const host = document.querySelector('#mfe');
+      // `#mfe` is the host slot; the custom element owns the shadow root.
+      const host = document.querySelector('#mfe on4net-idpn-user-management');
       const dialog = host?.shadowRoot?.querySelector('[role="dialog"]');
       return {
         insideShadowRoot: dialog !== null && dialog !== undefined,

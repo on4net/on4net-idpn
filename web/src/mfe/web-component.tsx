@@ -1,3 +1,4 @@
+import { IDPN_MFE_EVENT_NAME, type IdpnEvent } from '@idpn/mfe-sdk';
 import { createRoot, type Root } from 'react-dom/client';
 
 import { AccountRoot, type AccountEvent } from './account';
@@ -61,6 +62,28 @@ export class IdpnMfeElement extends HTMLElement {
     this.eventHandler = value;
     this.renderModule();
   }
+
+  /**
+   * Stable event delivery used by the modules (docs/micro-frontend.md 6):
+   *
+   * 1. publishes `CustomEvent<IdpnEvent>` named {@link IDPN_MFE_EVENT_NAME} with
+   *    `bubbles: true` and `composed: true`, so a Vue/Angular/legacy host can listen on the
+   *    element or on `document` without importing the SDK;
+   * 2. forwards the same event to the in-memory `onEvent` property, if the host set one.
+   *
+   * The reference never changes, so React never re-fetches just because the element
+   * re-rendered. The detail is the public event contract and never contains a token.
+   */
+  private readonly deliverEvent = (event: IdpnWebComponentEvent): void => {
+    this.dispatchEvent(
+      new CustomEvent<IdpnEvent>(IDPN_MFE_EVENT_NAME, {
+        detail: event,
+        bubbles: true,
+        composed: true,
+      }),
+    );
+    this.eventHandler?.(event);
+  };
 
   /** Host theme tokens, forwarded to the MFE root as CSS custom properties. */
   get theme(): Record<string, string> | undefined {
@@ -146,7 +169,7 @@ export class IdpnMfeElement extends HTMLElement {
     const dir = dirAttribute === 'ltr' || dirAttribute === 'rtl' ? dirAttribute : undefined;
     const apiBaseUrl = this.getAttribute('api-base') ?? undefined;
     const theme = this.theme;
-    const onEvent = this.onEvent;
+    const onEvent = this.deliverEvent;
 
     if (moduleName === 'account') {
       this.root.render(
@@ -156,7 +179,7 @@ export class IdpnMfeElement extends HTMLElement {
           {...(dir === undefined ? {} : { dir })}
           {...(apiBaseUrl === undefined ? {} : { apiBaseUrl })}
           {...(theme === undefined ? {} : { theme })}
-          {...(onEvent === undefined ? {} : { onEvent })}
+          onEvent={onEvent}
         />,
       );
       return;
@@ -175,7 +198,7 @@ export class IdpnMfeElement extends HTMLElement {
         {...(pageSize === undefined ? {} : { pageSize })}
         {...(theme === undefined ? {} : { theme })}
         {...(this.getAccessToken === undefined ? {} : { getAccessToken: this.getAccessToken })}
-        {...(onEvent === undefined ? {} : { onEvent })}
+        onEvent={onEvent}
       />,
     );
   }

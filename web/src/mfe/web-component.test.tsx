@@ -1,6 +1,8 @@
 import { waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { IDPN_MFE_EVENT_NAME } from '@idpn/mfe-sdk';
+
 import {
   ACCOUNT_ELEMENT_NAME,
   IdpnAccountElement,
@@ -11,6 +13,8 @@ import {
 } from './web-component';
 
 const ELEMENT = USER_MANAGEMENT_ELEMENT_NAME;
+/** Stand-in for an in-memory SPA token; assertions make sure it never leaves memory. */
+const TOKEN = 'in-memory-access-token-1';
 
 const membersBody = {
   items: [
@@ -273,5 +277,102 @@ describe('Web Component module selection', () => {
     await waitFor(() => expect(element.shadowRoot?.textContent).toContain('سارا محمدی'));
     expect(element.shadowRoot?.querySelector('.idpn-root')).toHaveAttribute('dir', 'ltr');
     expect(element.shadowRoot?.querySelector('.idpn-root')).toHaveAttribute('lang', 'en-US');
+  });
+});
+
+describe('Web Component event contract', () => {
+  it('publishes a composed, bubbling idpn:event without a token and still calls onEvent', async () => {
+    fetchMock.mockImplementation(() => Promise.resolve(jsonResponse({ title: 'Forbidden' }, 403)));
+    const onEvent = vi.fn();
+    const received: CustomEvent[] = [];
+    const listener = (event: Event): void => {
+      received.push(event as CustomEvent);
+    };
+    document.addEventListener(IDPN_MFE_EVENT_NAME, listener);
+
+    try {
+      const element = document.createElement(ELEMENT) as IdpnUserManagementElement;
+      element.setAttribute('client-id', 'app-a');
+      // SPA mode: the token lives in memory and must never reach the DOM or an event.
+      element.getAccessToken = () => TOKEN;
+      element.onEvent = onEvent;
+      document.body.appendChild(element);
+
+      await waitFor(() => expect(received).toHaveLength(1));
+
+      const event = received[0] as CustomEvent;
+      expect(event.type).toBe(IDPN_MFE_EVENT_NAME);
+      expect(event.bubbles).toBe(true);
+      expect(event.composed).toBe(true);
+      expect(event.target).toBe(element);
+      expect(event.detail).toEqual({ type: 'auth:error', code: 'forbidden' });
+      expect(onEvent).toHaveBeenCalledWith({ type: 'auth:error', code: 'forbidden' });
+
+      expect(JSON.stringify(event.detail)).not.toContain(TOKEN);
+      expect(element.outerHTML).not.toContain(TOKEN);
+      expect(document.documentElement.outerHTML).not.toContain(TOKEN);
+      expect(localStorage.length).toBe(0);
+      expect(sessionStorage.length).toBe(0);
+      expect(document.cookie).toBe('');
+    } finally {
+      document.removeEventListener(IDPN_MFE_EVENT_NAME, listener);
+    }
+  });
+});
+
+describe('Web Component property updates', () => {
+  it('re-renders for the new client when the client-id attribute changes', async () => {
+    const element = mount();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(requestedUrls().some((url) => url.includes('/clients/app-a/members'))).toBe(true);
+
+    element.setAttribute('client-id', 'app-b');
+
+    await waitFor(() =>
+      expect(requestedUrls().some((url) => url.includes('/clients/app-b/members'))).toBe(true),
+    );
+    expect(element.getAttribute('client-id')).toBe('app-b');
+    expect(element.shadowRoot?.querySelectorAll('.idpn-root')).toHaveLength(1);
+  });
+
+  it('switches from user-management to account through the module property', async () => {
+    const element = mount();
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    element.module = 'account';
+
+    await waitFor(() =>
+      expect(requestedUrls().some((url) => url.includes('/api/v1/account/profile'))).toBe(true),
+    );
+    expect(element.module).toBe('account');
+    expect(element.shadowRoot?.querySelector('[data-testid="account-module"]')).not.toBeNull();
+    expect(element.shadowRoot?.querySelectorAll('.idpn-root')).toHaveLength(1);
+  });
+
+  it('does not re-fetch when only the onEvent property changes', async () => {
+    const element = mount();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const callsBefore = fetchMock.mock.calls.length;
+
+    // The module receives a stable dispatcher, so replacing the host handler must not
+    // restart the data effects (and must not duplicate listeners).
+    element.onEvent = vi.fn();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(fetchMock.mock.calls.length).toBe(callsBefore);
+  });
+
+  it('keeps a single shadow root and mount point across unmount and re-mount', async () => {
+    const element = mount();
+    await waitFor(() => expect(element.shadowRoot?.textContent).toContain('سارا محمدی'));
+
+    element.remove();
+    document.body.appendChild(element);
+    await waitFor(() => expect(element.shadowRoot?.textContent).toContain('سارا محمدی'));
+
+    expect(element.shadowRoot?.querySelectorAll('.idpn-root')).toHaveLength(1);
+    expect(element.shadowRoot?.querySelectorAll('style')).toHaveLength(1);
+    // Exactly one <style> and one mount point are direct children of the shadow root.
+    expect(element.shadowRoot?.children).toHaveLength(2);
   });
 });

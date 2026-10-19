@@ -7,6 +7,7 @@ import {
 import { describe, expect, it } from 'vitest';
 
 import {
+  IDPN_MFE_EVENT_NAME,
   IDPN_MFE_EVENT_TYPES,
   IDPN_MFE_MODULES,
   type IdpnEvent,
@@ -111,6 +112,11 @@ describe('@idpn/mfe-sdk contract parity', () => {
 
   it('covers every supported module', () => {
     expect([...IDPN_MFE_MODULES]).toEqual(['user-management', 'account']);
+  });
+
+  it('keeps the Web Component DOM event name stable for hosts', () => {
+    // Renaming the event breaks every non-SDK host listener; treat it as a major change.
+    expect(IDPN_MFE_EVENT_NAME).toBe('idpn:event');
   });
 
   it('does not allow token fields in the public types', () => {

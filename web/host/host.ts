@@ -1,1 +1,3 @@
-import '../src/mfe/web-component';
+import { bootstrapHost } from './host-bootstrap';
+
+void bootstrapHost();

@@ -54,6 +54,11 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'], baseURL: webURL },
     },
     {
+      name: 'wc-host-chromium',
+      testMatch: 'web/web-component-host.spec.ts',
+      use: { ...devices['Desktop Chrome'], baseURL: webURL },
+    },
+    {
       name: 'mf-chromium',
       testMatch: 'web/mf-host.spec.ts',
       use: { ...devices['Desktop Chrome'], baseURL: hostURL },
@@ -82,13 +87,23 @@ export default defineConfig({
       },
     },
     {
-      command: 'pnpm --filter @idpn/web dev',
+      // `dev:e2e` builds the Web Component bundle first: the vanilla host in
+      // `web/host` loads the real `dist-wc/web-component.js`, not the TS source.
+      command: 'pnpm --filter @idpn/web run dev:e2e',
       url: webURL,
       reuseExistingServer: !isCI,
-      timeout: 120_000,
+      timeout: 180_000,
       env: {
         VITE_PORT: String(WEB_PORT),
         VITE_API_PROXY: apiURL,
+        // Vanilla host configuration (build-time only, never from the URL).
+        VITE_IDPN_CLIENT_ID: 'app-a',
+        VITE_IDPN_API_BASE_URL: '',
+        VITE_IDPN_LOGIN_URL: `${webURL}/oauth2/authorize`,
+        VITE_IDPN_LOCALE: 'fa-IR',
+        VITE_IDPN_DIR: 'rtl',
+        VITE_IDPN_MODULE: 'all',
+        VITE_IDPN_THEME: JSON.stringify({ brand: '#0057b8' }),
       },
     },
     {

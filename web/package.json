@@ -8,6 +8,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "dev": "vite",
     "dev:host": "vite build --config vite.mfe.config.ts && vite --config vite.host.config.ts",
+    "dev:e2e": "vite build --config vite.webcomponent.config.ts && vite",
     "ui:add": "pnpm dlx shadcn@4.22.0 add",
     "ui:init": "pnpm dlx shadcn@4.22.0 init",
     "build": "vite build",
