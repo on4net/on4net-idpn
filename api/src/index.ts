@@ -36,6 +36,10 @@ import { FileSigningKeyRepository } from './oidc/file-key-repository.js';
 import { KeyRotationScheduler } from './oidc/key-rotation-scheduler.js';
 import { DEFAULT_ROTATION_DUE_DAYS, SigningKeyManager } from './oidc/keys.js';
 import { createPrismaClientRepository } from './oidc/prisma-client-repository.js';
+import {
+  createAuthorizeAuthenticationRequirement,
+  createAuthorizeMembershipStatus,
+} from './oidc/authorize-enforcement.js';
 import { createPrismaCodeRepository } from './oidc/prisma-code-repository.js';
 import { createPrismaRefreshTokenRepository } from './oidc/prisma-refresh-repository.js';
 import { createPrismaUserRepository } from './oidc/prisma-user-repository.js';
@@ -194,6 +198,14 @@ const backchannelLogout = new BackchannelLogoutDispatcher({
 const isClientAdminEligible = async (userId: string, clientId: string): Promise<boolean> =>
   ((await permissionReader.clientPermissionsForUser?.(userId, clientId)) ?? []).length > 0;
 
+/**
+ * `/oauth2/authorize` re-evaluates the MFA/step-up policy and membership server-side: the
+ * password login endpoint only sees a caller-supplied `clientId`, so token issuance is the
+ * only point that covers every session source (password, MFA, passkey, social).
+ */
+const authorizeAuthenticationRequirement = createAuthorizeAuthenticationRequirement(mfaRepository);
+const authorizeMembershipStatus = createAuthorizeMembershipStatus(prisma);
+
 const app = buildServer({
   issuer: env.APP_URL,
   keys,
@@ -211,6 +223,8 @@ const app = buildServer({
     clients: clientsRepository,
     loginUrl: `${(env.HOSTED_UI_URL ?? env.APP_URL).replace(/\/+$/, '')}/`,
     isClientAdminEligible,
+    authenticationRequirement: authorizeAuthenticationRequirement,
+    membershipStatus: authorizeMembershipStatus,
     loginRequests: authorizeLoginRequests,
   },
   social: {

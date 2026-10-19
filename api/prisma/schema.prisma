@@ -491,6 +491,8 @@ model AuthorizationCode {
   amr                 String[]
   expiresAt           DateTime  @map("expires_at") @db.Timestamptz(6)
   consumedAt          DateTime? @map("consumed_at") @db.Timestamptz(6)
+  /** Login Context the code was issued for; narrows roles at token time (CTX/T31). */
+  loginContext        String?   @map("login_context") @db.VarChar(64)
 
   client  Client  @relation(fields: [clientId], references: [id], onDelete: Restrict)
   user    User    @relation(fields: [userId], references: [id], onDelete: Restrict)
@@ -515,6 +517,8 @@ model RefreshToken {
   revokedAt  DateTime? @map("revoked_at") @db.Timestamptz(6)
   replacedBy String?   @unique @map("replaced_by") @db.Uuid
   createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  /** Login Context the refresh token is bound to (docs/login-contexts.md 5). */
+  loginContext String? @map("login_context") @db.VarChar(64)
 
   client      Client        @relation(fields: [clientId], references: [id], onDelete: Restrict)
   user        User          @relation(fields: [userId], references: [id], onDelete: Restrict)

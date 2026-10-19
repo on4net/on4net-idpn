@@ -106,14 +106,12 @@ export function registerTokenRoute(app: FastifyInstance, options: TokenRouteOpti
     });
 
     if (!auth.ok) {
-      return tokenError(
-        reply,
-        oauthError(
-          'invalid_request',
-          auth.reason === 'invalid_client' ? 'client authentication failed' : auth.reason,
-        ),
-        auth.reason === 'invalid_client' ? 401 : 400,
-      );
+      // RFC 6749 5.2: a failed client authentication is `invalid_client` with HTTP 401. The
+      // response is identical for unknown clients and wrong secrets (no enumeration).
+      if (basic !== null) {
+        reply.header('WWW-Authenticate', 'Basic realm="token"');
+      }
+      return tokenError(reply, oauthError('invalid_client', 'client authentication failed'), 401);
     }
 
     switch (payload.grant_type) {
@@ -201,6 +199,9 @@ async function authorizationCodeGrant(
       sessionId: exchange.record.sessionId,
       scope: exchange.record.scope,
       ttlSeconds: client.refreshTokenTtl,
+      ...(exchange.record.loginContext === undefined
+        ? {}
+        : { loginContext: exchange.record.loginContext }),
       now: at,
     });
     response.refresh_token = refresh.token;
@@ -255,7 +256,12 @@ async function refreshTokenGrant(
   }
 
   const issuedAt = Math.floor(at.getTime() / 1000);
-  const access = await resolveAccess(options, profile.id, client.clientId);
+  const access = await resolveAccess(
+    options,
+    profile.id,
+    client.clientId,
+    rotation.record.loginContext,
+  );
   const accessToken = await options.keys.signAccessToken(
     {
       iss: options.issuer,
@@ -271,6 +277,9 @@ async function refreshTokenGrant(
       jti: randomUUID(),
       scope: rotation.record.scope.join(' '),
       tenant_id: profile.tenantId,
+      ...(rotation.record.loginContext === undefined
+        ? {}
+        : { login_context: rotation.record.loginContext }),
       ...accessClaimsFor(access),
     },
     {

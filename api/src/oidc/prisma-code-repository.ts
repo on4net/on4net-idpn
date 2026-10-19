@@ -28,6 +28,7 @@ export function createPrismaCodeRepository(prisma: PrismaClient): AuthorizationC
           acr: record.acr,
           amr: record.amr,
           expiresAt: record.expiresAt,
+          loginContext: record.loginContext ?? null,
         },
       });
     },
@@ -55,6 +56,7 @@ export function createPrismaCodeRepository(prisma: PrismaClient): AuthorizationC
         amr: row.amr,
         expiresAt: row.expiresAt,
         consumedAt: row.consumedAt,
+        ...(row.loginContext === null ? {} : { loginContext: row.loginContext }),
       };
       return record;
     },

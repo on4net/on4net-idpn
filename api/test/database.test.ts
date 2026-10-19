@@ -337,15 +337,17 @@ describe('initial schema', () => {
 
   it('rolls back and re-applies the migrations', async () => {
     const latest = await rollbackLatestMigration({ connectionString });
-    expect(latest).toBe('0006_webauthn_credentials');
+    expect(latest).toBe('0007_login_context_binding');
     const second = await rollbackLatestMigration({ connectionString });
-    expect(second).toBe('0005_account_tokens');
+    expect(second).toBe('0006_webauthn_credentials');
     const third = await rollbackLatestMigration({ connectionString });
-    expect(third).toBe('0004_mfa_factors');
+    expect(third).toBe('0005_account_tokens');
     const fourth = await rollbackLatestMigration({ connectionString });
-    expect(fourth).toBe('0003_audit_events_append_only');
+    expect(fourth).toBe('0004_mfa_factors');
     const fifth = await rollbackLatestMigration({ connectionString });
-    expect(fifth).toBe('0002_assignments_nulls_not_distinct');
+    expect(fifth).toBe('0003_audit_events_append_only');
+    const sixth = await rollbackLatestMigration({ connectionString });
+    expect(sixth).toBe('0002_assignments_nulls_not_distinct');
     const rolledBack = await rollbackLatestMigration({ connectionString });
     expect(rolledBack).toBe('0001_init');
 

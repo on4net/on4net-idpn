@@ -81,6 +81,17 @@ function buildApp(options: {
   clientAdminEligible?: boolean;
   now?: Date;
   clientOverrides?: Partial<OAuthClient>;
+  loginUrl?: string;
+  authenticationRequirement?: (input: {
+    userId: string;
+    clientId: string;
+    loginContext?: string;
+  }) => Promise<{ mfaRequired: boolean; freshAuthenticationRequired: boolean }>;
+  membershipStatus?: (input: {
+    userId: string;
+    clientId: string;
+    loginContext?: string;
+  }) => Promise<'active' | 'invited' | 'suspended' | null>;
 }) {
   const app = Fastify({ logger: false });
   const codes = memoryCodes();
@@ -102,6 +113,13 @@ function buildApp(options: {
     },
     isConsentGranted: async () => options.consentGranted ?? true,
     isClientAdminEligible: async () => options.clientAdminEligible ?? true,
+    ...(options.loginUrl === undefined ? {} : { loginUrl: options.loginUrl }),
+    ...(options.authenticationRequirement === undefined
+      ? {}
+      : { authenticationRequirement: options.authenticationRequirement }),
+    ...(options.membershipStatus === undefined
+      ? {}
+      : { membershipStatus: options.membershipStatus }),
     now: () => options.now ?? new Date('2026-10-18T12:00:00Z'),
   });
   return { app, codes };
@@ -324,6 +342,180 @@ describe('GET /oauth2/authorize', () => {
     const location = new URL(response.headers.location ?? '');
     expect(location.pathname).toBe('/login');
     expect(location.searchParams.get('client_id')).toBe('app-a');
+    await app.close();
+  });
+});
+
+describe('GET /oauth2/authorize — MFA and membership enforcement', () => {
+  it('redirects a password-only session to login when the client requires MFA', async () => {
+    const { app, codes } = buildApp({
+      currentSession: session(),
+      loginUrl: 'https://auth.example.com/login',
+      authenticationRequirement: async () => ({
+        mfaRequired: true,
+        freshAuthenticationRequired: false,
+      }),
+    });
+    await app.ready();
+
+    const response = await request(app.server)
+      .get('/oauth2/authorize')
+      .query(baseQuery)
+      .set('Cookie', 'idpn_session=session-abc')
+      .expect(302);
+
+    const location = new URL(response.headers.location ?? '');
+    expect(location.origin + location.pathname).toBe('https://auth.example.com/login');
+    expect(location.searchParams.get('client_id')).toBe('app-a');
+    expect(location.searchParams.get('return_to')).toContain('/oauth2/authorize');
+    expect(codes.records.size).toBe(0);
+    await app.close();
+  });
+
+  it('issues a code when the session already proves a second factor', async () => {
+    const { app, codes } = buildApp({
+      currentSession: session({ acr: 'urn:on4net:acr:mfa', amr: ['pwd', 'totp'] }),
+      authenticationRequirement: async () => ({
+        mfaRequired: true,
+        freshAuthenticationRequired: false,
+      }),
+    });
+    await app.ready();
+
+    await request(app.server)
+      .get('/oauth2/authorize')
+      .query(baseQuery)
+      .set('Cookie', 'idpn_session=session-abc')
+      .expect(302);
+
+    expect(codes.records.size).toBe(1);
+    await app.close();
+  });
+
+  it('returns login_required instead of redirecting to login for prompt=none', async () => {
+    const { app, codes } = buildApp({
+      currentSession: session(),
+      authenticationRequirement: async () => ({
+        mfaRequired: true,
+        freshAuthenticationRequired: false,
+      }),
+    });
+    await app.ready();
+
+    const response = await request(app.server)
+      .get('/oauth2/authorize')
+      .query({ ...baseQuery, prompt: 'none' })
+      .set('Cookie', 'idpn_session=session-abc')
+      .expect(302);
+
+    const location = new URL(response.headers.location ?? '');
+    expect(location.origin + location.pathname).toBe('https://app-a.example.com/callback');
+    expect(location.searchParams.get('error')).toBe('login_required');
+    expect(codes.records.size).toBe(0);
+    await app.close();
+  });
+
+  it('forces fresh authentication for a stale step-up session', async () => {
+    const { app, codes } = buildApp({
+      currentSession: session({
+        acr: 'urn:on4net:acr:mfa',
+        amr: ['pwd', 'totp'],
+        authTime: '2026-10-18T11:00:00.000Z',
+      }),
+      loginUrl: 'https://auth.example.com/login',
+      authenticationRequirement: async () => ({
+        mfaRequired: true,
+        freshAuthenticationRequired: true,
+      }),
+    });
+    await app.ready();
+
+    const response = await request(app.server)
+      .get('/oauth2/authorize')
+      .query(baseQuery)
+      .set('Cookie', 'idpn_session=session-abc')
+      .expect(302);
+
+    expect(new URL(response.headers.location ?? '').pathname).toBe('/login');
+    expect(codes.records.size).toBe(0);
+    await app.close();
+  });
+
+  it('denies a suspended membership with access_denied', async () => {
+    const { app, codes } = buildApp({
+      currentSession: session(),
+      membershipStatus: async () => 'suspended',
+    });
+    await app.ready();
+
+    const response = await request(app.server)
+      .get('/oauth2/authorize')
+      .query(baseQuery)
+      .set('Cookie', 'idpn_session=session-abc')
+      .expect(302);
+
+    const location = new URL(response.headers.location ?? '');
+    expect(location.searchParams.get('error')).toBe('access_denied');
+    expect(codes.records.size).toBe(0);
+    await app.close();
+  });
+
+  it('denies a requested login context without an active membership', async () => {
+    const { app, codes } = buildApp({
+      currentSession: session(),
+      clientOverrides: { loginContexts: ['customer-admin'] },
+      membershipStatus: async () => null,
+    });
+    await app.ready();
+
+    const response = await request(app.server)
+      .get('/oauth2/authorize')
+      .query({ ...baseQuery, login_context: 'customer-admin' })
+      .set('Cookie', 'idpn_session=session-abc')
+      .expect(302);
+
+    const location = new URL(response.headers.location ?? '');
+    expect(location.searchParams.get('error')).toBe('access_denied');
+    expect(codes.records.size).toBe(0);
+    await app.close();
+  });
+
+  it('issues a context-bound code for an active context membership', async () => {
+    const { app, codes } = buildApp({
+      currentSession: session(),
+      clientOverrides: { loginContexts: ['customer-admin'] },
+      membershipStatus: async () => 'active',
+    });
+    await app.ready();
+
+    await request(app.server)
+      .get('/oauth2/authorize')
+      .query({ ...baseQuery, login_context: 'customer-admin' })
+      .set('Cookie', 'idpn_session=session-abc')
+      .expect(302);
+
+    expect(codes.records.size).toBe(1);
+    expect([...codes.records.values()][0]?.loginContext).toBe('customer-admin');
+    await app.close();
+  });
+});
+
+describe('GET /oauth2/authorize — acr_values', () => {
+  it('does not issue a code when acr_values requests the MFA ACR and the session is password-only', async () => {
+    const { app, codes } = buildApp({
+      currentSession: session(),
+      loginUrl: 'https://auth.example.com/login',
+    });
+    await app.ready();
+
+    const response = await request(app.server)
+      .get('/oauth2/authorize')
+      .query({ ...baseQuery, acr_values: 'urn:on4net:acr:mfa' })
+      .set('Cookie', 'idpn_session=session-abc')
+      .expect(302);
+
+    expect(new URL(response.headers.location ?? '').pathname).toBe('/login');
+    expect(codes.records.size).toBe(0);
     await app.close();
   });
 });

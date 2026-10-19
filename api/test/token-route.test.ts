@@ -373,7 +373,7 @@ describe('POST /oauth2/token — authorization_code', () => {
     const { app, codes } = await harness();
     const code = await seedCode(codes);
 
-    await request(app.server)
+    const missingSecret = await request(app.server)
       .post('/oauth2/token')
       .send({
         grant_type: 'authorization_code',
@@ -382,9 +382,10 @@ describe('POST /oauth2/token — authorization_code', () => {
         code_verifier: verifier,
         client_id: 'web-app',
       })
-      .expect(400);
+      .expect(401);
+    expect(missingSecret.body.error).toBe('invalid_client');
 
-    await request(app.server)
+    const wrongSecret = await request(app.server)
       .post('/oauth2/token')
       .set('Authorization', `Basic ${Buffer.from('web-app:wrong-secret').toString('base64')}`)
       .send({
@@ -393,7 +394,9 @@ describe('POST /oauth2/token — authorization_code', () => {
         redirect_uri: 'https://spa.example.com/cb',
         code_verifier: verifier,
       })
-      .expect(400);
+      .expect(401);
+    expect(wrongSecret.body.error).toBe('invalid_client');
+    expect(wrongSecret.headers['www-authenticate']).toContain('Basic');
     await app.close();
   });
 

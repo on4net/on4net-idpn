@@ -167,6 +167,7 @@ async function requestAuthorization(params: {
   sessionId: string;
   clientId: AppClientId;
   scope: string;
+  loginContext?: string;
 }): Promise<URL> {
   const response = await request(app.server)
     .get('/oauth2/authorize')
@@ -179,6 +180,7 @@ async function requestAuthorization(params: {
       nonce: 'nonce-1',
       code_challenge: s256Challenge(verifier),
       code_challenge_method: 'S256',
+      ...(params.loginContext === undefined ? {} : { login_context: params.loginContext }),
     })
     .set('Cookie', `idpn_session=${params.sessionId}`)
     .expect(302);
@@ -824,8 +826,9 @@ describe('access token claims', () => {
   });
 
   it('narrows roles and permissions to the requested login context', async () => {
-    // Carrying login_context through the authorization code is owned by #62; this asserts
-    // the resolution and claim assembly used by the token route once the context is known.
+    // The end-to-end context binding (code -> token -> refresh) is covered by the
+    // "binds the login context ..." test below; this asserts the resolution and claim
+    // assembly used by the token route once the context is known.
     const access = await effectiveAccess.resolve({
       userId: state.memberUserId,
       clientId: 'app-a',
@@ -870,6 +873,47 @@ describe('access token claims', () => {
     expect(claims.login_context).toBe('customer-admin');
     expect(claims.roles).toEqual(['app-a:editor']);
     expect(claims.permissions).toEqual(['app-a:contact:write']);
+  });
+
+  it('binds the login context to the code, token claims and refresh rotation', async () => {
+    const location = await requestAuthorization({
+      sessionId: state.sessions.member,
+      clientId: 'app-a',
+      scope: 'openid offline_access',
+      loginContext: 'customer-admin',
+    });
+    expect(location.searchParams.get('error')).toBeNull();
+    const code = location.searchParams.get('code');
+    expect(code).toEqual(expect.any(String));
+
+    const response = await request(app.server)
+      .post('/oauth2/token')
+      .send({
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: REDIRECT_URI['app-a'],
+        client_id: 'app-a',
+        code_verifier: verifier,
+      })
+      .expect(200);
+
+    const claims = await verifyAccess(response.body.access_token, 'app-a');
+    expect(claims.login_context).toBe('customer-admin');
+    expect(claims.roles).toEqual(['app-a:editor']);
+    expect(claims.permissions).toEqual(['app-a:contact:write']);
+    expect(claims.membership).toEqual({
+      context: 'customer-admin',
+      status: 'active',
+      attributes: { department: 'sales' },
+    });
+
+    // A rotated refresh token must stay bound to the same context: no privilege widening.
+    const refreshed = await refreshTokens(response.body.refresh_token, 'app-a');
+    expect(refreshed.status).toBe(200);
+    const refreshedClaims = await verifyAccess(refreshed.body.access_token, 'app-a');
+    expect(refreshedClaims.login_context).toBe('customer-admin');
+    expect(refreshedClaims.roles).toEqual(['app-a:editor']);
+    expect(refreshedClaims.permissions).toEqual(['app-a:contact:write']);
   });
 });
 

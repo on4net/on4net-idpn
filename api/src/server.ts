@@ -65,6 +65,12 @@ export interface BuildServerOptions {
     isClientAdminEligible?: (userId: string, clientId: string) => Promise<boolean>;
     /** Consent gate; defaults to granted for first-party clients. */
     isConsentGranted?: Parameters<typeof registerAuthorizeRoute>[1]['isConsentGranted'];
+    /** Server-side MFA/step-up policy check before a code is issued. */
+    authenticationRequirement?: Parameters<
+      typeof registerAuthorizeRoute
+    >[1]['authenticationRequirement'];
+    /** Membership lookup for the client/login context (CTX-003). */
+    membershipStatus?: Parameters<typeof registerAuthorizeRoute>[1]['membershipStatus'];
     /** Issues the opaque `login_request` used by the per-client social start endpoint. */
     loginRequests?: Parameters<typeof registerAuthorizeRoute>[1]['loginRequests'];
   };
@@ -104,6 +110,15 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   // RFC 6749/7009 clients post `application/x-www-form-urlencoded` to the token and
   // revocation endpoints; the JSON body stays supported for first-party callers.
   registerFormBodyParser(app);
+
+  // Baseline response hardening: no content sniffing and no referrer leakage. The Hosted UI
+  // sets its own CSP/HSTS at the edge (`docs/security.md` 12); these headers are safe for
+  // JSON and redirect responses alike.
+  app.addHook('onSend', async (_request, reply, payload) => {
+    reply.header('X-Content-Type-Options', 'nosniff');
+    reply.header('Referrer-Policy', 'no-referrer');
+    return payload;
+  });
 
   app.get('/healthz', async (_request, reply) => {
     const payload: HealthResponse = { status: 'ok', service: 'on4net-idpn-api' };

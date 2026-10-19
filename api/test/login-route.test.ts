@@ -216,3 +216,22 @@ describe('helpers', () => {
     expect(sanitizeReturnTo(undefined, appUrl)).toBeUndefined();
   });
 });
+
+describe('POST /api/v1/login — account status', () => {
+  it('refuses to create a session for a pending account', async () => {
+    const { app, sessions } = await harness(await user({ status: 'pending' }));
+
+    const response = await request(app.server)
+      .post('/api/v1/login')
+      .send({ identifier: 'sara@example.com', password })
+      .expect(401);
+
+    expect(response.body).toEqual({
+      error: 'invalid_credentials',
+      message: expect.any(String),
+    });
+    expect(response.headers['set-cookie']).toBeUndefined();
+    expect(sessions).toHaveLength(0);
+    await app.close();
+  });
+});

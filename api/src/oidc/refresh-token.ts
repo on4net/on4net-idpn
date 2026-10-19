@@ -13,6 +13,8 @@ export interface RefreshTokenRecord {
   revokedAt: Date | null;
   replacedBy: string | null;
   createdAt: Date;
+  /** Login Context this token is bound to; narrows roles on every refresh (T31). */
+  loginContext?: string;
 }
 
 export interface RefreshTokenRepository {
@@ -37,6 +39,8 @@ export interface IssueRefreshTokenInput {
   ttlSeconds: number;
   /** Existing family when rotating; a new family is created otherwise. */
   familyId?: string;
+  /** Login Context the token must stay bound to across rotations. */
+  loginContext?: string;
   now?: Date;
 }
 
@@ -60,6 +64,7 @@ export async function issueRefreshToken(
     revokedAt: null,
     replacedBy: null,
     createdAt: now,
+    ...(input.loginContext === undefined ? {} : { loginContext: input.loginContext }),
   };
 
   await repository.create(record);
@@ -118,6 +123,7 @@ export async function rotateRefreshToken(
     scope: current.scope,
     ttlSeconds: input.ttlSeconds,
     familyId: current.familyId,
+    ...(current.loginContext === undefined ? {} : { loginContext: current.loginContext }),
     now,
   });
 

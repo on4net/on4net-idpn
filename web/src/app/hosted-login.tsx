@@ -360,6 +360,30 @@ async function defaultConfirmEmail(token: string): Promise<AccountFlowResult> {
 }
 
 /**
+ * Only a rooted path or an absolute URL on the IdP origin may be a navigation target. The API
+ * already validates `return_to`, but re-checking here keeps `javascript:` payloads and
+ * off-site redirects from ever reaching `window.location` (docs/security.md T5, T15).
+ */
+export function safeRedirectTarget(value: string | undefined): string {
+  if (value === undefined || value === '') {
+    return '/';
+  }
+  const trimmed = value.trim();
+  if (trimmed.startsWith('/') && !trimmed.startsWith('//') && !trimmed.startsWith('/\\')) {
+    return trimmed;
+  }
+  try {
+    const candidate = new URL(trimmed);
+    if (typeof window !== 'undefined' && candidate.origin === window.location.origin) {
+      return candidate.toString();
+    }
+  } catch {
+    // Not an absolute URL: fall through to the safe default.
+  }
+  return '/';
+}
+
+/**
  * Hosted Auth UI page: reads `client_id`, `return_to`, `ui_locales` and `login_hint`, applies
  * the client theme and renders the localized login form. No token ever reaches this page —
  * only the HttpOnly `idpn_session` cookie set by the API on success.
@@ -471,6 +495,14 @@ export function HostedLoginPage({
     }
   };
 
+  /**
+   * The only navigation target is the `redirectTo` value returned by the API, which mirrors a
+   * `return_to` the server validated (same origin or a rooted path). Never fall back to the
+   * raw query value: `return_to=javascript:...` or `//evil.example` would otherwise run on the
+   * IdP origin / redirect off-site after a successful login (docs/security.md T5, T15).
+   */
+  const redirectTarget = (value: string | undefined): string => safeRedirectTarget(value);
+
   const handleSubmit = async (values: LoginFormValues) => {
     setSubmitting(true);
     setErrorCode(null);
@@ -492,7 +524,7 @@ export function HostedLoginPage({
         setErrorCode(result.reason);
         return;
       }
-      navigateTo(result.redirectTo ?? returnTo ?? '/');
+      navigateTo(redirectTarget(result.redirectTo));
     } finally {
       setSubmitting(false);
     }
@@ -510,7 +542,7 @@ export function HostedLoginPage({
         setMfaError(result.reason);
         return;
       }
-      navigateTo(result.redirectTo ?? returnTo ?? '/');
+      navigateTo(redirectTarget(result.redirectTo));
     } finally {
       setMfaSubmitting(false);
     }
@@ -535,7 +567,7 @@ export function HostedLoginPage({
         setMfaError(result.reason);
         return;
       }
-      navigateTo(result.redirectTo ?? returnTo ?? '/');
+      navigateTo(redirectTarget(result.redirectTo));
     } finally {
       setPasskeySubmitting(false);
     }

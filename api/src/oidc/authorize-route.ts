@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 
+import { MFA_ACR, MFA_AMR_METHODS } from '../mfa/mfa-types.js';
 import { readSessionId } from '../session/cookie.js';
 import type { IdpSession } from '../session/types.js';
 import {
@@ -27,6 +28,30 @@ export interface AuthorizeLoginRequestIssuer {
   create(input: { clientId: string; authorizeUrl: string }): Promise<string>;
 }
 
+/** Membership status of a user for one client/login context (`docs/domain-model.md` 2.6.2). */
+export type AuthorizeMembershipStatus = 'active' | 'invited' | 'suspended';
+
+/** Authentication strength an authorize request needs before a code may be issued. */
+export interface AuthorizeAuthenticationRequirement {
+  /** The client or login-context MFA policy requires a second factor. */
+  mfaRequired: boolean;
+  /** A step-up context requires authentication fresher than the step-up window. */
+  freshAuthenticationRequired: boolean;
+}
+
+export interface AuthorizeSubjectInput {
+  userId: string;
+  clientId: string;
+  loginContext?: string;
+}
+
+/**
+ * Window in which a step-up context accepts an existing authentication instead of forcing
+ * a fresh one (`docs/login-contexts.md` 7.2: a step-up context issues no token without a
+ * fresh authentication).
+ */
+export const STEP_UP_MAX_AGE_SECONDS = 300;
+
 export interface AuthorizeRouteOptions {
   issuer: string;
   clients: ClientRepository;
@@ -43,6 +68,20 @@ export interface AuthorizeRouteOptions {
   /** Hosted login URL for interactive requests (Hosted UI arrives in a later card). */
   loginUrl?: string;
   consentUrl?: string;
+  /**
+   * Server-side MFA/step-up policy lookup. The password login endpoint cannot be trusted to
+   * enforce this: its `clientId` is caller-supplied, so a code must not be issued from a
+   * password-only session for a client or context that requires a second factor
+   * (`docs/login-contexts.md` 6, docs/security.md T31).
+   */
+  authenticationRequirement?: (
+    input: AuthorizeSubjectInput,
+  ) => Promise<AuthorizeAuthenticationRequirement>;
+  /**
+   * Membership lookup for the client (and login context, when requested). Returns `null`
+   * when the user holds no membership for that exact scope (`docs/login-contexts.md` 4.1).
+   */
+  membershipStatus?: (input: AuthorizeSubjectInput) => Promise<AuthorizeMembershipStatus | null>;
   /** When present, the login redirect carries a single-use `login_request` handle. */
   loginRequests?: AuthorizeLoginRequestIssuer;
   now?: () => Date;
@@ -174,6 +213,74 @@ export function registerAuthorizeRoute(app: FastifyInstance, options: AuthorizeR
       return redirect(reply, buildErrorRedirect(authorize.redirectUri, error, authorize.state));
     }
 
+    const subject: AuthorizeSubjectInput = {
+      userId: session.userId,
+      clientId: authorize.client.clientId,
+      ...(authorize.loginContext === undefined ? {} : { loginContext: authorize.loginContext }),
+    };
+
+    // A suspended membership cuts access to that app, and a requested login context requires
+    // an active membership in that exact context (`docs/login-contexts.md` 4.1, CTX-003).
+    if (options.membershipStatus !== undefined) {
+      const membership = await options.membershipStatus(subject);
+      if (membership === 'suspended') {
+        return redirect(
+          reply,
+          buildErrorRedirect(
+            authorize.redirectUri,
+            oauthError('access_denied', 'membership is suspended'),
+            authorize.state,
+          ),
+        );
+      }
+      if (authorize.loginContext !== undefined && membership !== 'active') {
+        return redirect(
+          reply,
+          buildErrorRedirect(
+            authorize.redirectUri,
+            oauthError('access_denied', 'membership is required for this login context'),
+            authorize.state,
+          ),
+        );
+      }
+    }
+
+    // The MFA policy is enforced here, server-side, because the login endpoint's clientId is
+    // caller-controlled. Without this, a password-only (or social) session would silently
+    // bypass `required_*` policies and step-up contexts.
+    if (options.authenticationRequirement !== undefined || authorize.acrValues.length > 0) {
+      const requirement =
+        options.authenticationRequirement === undefined
+          ? { mfaRequired: false, freshAuthenticationRequired: false }
+          : await options.authenticationRequirement(subject);
+      // An explicit `acr_values` request for the MFA ACR is honoured as well.
+      const mfaRequired = requirement.mfaRequired || authorize.acrValues.includes(MFA_ACR);
+      const mfaSatisfied = sessionHasMultiFactor(session);
+      const freshEnough =
+        !requirement.freshAuthenticationRequired ||
+        !isAuthenticationTooOld(session, STEP_UP_MAX_AGE_SECONDS, now());
+      if ((mfaRequired && !mfaSatisfied) || !freshEnough) {
+        if (wantsSilent) {
+          return redirect(
+            reply,
+            buildErrorRedirect(
+              authorize.redirectUri,
+              oauthError('login_required', 'a stronger authentication is required'),
+              authorize.state,
+            ),
+          );
+        }
+        const loginRequest =
+          options.loginRequests === undefined
+            ? undefined
+            : await options.loginRequests.create({
+                clientId: authorize.client.clientId,
+                authorizeUrl: new URL(returnTo, options.issuer).toString(),
+              });
+        return redirect(reply, buildLoginRedirect(loginUrl, authorize, returnTo, loginRequest));
+      }
+    }
+
     if (
       authorize.scopes.includes(CLIENT_ADMIN_SCOPE) &&
       options.isClientAdminEligible !== undefined &&
@@ -235,4 +342,13 @@ export function registerAuthorizeRoute(app: FastifyInstance, options: AuthorizeR
 
 function isAuthenticationTooOld(session: IdpSession, maxAgeSeconds: number, now: Date): boolean {
   return now.getTime() - new Date(session.authTime).getTime() > maxAgeSeconds * 1000;
+}
+
+/** A session proves a second factor through its ACR or one of the MFA AMR methods. */
+function sessionHasMultiFactor(session: IdpSession): boolean {
+  if (session.acr === MFA_ACR) {
+    return true;
+  }
+  const methods: readonly string[] = MFA_AMR_METHODS;
+  return session.amr.some((method) => methods.includes(method));
 }

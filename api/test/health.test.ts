@@ -23,6 +23,8 @@ describe('GET /healthz', () => {
       service: 'on4net-idpn-api',
     });
     expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.headers['x-content-type-options']).toBe('nosniff');
+    expect(response.headers['referrer-policy']).toBe('no-referrer');
   });
 
   it('returns 404 for an unknown route', async () => {

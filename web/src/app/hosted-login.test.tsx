@@ -4,7 +4,7 @@ import type { ComponentProps } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { IdpnRoot } from './idpn-root';
-import { HostedLoginPage, normalizeLoginHint } from './hosted-login';
+import { HostedLoginPage, normalizeLoginHint, safeRedirectTarget } from './hosted-login';
 import { LoginForm } from './login-form';
 import { directionOf, MESSAGES, resolveLocale, translate } from '@/i18n';
 
@@ -411,6 +411,42 @@ describe('HostedLoginPage', () => {
     expect(navigate).toHaveBeenCalledWith('/oauth2/authorize?x=1');
   });
 
+  it('never navigates to the raw return_to query value', async () => {
+    const user = userEvent.setup();
+    const navigate = vi.fn();
+    const submit = vi.fn().mockResolvedValue({ ok: true });
+
+    render(
+      <HostedLoginPage
+        search="?client_id=app-a&return_to=javascript%3Aalert(document.domain)"
+        fetchConfig={vi.fn().mockResolvedValue(null)}
+        submit={submit}
+        navigate={navigate}
+      />,
+    );
+
+    await user.type(screen.getByLabelText('ایمیل یا نام کاربری'), 'sara');
+    await user.type(screen.getByLabelText('رمز عبور'), 'a-very-long-password');
+    await user.click(screen.getByRole('button', { name: 'ورود' }));
+
+    expect(navigate).toHaveBeenCalledTimes(1);
+    expect(navigate).toHaveBeenCalledWith('/');
+  });
+
+  it('rejects protocol-relative and off-site redirect targets', () => {
+    expect(safeRedirectTarget(undefined)).toBe('/');
+    expect(safeRedirectTarget('//evil.example/login')).toBe('/');
+    expect(safeRedirectTarget('/\\evil.example')).toBe('/');
+    expect(safeRedirectTarget('javascript:alert(1)')).toBe('/');
+    expect(safeRedirectTarget('https://evil.example/oauth2/authorize')).toBe('/');
+    expect(safeRedirectTarget('/oauth2/authorize?client_id=app-a')).toBe(
+      '/oauth2/authorize?client_id=app-a',
+    );
+    expect(safeRedirectTarget(`${window.location.origin}/oauth2/authorize`)).toBe(
+      `${window.location.origin}/oauth2/authorize`,
+    );
+  });
+
   it('shows the secure error and does not navigate on failure', async () => {
     const user = userEvent.setup();
     const navigate = vi.fn();
@@ -526,7 +562,9 @@ describe('HostedLoginPage MFA step', () => {
 
   it('shows the one-time-code step after the password and completes the login', async () => {
     const user = userEvent.setup();
-    const verify = vi.fn().mockResolvedValue({ ok: true });
+    const verify = vi
+      .fn()
+      .mockResolvedValue({ ok: true, redirectTo: '/oauth2/authorize?client_id=app-a' });
     const navigate = vi.fn();
     renderWith(verify, navigate);
 
@@ -552,7 +590,9 @@ describe('HostedLoginPage MFA step', () => {
 
   it('offers the passkey second factor when the login response lists webauthn', async () => {
     const user = userEvent.setup();
-    const verifyPasskey = vi.fn().mockResolvedValue({ ok: true });
+    const verifyPasskey = vi
+      .fn()
+      .mockResolvedValue({ ok: true, redirectTo: '/oauth2/authorize?client_id=app-a' });
     const navigate = vi.fn();
     const driver = {
       supported: vi.fn().mockReturnValue(true),

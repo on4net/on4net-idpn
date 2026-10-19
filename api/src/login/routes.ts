@@ -139,6 +139,12 @@ export function registerLoginRoute(app: FastifyInstance, options: LoginRouteOpti
       return reject(reply, options, request, body, user.id, result.reason);
     }
 
+    if (user.status !== 'active') {
+      // A pending account may prove its password (to finish verification) but must never get a
+      // session: every token path expects an active account (docs/security.md 3.1).
+      return reject(reply, options, request, body, user.id, 'account_not_active');
+    }
+
     const requirement = await resolveMfaRequirement(options, user, {
       ...(body.clientId === undefined ? {} : { clientId: body.clientId }),
       ...(loginContext === undefined ? {} : { loginContext }),

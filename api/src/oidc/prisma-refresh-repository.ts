@@ -23,6 +23,7 @@ export function createPrismaRefreshTokenRepository(prisma: PrismaClient): Refres
           scope: record.scope,
           expiresAt: record.expiresAt,
           createdAt: record.createdAt,
+          loginContext: record.loginContext ?? null,
         },
       });
     },
@@ -48,6 +49,7 @@ export function createPrismaRefreshTokenRepository(prisma: PrismaClient): Refres
         revokedAt: row.revokedAt,
         replacedBy: row.replacedBy,
         createdAt: row.createdAt,
+        ...(row.loginContext === null ? {} : { loginContext: row.loginContext }),
       };
       return record;
     },
