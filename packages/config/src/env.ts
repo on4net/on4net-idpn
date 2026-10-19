@@ -98,6 +98,16 @@ export const serverEnvSchema = z.object({
   ARGON2_TIME_COST: z.coerce.number().int().min(1).max(10).default(3),
   ARGON2_PARALLELISM: z.coerce.number().int().min(1).max(8).default(1),
   SIGNING_KEY_REF: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
+  /**
+   * Days between automatic signing-key rotations. `0` disables the scheduler; rotation then
+   * happens through `POST /api/v1/keys/rotate` only.
+   */
+  KEY_ROTATION_INTERVAL_DAYS: z.coerce.number().int().min(0).max(3650).default(90),
+  /**
+   * How long a retired signing key stays in JWKS. Must cover the longest access-token
+   * lifetime (max 3600 s) so tokens issued before a rotation stay verifiable until expiry.
+   */
+  KEY_RETIRED_RETENTION_SECONDS: z.coerce.number().int().min(60).max(86_400).default(3600),
   MFE_PUBLIC_URL: optionalUrl(),
   /**
    * Public origin of the Hosted Auth UI. Defaults to `APP_URL` (single-origin deployment);

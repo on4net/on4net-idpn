@@ -39,7 +39,7 @@ describe('FileSigningKeyRepository', () => {
     const keys = await repository.list();
     expect(keys).toHaveLength(2);
     expect(keys.find((key) => key.kid === first.kid)?.status).toBe('retired');
-    expect(keys.find((key) => key.kid === second.kid)?.status).toBe('active');
+    expect(keys.find((key) => key.kid === second.active.kid)?.status).toBe('active');
     expect(keys.find((key) => key.kid === first.kid)?.retiredAt).toBeInstanceOf(Date);
   });
 

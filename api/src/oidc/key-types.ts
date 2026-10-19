@@ -21,6 +21,53 @@ export interface SigningKeyRepository {
   updateStatus(kid: string, status: SigningKeyStatus, retiredAt?: Date): Promise<void>;
 }
 
+/** Public metadata of one signing key; never includes private key material. */
+export interface SigningKeySummary {
+  kid: string;
+  alg: 'ES256';
+  status: SigningKeyStatus;
+  createdAt: Date;
+  retiredAt: Date | null;
+  /** True while the key is part of the published JWKS. */
+  publishedInJwks: boolean;
+}
+
+/** Rotation/expiry health exposed to operators (`GET /api/v1/keys`). */
+export interface SigningKeyHealth {
+  keys: SigningKeySummary[];
+  activeKey: {
+    kid: string;
+    createdAt: Date;
+    ageDays: number;
+  } | null;
+  /**
+   * True when the active key is older than the rotation threshold, i.e. a scheduled
+   * rotation is overdue (or manual rotation should happen).
+   */
+  rotationDue: boolean;
+  /** Age in days after which `rotationDue` becomes true. */
+  rotationDueAfterDays: number;
+}
+
+/** Outcome of a rotation; only public identifiers, never key material. */
+export interface KeyRotationResult {
+  active: StoredSigningKey;
+  previousKid: string | null;
+  previousRevoked: boolean;
+}
+
+export interface SigningKeyManagerOptions {
+  /**
+   * How long a retired key stays in the JWKS after retirement. Must cover the longest
+   * token lifetime so tokens issued just before rotation remain verifiable until expiry.
+   */
+  retiredRetentionSeconds?: number;
+  /** Age in days at which `rotationDue` is reported; 0 disables the flag. */
+  rotationDueAfterDays?: number;
+  /** Optional sink for lifecycle warnings (never receives key material). */
+  onWarning?: (message: string) => void;
+}
+
 export interface PublicJwk extends JWK {
   kid: string;
   alg: 'ES256';

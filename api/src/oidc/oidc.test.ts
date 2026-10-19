@@ -150,7 +150,7 @@ describe('SigningKeyManager', () => {
     const first = await manager.ensureKey();
 
     const second = await manager.rotate();
-    expect(second.kid).not.toBe(first.kid);
+    expect(second.active.kid).not.toBe(first.kid);
 
     const keys = await repository.list();
     expect(keys.map((key) => key.status).sort()).toEqual(['active', 'retired']);
@@ -164,6 +164,22 @@ describe('SigningKeyManager', () => {
     await expect(manager.verify(oldToken, { issuer, audience: 'app-a' })).resolves.toMatchObject({
       sub: 'user-1',
     });
+
+    // A token issued after the rotation carries the new kid.
+    const newToken = await manager.signAccessToken(
+      { scope: 'openid' },
+      { issuer, audience: 'app-a', subject: 'user-1', expiresInSeconds: 600 },
+    );
+    expect(decodeProtectedHeader(newToken).kid).toBe(second.active.kid);
+    await expect(
+      manager.verify(newToken, {
+        issuer,
+        audience: 'app-a',
+        currentDate: new Date('2026-10-18T10:00:00Z'),
+      }),
+    ).resolves.toMatchObject({
+      sub: 'user-1',
+    });
   });
 
   it('keeps revoked keys out of the JWKS', async () => {
@@ -174,7 +190,7 @@ describe('SigningKeyManager', () => {
     await repository.updateStatus(first.kid, 'revoked', new Date());
 
     const jwks = await manager.jwks();
-    expect(jwks.keys.map((key) => key.kid)).toEqual([second.kid]);
+    expect(jwks.keys.map((key) => key.kid)).toEqual([second.active.kid]);
   });
 });
 

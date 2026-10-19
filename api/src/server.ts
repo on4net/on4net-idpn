@@ -14,6 +14,8 @@ import type { MemberRoutesOptions } from './admin/members/routes.js';
 import { registerMemberAdminRoutes } from './admin/members/routes.js';
 import type { SessionRoutesOptions } from './admin/sessions/routes.js';
 import { registerSessionAdminRoutes } from './admin/sessions/routes.js';
+import type { KeyRoutesOptions } from './admin/keys/routes.js';
+import { registerKeyAdminRoutes } from './admin/keys/routes.js';
 import { MemorySigningKeyRepository, SigningKeyManager } from './oidc/keys.js';
 import { registerAuthorizeRoute } from './oidc/authorize-route.js';
 import type { LogoutRouteOptions } from './oidc/logout-route.js';
@@ -66,6 +68,8 @@ export interface BuildServerOptions {
   audit?: Omit<AuditRoutesOptions, 'issuer' | 'verifier'>;
   /** Mounts session administration and self-service endpoints (docs/api.md 3.1, 3.7). */
   adminSessions?: Omit<SessionRoutesOptions, 'issuer' | 'verifier'>;
+  /** Mounts the signing-key endpoints (docs/api.md 3.9). */
+  adminKeys?: Omit<KeyRoutesOptions, 'issuer' | 'verifier' | 'keys'>;
 }
 
 /**
@@ -170,6 +174,15 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
 
   if (options.adminSessions !== undefined) {
     registerSessionAdminRoutes(app, { ...options.adminSessions, issuer, verifier: keys });
+  }
+
+  if (options.adminKeys !== undefined) {
+    registerKeyAdminRoutes(app, {
+      ...options.adminKeys,
+      issuer,
+      verifier: keys,
+      keys,
+    });
   }
 
   return app;

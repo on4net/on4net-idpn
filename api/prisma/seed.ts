@@ -35,6 +35,8 @@ const BASE_PERMISSIONS = [
   { key: 'idp:session:revoke', description: 'Revoke sessions' },
   { key: 'idp:audit:read', description: 'Read audit events' },
   { key: 'idp:audit:export', description: 'Export audit events' },
+  { key: 'idp:key:read', description: 'View signing key metadata and rotation health' },
+  { key: 'idp:key:write', description: 'Rotate signing keys' },
   { key: 'idp:key:manage', description: 'Manage signing keys' },
   { key: 'idp:mfa:manage', description: 'Manage multi-factor authentication factors' },
 ] as const;
@@ -69,6 +71,8 @@ const BASE_ROLES = [
       'idp:session:write',
       'idp:session:revoke',
       'idp:audit:read',
+      'idp:key:read',
+      'idp:key:write',
       'idp:key:manage',
       'idp:mfa:manage',
     ],

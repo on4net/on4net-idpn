@@ -20,7 +20,8 @@ import { createPrismaLogoutRepository } from './oidc/prisma-logout-repository.js
 import { createPrismaAdminUserRepository } from './admin/prisma-user-repository.js';
 import { PrismaClient } from './generated/prisma/client.js';
 import { FileSigningKeyRepository } from './oidc/file-key-repository.js';
-import { SigningKeyManager } from './oidc/keys.js';
+import { KeyRotationScheduler } from './oidc/key-rotation-scheduler.js';
+import { DEFAULT_ROTATION_DUE_DAYS, SigningKeyManager } from './oidc/keys.js';
 import { createPrismaClientRepository } from './oidc/prisma-client-repository.js';
 import { createPrismaCodeRepository } from './oidc/prisma-code-repository.js';
 import { createPrismaRefreshTokenRepository } from './oidc/prisma-refresh-repository.js';
@@ -38,7 +39,20 @@ const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: env.
 const redis = new Redis(env.REDIS_URL, { maxRetriesPerRequest: 3 });
 
 // Development key store (git-ignored). Production points SIGNING_KEY_REF at KMS/Vault.
-const keys = new SigningKeyManager(new FileSigningKeyRepository('.idpn-keys.json'));
+// When scheduled rotation is disabled the health flag still reports a rotation after the
+// documented 90-day threshold, so operators keep getting an alert.
+const keys = new SigningKeyManager(
+  new FileSigningKeyRepository('.idpn-keys.json'),
+  () => new Date(),
+  {
+    retiredRetentionSeconds: env.KEY_RETIRED_RETENTION_SECONDS,
+    rotationDueAfterDays:
+      env.KEY_ROTATION_INTERVAL_DAYS > 0
+        ? env.KEY_ROTATION_INTERVAL_DAYS
+        : DEFAULT_ROTATION_DUE_DAYS,
+    onWarning: (message) => console.warn(`signing key: ${message}`),
+  },
+);
 await keys.ensureKey();
 
 const sessions = new RedisSessionStore({
@@ -171,10 +185,49 @@ const app = buildServer({
     revoker: sessions,
     audit: createPrismaAdminAudit(prisma),
   },
+  adminKeys: {
+    adminClientId: env.ADMIN_CLIENT_ID,
+    permissions: permissionReader,
+    audit: createPrismaAdminAudit(prisma),
+  },
 });
+
+/**
+ * Scheduled rotation (docs/architecture.md 5). `KEY_ROTATION_INTERVAL_DAYS=0` disables it;
+ * the scheduler never starts in a test build, and index.ts is the only place that starts
+ * a timer.
+ */
+const keyRotationAudit = createPrismaAdminAudit(prisma);
+const keyRotationScheduler = new KeyRotationScheduler({
+  keys,
+  intervalDays: env.KEY_ROTATION_INTERVAL_DAYS,
+  onRotated: async (result) => {
+    await keyRotationAudit.record({
+      actorType: 'system',
+      action: 'key.rotate',
+      targetType: 'signing_key',
+      targetId: null,
+      result: 'success',
+      metadata: {
+        kid: result.active.kid,
+        previousKid: result.previousKid,
+        previousRevoked: result.previousRevoked,
+        trigger: 'scheduled',
+      },
+    });
+    console.log(
+      `signing key rotated: active=${result.active.kid} previous=${result.previousKid ?? 'none'}`,
+    );
+  },
+  onError: (error) => {
+    console.error(`signing key rotation failed: ${error.message}`);
+  },
+});
+keyRotationScheduler.start();
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.once(signal, () => {
+    keyRotationScheduler.stop();
     void app
       .close()
       .then(() => prisma.$disconnect())

@@ -12,14 +12,26 @@ import {
 
 import type {
   JwksDocument,
+  KeyRotationResult,
   PublicJwk,
   SignedTokenOptions,
+  SigningKeyHealth,
+  SigningKeyManagerOptions,
   SigningKeyRepository,
   StoredSigningKey,
   VerifyOptions,
 } from './key-types.js';
 
 export const SIGNING_ALG = 'ES256' as const;
+
+/**
+ * Default retention for retired keys: the longest access-token lifetime the Admin API
+ * allows (`MAX_ACCESS_TOKEN_TTL` in admin/clients/client-validation.ts), i.e. one hour.
+ */
+export const DEFAULT_RETIRED_RETENTION_SECONDS = 3600;
+
+/** Default age at which `rotationDue` is reported (docs/security.md T10: rotate every 90 days). */
+export const DEFAULT_ROTATION_DUE_DAYS = 90;
 
 /** Generates a fresh P-256 key pair with a deterministic `kid` (RFC 7638 thumbprint). */
 export async function generateSigningKey(
@@ -47,10 +59,20 @@ export async function generateSigningKey(
  * never revoked), rotation and local token verification.
  */
 export class SigningKeyManager {
+  private readonly retiredRetentionMs: number;
+  private readonly rotationDueAfterDays: number;
+  private readonly onWarning: ((message: string) => void) | undefined;
+
   constructor(
     private readonly repository: SigningKeyRepository,
     private readonly now: () => Date = () => new Date(),
-  ) {}
+    options: SigningKeyManagerOptions = {},
+  ) {
+    this.retiredRetentionMs =
+      (options.retiredRetentionSeconds ?? DEFAULT_RETIRED_RETENTION_SECONDS) * 1000;
+    this.rotationDueAfterDays = options.rotationDueAfterDays ?? DEFAULT_ROTATION_DUE_DAYS;
+    this.onWarning = options.onWarning;
+  }
 
   /** Creates and persists a first active key when the store is empty. */
   async ensureKey(): Promise<StoredSigningKey> {
@@ -72,27 +94,97 @@ export class SigningKeyManager {
   async jwks(): Promise<JwksDocument> {
     await this.ensureKey();
     const keys = await this.repository.list();
+    const now = this.now();
     return {
       keys: keys
-        .filter((key) => key.status !== 'revoked')
+        .filter((key) => this.isPublished(key, now))
         .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
         .map(toPublicJwk),
     };
   }
 
-  /**
-   * Rotates the signing key: the current active key becomes `retired` (kept in JWKS until
-   * its tokens expire) and a new active key is created.
-   */
-  async rotate(): Promise<StoredSigningKey> {
+  /** Public metadata and rotation health for operators (`GET /api/v1/keys`). */
+  async inspect(): Promise<SigningKeyHealth> {
     await this.ensureKey();
     const keys = await this.repository.list();
-    for (const key of keys.filter((entry) => entry.status === 'active')) {
-      await this.repository.updateStatus(key.kid, 'retired', this.now());
+    const now = this.now();
+    const active = keys.find((key) => key.status === 'active') ?? null;
+    const ageDays =
+      active === null
+        ? null
+        : Math.max(0, Math.floor((now.getTime() - active.createdAt.getTime()) / 86_400_000));
+    const rotationDue =
+      active !== null &&
+      this.rotationDueAfterDays > 0 &&
+      now.getTime() - active.createdAt.getTime() >= this.rotationDueAfterDays * 86_400_000;
+
+    if (rotationDue) {
+      this.onWarning?.(
+        `active signing key ${active.kid} is ${ageDays} days old; rotation is due ` +
+          `(threshold ${this.rotationDueAfterDays} days)`,
+      );
     }
-    const created = await generateSigningKey('active', this.now());
+
+    return {
+      keys: keys
+        .slice()
+        .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+        .map((key) => ({
+          kid: key.kid,
+          alg: key.alg,
+          status: key.status,
+          createdAt: key.createdAt,
+          retiredAt: key.retiredAt ?? null,
+          publishedInJwks: this.isPublished(key, now),
+        })),
+      activeKey:
+        active === null || ageDays === null
+          ? null
+          : { kid: active.kid, createdAt: active.createdAt, ageDays },
+      rotationDue,
+      rotationDueAfterDays: this.rotationDueAfterDays,
+    };
+  }
+
+  /**
+   * Rotates the signing key: the current active key becomes `retired` (kept in JWKS until
+   * its tokens expire) and a new active key is created. With `revokePrevious` the old key
+   * is revoked instead, for emergency rotation after a suspected compromise.
+   */
+  async rotate(options: { revokePrevious?: boolean } = {}): Promise<KeyRotationResult> {
+    await this.ensureKey();
+    const now = this.now();
+    const keys = await this.repository.list();
+    const previous = keys.filter((key) => key.status === 'active');
+    const revokePrevious = options.revokePrevious === true;
+    for (const key of previous) {
+      await this.repository.updateStatus(key.kid, revokePrevious ? 'revoked' : 'retired', now);
+    }
+    const created = await generateSigningKey('active', now);
     await this.repository.save(created);
-    return created;
+    return {
+      active: created,
+      previousKid: previous[0]?.kid ?? null,
+      previousRevoked: revokePrevious,
+    };
+  }
+
+  /**
+   * Revokes one key. A revoked key is removed from the JWKS immediately, so tokens it
+   * signed stop verifying. Revoking the active key also provisions a fresh active key.
+   */
+  async revoke(kid: string): Promise<boolean> {
+    await this.ensureKey();
+    const keys = await this.repository.list();
+    const target = keys.find((key) => key.kid === kid);
+    if (target === undefined) {
+      return false;
+    }
+    await this.repository.updateStatus(kid, 'revoked', this.now());
+    if (target.status === 'active') {
+      await this.ensureKey();
+    }
+    return true;
   }
 
   async signAccessToken(
@@ -118,18 +210,64 @@ export class SigningKeyManager {
 
   /**
    * Verifies a token against the published JWKS. Only ES256 is accepted, so `alg: none`
-   * and symmetric algorithms are rejected before any signature check.
+   * and symmetric algorithms are rejected before any signature check. Revoked keys are
+   * not published, and a token that names one fails with an explicit error.
    */
   async verify(token: string, options: VerifyOptions): Promise<JWTVerifyResult['payload']> {
     const jwks = await this.jwks();
-    const result = await jwtVerify(token, createLocalJWKSet(jwks), {
-      issuer: options.issuer,
-      audience: options.audience,
-      algorithms: [SIGNING_ALG],
-      typ: 'JWT',
-      ...(options.currentDate === undefined ? {} : { currentDate: options.currentDate }),
-    });
-    return result.payload;
+    try {
+      const result = await jwtVerify(token, createLocalJWKSet(jwks), {
+        issuer: options.issuer,
+        audience: options.audience,
+        algorithms: [SIGNING_ALG],
+        typ: 'JWT',
+        ...(options.currentDate === undefined ? {} : { currentDate: options.currentDate }),
+      });
+      return result.payload;
+    } catch (error) {
+      // Revoked keys are not published, so the failure is normally "no matching key".
+      // Name the real cause when the token explicitly references a revoked key.
+      const kid = readKid(token);
+      if (kid !== null) {
+        const keys = await this.repository.list();
+        if (keys.some((key) => key.kid === kid && key.status === 'revoked')) {
+          throw new Error('token was signed by a revoked signing key', { cause: error });
+        }
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Active keys are always published. Retired keys stay published only while a token they
+   * signed can still be valid (`retiredAt + longest token lifetime`). Revoked keys are
+   * never published.
+   */
+  private isPublished(key: StoredSigningKey, now: Date): boolean {
+    if (key.status === 'active') {
+      return true;
+    }
+    if (key.status === 'revoked') {
+      return false;
+    }
+    const retiredAt = key.retiredAt ?? key.createdAt;
+    return now.getTime() - retiredAt.getTime() < this.retiredRetentionMs;
+  }
+}
+
+/** Reads the unverified JOSE header `kid`; only used to give revoked keys a clear error. */
+function readKid(token: string): string | null {
+  const parts = token.split('.');
+  if (parts.length !== 3 || parts[0] === undefined) {
+    return null;
+  }
+  try {
+    const header = JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf8')) as {
+      kid?: unknown;
+    };
+    return typeof header.kid === 'string' ? header.kid : null;
+  } catch {
+    return null;
   }
 }
 
