@@ -3,7 +3,7 @@ import type { z } from 'zod';
 
 import type { AdminAudit } from '../admin/admin-types.js';
 import { maskEmail, normalizeEmail } from '../auth/normalize.js';
-import { hashPassword, type Argon2Params } from '../auth/password.js';
+import { hashPassword, verifyPassword, type Argon2Params } from '../auth/password.js';
 import { validatePassword } from '../auth/password-policy.js';
 import { hashOpaqueToken } from '../auth/opaque-token.js';
 import type { RateLimiter, RateLimitPolicy } from '../http/rate-limit.js';
@@ -189,6 +189,19 @@ export function registerAccountLifecycleRoutes(
         'Password policy violated',
         'the new password does not meet the password policy',
         { code: 'password_policy', violations, instance },
+      );
+    }
+
+    // Reuse is a validation failure too. Checking it here keeps the single-use link usable
+    // for a corrected password instead of spending it on a change that cannot be applied.
+    if (user.passwordHash !== null && (await verifyPassword(user.passwordHash, input.password))) {
+      return sendProblem(
+        reply,
+        422,
+        'password-reuse',
+        'Password reuse',
+        'the new password must differ from the current password',
+        { code: 'password_reuse', instance },
       );
     }
 
