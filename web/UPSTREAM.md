@@ -40,6 +40,9 @@
 4. به‌جای پکیج‌های جداگانه `@radix-ui/react-*` از پکیج یکپارچه `radix-ui` استفاده می‌شود.
 5. **قرارداد جهت:** ریشه‌ها `DirectionProvider` دارند؛ `DialogContent` جهت را روی Overlay پورتال‌شده تکرار
    می‌کند تا سطوح standalone (Admin) هم در RTL درست بمانند. جزئیات Audit در `docs/rtl-audit.md`.
+6. **Select (A11y #56):** Radix هنگام بازشدن Listbox همه Siblingها را `aria-hidden` می‌کند ولی کنترل‌های
+   فوکوس‌پذیر را باقی می‌گذارد؛ `SelectContent` این مارکر را حذف می‌کند تا `aria-hidden-focus` (serious) رخ
+   ندهد. Focus Guard همچنان فوکوس را داخل Popup نگه می‌دارد.
 
 ## افزودن کامپوننت جدید
 

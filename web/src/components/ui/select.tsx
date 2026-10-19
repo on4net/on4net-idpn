@@ -45,6 +45,37 @@ export const SelectContent = React.forwardRef<
   const scope = usePortalScope();
   const target = resolvePortalTarget(container, scope, 'SelectContent');
 
+  /**
+   * Radix's select is modal-only: it marks every background sibling `aria-hidden` while
+   * the listbox is open but leaves its controls focusable, which axe reports as
+   * `aria-hidden-focus` (serious). A combobox popup does not need to remove the rest of
+   * the page from the accessibility tree - the focus guard already keeps Tab inside the
+   * popup - so this patch drops the `aria-hidden` marker. Radix restores its own state
+   * when the popup closes. Recorded in `web/UPSTREAM.md` (A11y #56).
+   */
+  React.useEffect(() => {
+    if (typeof document === 'undefined' || target === null) {
+      return;
+    }
+    const strip = (): void => {
+      for (const element of document.querySelectorAll<HTMLElement>(
+        '[data-aria-hidden="true"][aria-hidden="true"]',
+      )) {
+        element.removeAttribute('aria-hidden');
+      }
+    };
+    strip();
+    // Radix applies the marker in a layout/passive effect of the portalled content, which
+    // can commit after this effect; observe and strip until the popup closes.
+    const observer = new MutationObserver(strip);
+    observer.observe(document.body, {
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['aria-hidden'],
+    });
+    return () => observer.disconnect();
+  }, [target]);
+
   if (target === null) {
     return null;
   }

@@ -132,6 +132,67 @@ jobs:
           path: artifacts/sbom.cdx.json
           if-no-files-found: error
 
+  ui-a11y:
+    name: UI accessibility (axe Critical/Serious)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Accessibility gate
+        run: pnpm test:a11y
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-a11y-report
+          path: playwright-report
+          if-no-files-found: ignore
+
+  ui-visual:
+    # Screenshot baselines are committed per platform; this job uses the win32 set.
+    name: UI visual regression (win32 baselines)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm exec playwright install chromium
+
+      - name: Visual regression gate
+        run: pnpm test:visual
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-visual-report
+          path: playwright-report
+          if-no-files-found: ignore
+
   e2e:
     name: E2E (Chromium: API, Hosted UI, MFE, BFF)
     runs-on: ubuntu-latest

@@ -20,6 +20,8 @@
     "host/**/*.ts",
     "host-mf/**/*.ts",
     "host-mf/**/*.tsx",
+    "harness/**/*.ts",
+    "harness/**/*.tsx",
     "vite*.config.ts"
   ]
 }

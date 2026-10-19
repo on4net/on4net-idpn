@@ -36,8 +36,46 @@ export default defineConfig({
   },
   // Vite optimizes the federated dependencies on the first cold request; a 5s default
   // makes the first module mount flaky on slower machines. Assertions stay unchanged.
-  expect: { timeout: 15_000 },
+  expect: {
+    timeout: 15_000,
+    toHaveScreenshot: {
+      animations: 'disabled',
+      caret: 'hide',
+      maxDiffPixelRatio: 0.01,
+      threshold: 0.2,
+    },
+  },
+  // Baselines are per platform because font rasterisation differs between operating systems.
+  snapshotPathTemplate: '{testDir}/visual/__screenshots__/{platform}/{arg}{ext}',
   projects: [
+    {
+      name: 'a11y-chromium',
+      testMatch: 'a11y/*.spec.ts',
+      use: {
+        ...devices['Desktop Chrome'],
+        baseURL: webURL,
+        viewport: { width: 1280, height: 800 },
+        deviceScaleFactor: 1,
+        colorScheme: 'light',
+        reducedMotion: 'reduce',
+        timezoneId: 'UTC',
+        locale: 'fa-IR',
+      },
+    },
+    {
+      name: 'visual-chromium',
+      testMatch: 'visual/*.spec.ts',
+      use: {
+        ...devices['Desktop Chrome'],
+        baseURL: webURL,
+        viewport: { width: 1280, height: 800 },
+        deviceScaleFactor: 1,
+        colorScheme: 'light',
+        reducedMotion: 'reduce',
+        timezoneId: 'UTC',
+        locale: 'fa-IR',
+      },
+    },
     {
       name: 'api-chromium',
       testMatch: ['health.spec.ts', 'admin/*.spec.ts'],

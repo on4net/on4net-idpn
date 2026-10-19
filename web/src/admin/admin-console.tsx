@@ -65,6 +65,8 @@ export function AdminConsole({
   const [notice, setNotice] = React.useState<Notice>({ kind: 'idle' });
   const [createOpen, setCreateOpen] = React.useState(false);
   const [tempPassword, setTempPassword] = React.useState<string | null>(null);
+  /** Focus returns here after Escape/close; the dialog has no Radix trigger element. */
+  const createTriggerRef = React.useRef<HTMLButtonElement | null>(null);
 
   const load = React.useCallback(
     async (targetPage: number, search: string) => {
@@ -163,7 +165,12 @@ export function AdminConsole({
             <Card>
               <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
                 <CardTitle>{t('admin.title')}</CardTitle>
-                <Button type="button" onClick={() => setCreateOpen(true)} disabled={signedOut}>
+                <Button
+                  ref={createTriggerRef}
+                  type="button"
+                  onClick={() => setCreateOpen(true)}
+                  disabled={signedOut}
+                >
                   {t('admin.create')}
                 </Button>
               </CardHeader>
@@ -357,7 +364,12 @@ export function AdminConsole({
         </Tabs>
 
         <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-          <DialogContent>
+          <DialogContent
+            onCloseAutoFocus={(event) => {
+              event.preventDefault();
+              createTriggerRef.current?.focus();
+            }}
+          >
             <DialogTitle>{t('admin.create')}</DialogTitle>
             <form className="flex flex-col gap-3" onSubmit={submitCreate}>
               <div className="flex flex-col gap-1">

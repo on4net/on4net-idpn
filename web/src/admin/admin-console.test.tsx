@@ -193,6 +193,8 @@ describe('AdminConsole', () => {
       }),
     );
     expect(await screen.findByText('tmp-456')).toBeTruthy();
+    // The dialog has no Radix trigger; focus still returns to the button that opened it.
+    expect(screen.getByRole('button', { name: 'New user' })).toHaveFocus();
   });
 
   it('reports a forbidden action without changing the table', async () => {

@@ -42,10 +42,29 @@
     box-sizing: border-box;
   }
 
-  .idpn-root :where(button, input, select, textarea) {
+  /*
+   * Replicate the form-control part of Tailwind Preflight inside the module. These
+   * selectors must outrank `.idpn-root *` (0,1,0): `all: revert` restored the UA button
+   * styles (buttonface background, buttontext colour), and a zero-specificity `:where()`
+   * rule cannot override that declaration.
+   */
+  .idpn-root button,
+  .idpn-root input,
+  .idpn-root select,
+  .idpn-root textarea {
     font: inherit;
-    color: inherit;
+    font-feature-settings: inherit;
+    font-variation-settings: inherit;
     letter-spacing: inherit;
+    color: inherit;
+    border-radius: 0;
+    background-color: transparent;
+    opacity: 1;
+  }
+
+  .idpn-root button,
+  .idpn-root input:where([type='button'], [type='reset'], [type='submit']) {
+    appearance: button;
   }
 }
 

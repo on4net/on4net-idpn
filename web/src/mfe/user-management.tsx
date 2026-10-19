@@ -151,6 +151,8 @@ export function UserManagement({
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [reloadKey, setReloadKey] = React.useState(0);
+  /** Focus returns to the row's Roles button after the dialog closes (no DialogTrigger). */
+  const rolesTriggerRef = React.useRef<HTMLButtonElement | null>(null);
 
   const report = React.useCallback(
     (caught: unknown): string => {
@@ -564,7 +566,10 @@ export function UserManagement({
                       type="button"
                       size="sm"
                       variant="secondary"
-                      onClick={() => openRoleDialog(member)}
+                      onClick={(event) => {
+                        rolesTriggerRef.current = event.currentTarget;
+                        openRoleDialog(member);
+                      }}
                     >
                       {t('members.rolesButton')}
                     </Button>
@@ -609,7 +614,13 @@ export function UserManagement({
           }
         }}
       >
-        <DialogContent aria-describedby="member-roles-description">
+        <DialogContent
+          aria-describedby="member-roles-description"
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            rolesTriggerRef.current?.focus();
+          }}
+        >
           <DialogTitle>
             {t('members.rolesDialogTitle', { name: roleTarget?.displayName ?? '' })}
           </DialogTitle>
