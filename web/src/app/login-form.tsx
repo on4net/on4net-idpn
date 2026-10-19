@@ -22,6 +22,8 @@ export interface LoginFormProps {
   errorCode: 'invalid_credentials' | 'network' | null;
   /** Prefills the identifier from `login_hint`; the user may still change it. */
   defaultIdentifier?: string;
+  /** Optional social login block rendered above the password form, inside the same card. */
+  social?: React.ReactNode;
   onSubmit(values: LoginFormValues): void | Promise<void>;
 }
 
@@ -31,6 +33,7 @@ export function LoginForm({
   submitting,
   errorCode,
   defaultIdentifier,
+  social,
   onSubmit,
 }: LoginFormProps) {
   void dir;
@@ -65,6 +68,8 @@ export function LoginForm({
     <main className="w-full max-w-sm rounded-lg border border-border bg-card p-6 shadow-sm">
       <h1 className="mb-1 text-xl font-semibold text-foreground">{t('login.title')}</h1>
       <p className="mb-6 text-sm text-muted-foreground">{t('login.subtitle')}</p>
+
+      {social === undefined ? null : <div className="mb-4">{social}</div>}
 
       {errorMessage === null ? null : (
         <Alert variant="destructive" className="mb-4" aria-live="assertive">

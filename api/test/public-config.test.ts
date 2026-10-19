@@ -76,6 +76,23 @@ describe('buildPublicClientConfig', () => {
     }
   });
 
+  it('drops providers that are not part of the public contract', () => {
+    const mixed: PublicClientSource = {
+      ...source,
+      socialProviders: [
+        { provider: 'google', label: 'Google' },
+        {
+          provider: 'github',
+          label: 'GitHub',
+        } as unknown as PublicClientSource['socialProviders'][number],
+      ],
+    };
+
+    expect(buildPublicClientConfig(mixed, deps).socialProviders).toEqual([
+      { provider: 'google', label: 'Google' },
+    ]);
+  });
+
   it('falls back safely for missing locale and branding data', () => {
     const minimal: PublicClientSource = {
       ...source,
@@ -218,14 +235,58 @@ describe('Prisma public config repository', () => {
 
     expect(loaded).not.toBeNull();
     expect(loaded?.loginContexts.map((context) => context.key)).toEqual(['team']);
+    expect(loaded?.loginContexts[0]?.methods).toEqual(['password', 'google']);
     expect(loaded?.socialProviders).toEqual([{ provider: 'google', label: 'Google' }]);
 
     const config = buildPublicClientConfig(loaded as PublicClientSource, deps);
     expect(config).toMatchObject({ clientId: client.clientId, defaultLoginContext: 'team' });
-    expect(JSON.stringify(config)).not.toContain('https://pub.example.com/cb');
-    expect(JSON.stringify(config)).not.toContain('secret');
+    expect(config.loginContexts).toEqual([
+      expect.objectContaining({ key: 'team', methods: ['password', 'google'] }),
+    ]);
+    expect(config.socialProviders).toEqual([{ provider: 'google', label: 'Google' }]);
+    const serialized = JSON.stringify(config);
+    expect(serialized).not.toContain('https://pub.example.com/cb');
+    expect(serialized).not.toContain('secret');
+    // Provider credentials (client key/secret, scopes, allowlists) never leave the server.
+    expect(serialized).not.toContain('google-key');
+    expect(serialized).not.toContain('facebook-key');
 
     const missing = await repository.findPublicClient('does-not-exist');
     expect(missing).toBeNull();
+  }, 60_000);
+
+  it('hides a disabled client even when it has enabled providers', async () => {
+    const tenant = await prisma.tenant.create({
+      data: { slug: `pub-off-${Date.now()}`, name: 'Disabled tenant' },
+    });
+    const client = await prisma.client.create({
+      data: {
+        clientId: `pub-disabled-${Date.now()}`,
+        name: 'Disabled client',
+        type: 'web',
+        status: 'disabled',
+        redirectUris: ['https://off.example.com/cb'],
+        postLogoutRedirectUris: ['https://off.example.com/'],
+        allowedOrigins: ['https://off.example.com'],
+        scopes: ['openid'],
+        allowedEmailDomains: [],
+        tenantId: tenant.id,
+        socialProviders: {
+          create: [
+            {
+              provider: 'google',
+              clientKey: 'disabled-key',
+              clientSecretEncrypted: Buffer.from('secret'),
+              scopes: ['openid'],
+              allowedEmailDomains: [],
+              enabled: true,
+            },
+          ],
+        },
+      },
+    });
+
+    const repository = createPrismaPublicConfigRepository(prisma);
+    expect(await repository.findPublicClient(client.clientId)).toBeNull();
   }, 60_000);
 });

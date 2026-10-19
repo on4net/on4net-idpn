@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { IdpnRoot } from './idpn-root';
 import { HostedLoginPage, normalizeLoginHint } from './hosted-login';
 import { LoginForm } from './login-form';
-import { directionOf, resolveLocale, translate } from '@/i18n';
+import { directionOf, MESSAGES, resolveLocale, translate } from '@/i18n';
 
 function renderForm(overrides: Partial<React.ComponentProps<typeof LoginForm>> = {}) {
   return render(
@@ -46,6 +46,22 @@ describe('i18n', () => {
   it('interpolates values into placeholders', () => {
     expect(translate('en-US', 'login.title', { unused: 1 })).toBe('Sign in');
     expect(translate('fa-IR', 'common.loading')).toBe('در حال بارگذاری');
+  });
+
+  it('ships every social login label in both locales', () => {
+    const keys = Object.keys(MESSAGES['fa-IR']).filter((key) => key.startsWith('login.social.'));
+
+    expect(keys).toContain('login.social.continueWith');
+    expect(keys).toContain('login.social.errorMembershipSuspended');
+    for (const key of keys) {
+      expect(MESSAGES['en-US'][key], key).toBeTruthy();
+    }
+    expect(translate('fa-IR', 'login.social.continueWith', { provider: 'Google' })).toBe(
+      'ادامه با Google',
+    );
+    expect(translate('en-US', 'login.social.errorMembershipSuspended')).toBe(
+      'Your access to this app is suspended.',
+    );
   });
 });
 
@@ -211,6 +227,138 @@ describe('HostedLoginPage', () => {
 
     expect(screen.getByRole('heading', { name: 'ورود به حساب' })).toBeInTheDocument();
     expect(screen.queryByTestId('public-config-loaded')).not.toBeInTheDocument();
+  });
+
+  it('keeps the password-only layout when the client has no social providers', async () => {
+    const fetchConfig = vi.fn().mockResolvedValue({
+      locales: { default: 'fa-IR', supported: ['fa-IR'] },
+      socialProviders: [],
+    });
+
+    render(<HostedLoginPage search="?client_id=app-a" fetchConfig={fetchConfig} />);
+
+    expect(await screen.findByTestId('public-config-loaded')).toBeInTheDocument();
+    expect(
+      screen.queryByRole('heading', { name: 'ورود با سرویس‌های دیگر' }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('region')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'ورود' })).toBeInTheDocument();
+  });
+
+  it('renders one provider button per enabled provider from the public config', async () => {
+    const fetchConfig = vi.fn().mockResolvedValue({
+      locales: { default: 'fa-IR', supported: ['fa-IR'] },
+      socialProviders: [
+        { provider: 'google', label: 'Google' },
+        { provider: 'facebook', label: 'Facebook' },
+      ],
+    });
+
+    render(<HostedLoginPage search="?client_id=app-a" fetchConfig={fetchConfig} />);
+
+    expect(await screen.findByRole('button', { name: 'ادامه با Google' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'ادامه با Facebook' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'ورود' })).toBeInTheDocument();
+    expect(screen.getByTestId('idpn-root')).toHaveAttribute('dir', 'rtl');
+  });
+
+  it('renders a single provider without duplicating or inventing buttons', async () => {
+    const fetchConfig = vi.fn().mockResolvedValue({
+      locales: { default: 'fa-IR', supported: ['fa-IR'] },
+      socialProviders: [{ provider: 'google', label: 'Google' }],
+    });
+
+    render(<HostedLoginPage search="?client_id=app-a" fetchConfig={fetchConfig} />);
+
+    expect(await screen.findByRole('button', { name: 'ادامه با Google' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Facebook/ })).not.toBeInTheDocument();
+  });
+
+  it('starts social login with the client, provider, return_to and login_hint', async () => {
+    const user = userEvent.setup();
+    const navigate = vi.fn();
+    const fetchConfig = vi.fn().mockResolvedValue({
+      locales: { default: 'fa-IR', supported: ['fa-IR'] },
+      socialProviders: [{ provider: 'google', label: 'Google' }],
+    });
+
+    render(
+      <HostedLoginPage
+        search="?client_id=app-a&return_to=%2Foauth2%2Fauthorize%3Fclient_id%3Dapp-a&login_hint=sara%40example.com&login_request=request-123"
+        fetchConfig={fetchConfig}
+        navigate={navigate}
+      />,
+    );
+
+    await user.click(await screen.findByRole('button', { name: 'ادامه با Google' }));
+
+    expect(navigate).toHaveBeenCalledTimes(1);
+    const target = String(navigate.mock.calls[0]?.[0]);
+    const params = new URLSearchParams(target.split('?')[1]);
+    expect(target.startsWith('/oauth2/social/app-a/google/start?')).toBe(true);
+    expect(params.get('login_request')).toBe('request-123');
+    expect(params.get('return_to')).toBe('/oauth2/authorize?client_id=app-a');
+    expect(params.get('login_hint')).toBe('sara@example.com');
+    expect(target).not.toMatch(/clientKey|secret|scope/i);
+  });
+
+  it('hides providers the selected login context does not allow', async () => {
+    const fetchConfig = vi.fn().mockResolvedValue({
+      locales: { default: 'fa-IR', supported: ['fa-IR'] },
+      loginContexts: [{ key: 'team', methods: ['password', 'google'] }],
+      socialProviders: [
+        { provider: 'google', label: 'Google' },
+        { provider: 'facebook', label: 'Facebook' },
+      ],
+    });
+
+    render(
+      <HostedLoginPage search="?client_id=app-a&login_context=team" fetchConfig={fetchConfig} />,
+    );
+
+    expect(await screen.findByRole('button', { name: 'ادامه با Google' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Facebook/ })).not.toBeInTheDocument();
+  });
+
+  it('shows a translated social error and keeps the password form usable', async () => {
+    const user = userEvent.setup();
+    const submit = vi.fn().mockResolvedValue({ ok: true });
+    const fetchConfig = vi.fn().mockResolvedValue({
+      locales: { default: 'fa-IR', supported: ['fa-IR'] },
+      socialProviders: [{ provider: 'google', label: 'Google' }],
+    });
+
+    render(
+      <HostedLoginPage
+        search="?client_id=app-a&error=social_state_invalid"
+        fetchConfig={fetchConfig}
+        submit={submit}
+        navigate={vi.fn()}
+      />,
+    );
+
+    const alert = screen.getByRole('alert');
+    expect(alert).toHaveTextContent('نشست ورود منقضی شده است. دوباره از ابتدا تلاش کنید.');
+    expect(alert).not.toHaveTextContent('social_state_invalid');
+
+    await user.type(screen.getByLabelText('ایمیل یا نام کاربری'), 'sara');
+    await user.type(screen.getByLabelText('رمز عبور'), 'a-very-long-password');
+    await user.click(screen.getByRole('button', { name: 'ورود' }));
+
+    expect(submit).toHaveBeenCalledWith(
+      expect.objectContaining({ identifier: 'sara', password: 'a-very-long-password' }),
+    );
+  });
+
+  it('never renders an unknown error value from the query string', () => {
+    render(
+      <HostedLoginPage
+        search="?client_id=app-a&error=%3Cscript%3Ealert(1)%3C%2Fscript%3E"
+        fetchConfig={vi.fn().mockResolvedValue(null)}
+      />,
+    );
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('accepts redirect_uri as a return target', async () => {

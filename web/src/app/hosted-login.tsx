@@ -2,6 +2,12 @@ import * as React from 'react';
 
 import { IdpnRoot } from '@/app/idpn-root';
 import { LoginForm, type LoginFormValues } from '@/app/login-form';
+import {
+  SocialLogin,
+  selectSocialProviders,
+  socialErrorMessageKey,
+  type SocialProviderSummary,
+} from '@/app/social-login';
 import { directionOf, resolveLocale, type Locale } from '@/i18n';
 
 interface PublicConfigLike {
@@ -9,6 +15,7 @@ interface PublicConfigLike {
   locales?: { default?: string; supported?: string[] };
   theme?: Record<string, string>;
   loginContexts?: { key: string; methods: string[] }[];
+  socialProviders?: SocialProviderSummary[];
 }
 
 export interface HostedLoginPageProps {
@@ -101,6 +108,11 @@ export function HostedLoginPage({
   const returnTo = params.get('return_to') ?? params.get('redirect_uri') ?? undefined;
   const uiLocales = params.get('ui_locales') ?? undefined;
   const loginHint = normalizeLoginHint(params.get('login_hint'));
+  /** Opaque handle from `/oauth2/authorize`; required by the social start endpoint. */
+  const loginRequest = params.get('login_request') ?? undefined;
+  const loginContext = params.get('login_context') ?? undefined;
+  /** Social callback failures arrive as an `error` query value (docs/auth-flows.md 9.5). */
+  const socialError = params.get('error');
 
   const [config, setConfig] = React.useState<PublicConfigLike | null>(null);
   const [locale, setLocale] = React.useState<Locale>(() => resolveLocale(uiLocales));
@@ -133,6 +145,14 @@ export function HostedLoginPage({
   }, [clientId, fetchConfig, uiLocales]);
 
   const dir = directionOf(locale);
+
+  const socialProviders = selectSocialProviders(
+    config?.socialProviders,
+    config?.loginContexts,
+    loginContext,
+  );
+  const socialErrorKey = socialErrorMessageKey(socialError);
+  const showSocial = socialProviders.length > 0 || socialErrorKey !== null;
 
   const handleSubmit = async (values: LoginFormValues) => {
     setSubmitting(true);
@@ -172,6 +192,20 @@ export function HostedLoginPage({
         submitting={submitting}
         errorCode={errorCode}
         defaultIdentifier={loginHint}
+        social={
+          showSocial ? (
+            <SocialLogin
+              locale={locale}
+              clientId={clientId ?? ''}
+              providers={socialProviders}
+              loginRequest={loginRequest}
+              returnTo={returnTo}
+              loginHint={loginHint}
+              errorCode={socialError}
+              navigate={navigate}
+            />
+          ) : undefined
+        }
         onSubmit={handleSubmit}
       />
       {config === null ? null : <span hidden data-testid="public-config-loaded" />}

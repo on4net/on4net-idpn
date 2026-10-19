@@ -67,6 +67,44 @@ describe('GET /api/v1/clients/:clientId/public-config', () => {
     await app.close();
   });
 
+  it('exposes only the client enabled social providers, never credentials', async () => {
+    const withProviders: PublicClientSource = {
+      ...source,
+      socialProviders: [
+        { provider: 'google', label: 'Google' },
+        { provider: 'facebook', label: 'Facebook' },
+      ],
+    };
+    const app: FastifyInstance = Fastify({ logger: false });
+    registerPublicConfigRoute(app, {
+      repository: { findPublicClient: async () => withProviders },
+      allowedOrigins: async () => [],
+      dependencies: deps,
+    });
+    await app.ready();
+
+    const response = await request(app.server)
+      .get('/api/v1/clients/app-a/public-config')
+      .expect(200);
+
+    expect(response.body.socialProviders).toEqual([
+      { provider: 'google', label: 'Google' },
+      { provider: 'facebook', label: 'Facebook' },
+    ]);
+    const serialized = JSON.stringify(response.body).toLowerCase();
+    for (const forbidden of [
+      'clientkey',
+      'clientsecret',
+      'secret',
+      'scope',
+      'redirecturi',
+      'allowedemaildomains',
+    ]) {
+      expect(serialized).not.toContain(forbidden);
+    }
+    await app.close();
+  });
+
   it('does not add CORS headers for a foreign origin', async () => {
     const app = publicApp();
     await app.ready();

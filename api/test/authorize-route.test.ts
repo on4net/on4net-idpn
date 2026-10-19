@@ -8,7 +8,7 @@ import {
   type AuthorizationCodeRepository,
 } from '../src/oidc/authorization-code.js';
 import { registerAuthorizeRoute } from '../src/oidc/authorize-route.js';
-import type { ClientRepository, OAuthClient } from '../src/oidc/client-repository.js';
+import type { OAuthClient } from '../src/oidc/client-repository.js';
 import type { IdpSession } from '../src/session/types.js';
 
 const verifier = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~';
@@ -23,12 +23,6 @@ const client: OAuthClient = {
   requirePkce: true,
   registrationPolicy: 'invite_only',
   mfaPolicy: 'optional',
-};
-
-const clients: ClientRepository = {
-  async findByClientId(clientId) {
-    return clientId === 'app-a' ? client : null;
-  },
 };
 
 function memoryCodes() {
@@ -86,12 +80,18 @@ function buildApp(options: {
   consentGranted?: boolean;
   clientAdminEligible?: boolean;
   now?: Date;
+  clientOverrides?: Partial<OAuthClient>;
 }) {
   const app = Fastify({ logger: false });
   const codes = memoryCodes();
+  const activeClient: OAuthClient = { ...client, ...options.clientOverrides };
   registerAuthorizeRoute(app, {
     issuer,
-    clients,
+    clients: {
+      async findByClientId(clientId) {
+        return clientId === 'app-a' ? activeClient : null;
+      },
+    },
     codes,
     sessions: {
       async read(sid) {
@@ -224,6 +224,41 @@ describe('GET /oauth2/authorize', () => {
     const location = new URL(response.headers.location ?? '');
     expect(location.searchParams.get('ui_locales')).toBe('fa-IR');
     expect(location.searchParams.get('login_hint')).toBe('sara@example.com');
+    await app.close();
+  });
+
+  it('carries the validated login_context into the hosted login URL', async () => {
+    const { app } = buildApp({
+      currentSession: null,
+      clientOverrides: { loginContexts: ['customer-admin', 'customer-team'] },
+    });
+    await app.ready();
+
+    const response = await request(app.server)
+      .get('/oauth2/authorize')
+      .query({ ...baseQuery, login_context: 'customer-admin' })
+      .expect(302);
+
+    const location = new URL(response.headers.location ?? '');
+    expect(location.searchParams.get('login_context')).toBe('customer-admin');
+    await app.close();
+  });
+
+  it('rejects a login_context that is not enabled for the client', async () => {
+    const { app } = buildApp({
+      currentSession: null,
+      clientOverrides: { loginContexts: ['customer-admin'] },
+    });
+    await app.ready();
+
+    const response = await request(app.server)
+      .get('/oauth2/authorize')
+      .query({ ...baseQuery, login_context: 'other-app' })
+      .expect(302);
+
+    const location = new URL(response.headers.location ?? '');
+    expect(location.searchParams.get('error')).toBe('invalid_request');
+    expect(location.searchParams.get('state')).toBe('state-123');
     await app.close();
   });
 

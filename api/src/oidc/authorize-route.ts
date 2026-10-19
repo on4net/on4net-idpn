@@ -98,6 +98,12 @@ export function buildLoginRedirect(
   if (authorize.loginHint !== undefined) {
     target.searchParams.set('login_hint', authorize.loginHint);
   }
+  // The login page applies the context's `login_methods`: a provider that the selected
+  // context does not allow gets no button (`docs/login-contexts.md` 9). The context was
+  // already validated against the client above, so it is passed through verbatim.
+  if (authorize.loginContext !== undefined) {
+    target.searchParams.set('login_context', authorize.loginContext);
+  }
   return isAbsoluteUrl(loginUrl) ? target.toString() : `${target.pathname}${target.search}`;
 }
 
