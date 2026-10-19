@@ -213,6 +213,9 @@ importers:
       '@idpn/config':
         specifier: workspace:*
         version: link:../packages/config
+      '@idpn/contracts':
+        specifier: workspace:*
+        version: link:../packages/contracts
       '@simplewebauthn/browser':
         specifier: 14.0.0
         version: 14.0.0

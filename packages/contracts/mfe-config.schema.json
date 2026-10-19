@@ -73,12 +73,137 @@
     },
     "theme": {
       "type": "object",
-      "propertyNames": {
-        "type": "string"
+      "properties": {
+        "background": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "foreground": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "card": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "primary": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "primaryForeground": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "secondary": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "muted": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "accent": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "destructive": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "border": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "input": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "ring": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "radius": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "fontFamily": {
+          "type": "object",
+          "properties": {
+            "rtl": {
+              "type": "string",
+              "enum": [
+                "vazirmatn",
+                "inter",
+                "system"
+              ]
+            },
+            "ltr": {
+              "type": "string",
+              "enum": [
+                "vazirmatn",
+                "inter",
+                "system"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "dark": {
+          "type": "object",
+          "properties": {
+            "background": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "foreground": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "card": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "primary": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "primaryForeground": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "secondary": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "muted": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "accent": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "destructive": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "border": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "input": {
+              "type": "string",
+              "maxLength": 80
+            },
+            "ring": {
+              "type": "string",
+              "maxLength": 80
+            }
+          },
+          "additionalProperties": false
+        }
       },
-      "additionalProperties": {
-        "type": "string"
-      }
+      "additionalProperties": false
     },
     "module": {
       "type": "string",

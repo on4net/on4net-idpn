@@ -14,6 +14,9 @@ export default defineConfig({
       '@': fileURLToPath(new URL('./src', import.meta.url)),
       // The host fixture consumes the published SDK entry, not a deep import.
       '@idpn/mfe-sdk': fileURLToPath(new URL('../packages/mfe-sdk/src/index.ts', import.meta.url)),
+      '@idpn/contracts/theme': fileURLToPath(
+        new URL('../packages/contracts/src/theme.ts', import.meta.url),
+      ),
     },
   },
   server: {

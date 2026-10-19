@@ -1,5 +1,7 @@
 import * as React from 'react';
 
+import { sanitizeIdpnTheme, type IdpnTheme } from '@idpn/contracts/theme';
+
 import { IdpnRoot } from '@/app/idpn-root';
 import {
   ForgotPasswordPage,
@@ -22,7 +24,8 @@ import { directionOf, resolveLocale, type Locale } from '@/i18n';
 interface PublicConfigLike {
   locale?: string;
   locales?: { default?: string; supported?: string[] };
-  theme?: Record<string, string>;
+  /** Untrusted JSON from the public-config endpoint; sanitized before it reaches the root. */
+  theme?: unknown;
   loginContexts?: { key: string; methods: string[] }[];
   socialProviders?: SocialProviderSummary[];
 }
@@ -69,7 +72,7 @@ export interface HostedLoginPageProps {
   navigate?: (target: string) => void;
 }
 
-const DEFAULT_THEME: Record<string, string> = {};
+const DEFAULT_THEME: IdpnTheme = {};
 
 /** RFC 5321 caps a forward path at 256 octets; keep room for the `@domain` part. */
 const MAX_LOGIN_HINT_LENGTH = 254;
@@ -441,7 +444,7 @@ export function HostedLoginPage({
 
   const [config, setConfig] = React.useState<PublicConfigLike | null>(null);
   const [locale, setLocale] = React.useState<Locale>(() => resolveLocale(uiLocales));
-  const [theme, setTheme] = React.useState<Record<string, string>>(DEFAULT_THEME);
+  const [theme, setTheme] = React.useState<IdpnTheme>(DEFAULT_THEME);
   const [submitting, setSubmitting] = React.useState(false);
   const [errorCode, setErrorCode] = React.useState<
     'invalid_credentials' | 'network' | 'mfa_enrollment_required' | null
@@ -467,7 +470,7 @@ export function HostedLoginPage({
         setLocale(
           resolveLocale(uiLocales, loaded.locales?.supported ?? ['fa-IR'], loaded.locales?.default),
         );
-        setTheme(loaded.theme ?? {});
+        setTheme(sanitizeIdpnTheme(loaded.theme));
       })
       .catch(() => {
         // A missing public config must not block login; defaults are used.

@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { idpnThemeSchema } from './theme.js';
+
 /** Direction of a locale; used by both the public config and the MFE contract. */
 export const localeDirSchema = z.enum(['rtl', 'ltr']);
 
@@ -59,7 +61,7 @@ export const publicClientConfigSchema = z
     locale: z.string().min(1),
     locales: localeBundleSchema.strict(),
     translationsUrl: z.string().url().optional(),
-    theme: z.record(z.string(), z.string()),
+    theme: idpnThemeSchema,
     registrationPolicy: registrationPolicySchema,
     mfaPolicy: mfaPolicySchema,
     loginContexts: z.array(loginContextSummarySchema),

@@ -41,9 +41,9 @@ describe('toMfeConfig', () => {
 
   it('forwards theme tokens and the handler as SDK configuration', () => {
     const onEvent = vi.fn();
-    const config = toMfeConfig(settings({ theme: { brand: '#0057b8' }, onEvent }), 'account');
+    const config = toMfeConfig(settings({ theme: { primary: '#0057b8' }, onEvent }), 'account');
 
-    expect(config.theme).toEqual({ brand: '#0057b8' });
+    expect(config.theme).toEqual({ primary: '#0057b8' });
     expect(config.onEvent).toBe(onEvent);
   });
 

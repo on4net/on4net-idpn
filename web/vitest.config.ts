@@ -7,6 +7,9 @@ export default defineConfig({
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
       '@idpn/mfe-sdk': fileURLToPath(new URL('../packages/mfe-sdk/src/index.ts', import.meta.url)),
+      '@idpn/contracts/theme': fileURLToPath(
+        new URL('../packages/contracts/src/theme.ts', import.meta.url),
+      ),
     },
   },
   test: {

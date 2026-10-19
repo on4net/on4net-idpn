@@ -1,4 +1,8 @@
-import { publicClientConfigSchema, type PublicClientConfig } from '@idpn/contracts';
+import {
+  publicClientConfigSchema,
+  sanitizeIdpnTheme,
+  type PublicClientConfig,
+} from '@idpn/contracts';
 
 export interface PublicLoginContext {
   key: string;
@@ -26,9 +30,11 @@ export interface PublicClientSource {
   };
   branding: {
     logoUrl?: string;
-    theme?: Record<string, string>;
+    /** Raw JSON from the client row; sanitized before it reaches the public payload. */
+    theme?: unknown;
     primaryColor?: string;
     radius?: string;
+    fontFamily?: unknown;
   };
   registrationPolicy: 'invite_only' | 'self_service' | 'disabled';
   mfaPolicy: 'optional' | 'required_admins' | 'required_all';
@@ -78,13 +84,20 @@ export function buildPublicClientConfig(
     dir[locale] = client.locales.dir?.[locale] ?? directionOf(locale);
   }
 
-  const theme: Record<string, string> = { ...(client.branding.theme ?? {}) };
-  if (client.branding.primaryColor !== undefined) {
-    theme.primary = client.branding.primaryColor;
-  }
-  if (client.branding.radius !== undefined) {
-    theme.radius = client.branding.radius;
-  }
+  const rawTheme =
+    typeof client.branding.theme === 'object' &&
+    client.branding.theme !== null &&
+    !Array.isArray(client.branding.theme)
+      ? (client.branding.theme as Record<string, unknown>)
+      : {};
+  const theme = sanitizeIdpnTheme({
+    ...rawTheme,
+    ...(client.branding.primaryColor === undefined
+      ? {}
+      : { primary: client.branding.primaryColor }),
+    ...(client.branding.radius === undefined ? {} : { radius: client.branding.radius }),
+    ...(client.branding.fontFamily === undefined ? {} : { fontFamily: client.branding.fontFamily }),
+  });
 
   const config: PublicClientConfig = {
     clientId: client.clientId,

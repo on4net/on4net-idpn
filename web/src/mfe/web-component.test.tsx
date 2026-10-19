@@ -250,24 +250,38 @@ describe('Web Component module selection', () => {
   it('forwards theme tokens to the shared root', async () => {
     const element = document.createElement(ACCOUNT_ELEMENT_NAME) as IdpnAccountElement;
     element.setAttribute('client-id', 'app-a');
-    element.theme = { brand: '#123456' };
+    element.theme = { primary: '#123456', radius: '8px' };
     document.body.appendChild(element);
 
     await waitFor(() => expect(element.shadowRoot?.textContent).toContain('سارا محمدی'));
     const root = element.shadowRoot?.querySelector('.idpn-root') as HTMLElement;
-    expect(root.style.getPropertyValue('--brand')).toBe('#123456');
-    expect(root.style.getPropertyValue('--idpn-brand')).toBe('#123456');
+    expect(root.style.getPropertyValue('--idpn-primary')).toBe('#123456');
+    expect(root.style.getPropertyValue('--idpn-radius')).toBe('8px');
+    expect(root.style.getPropertyValue('--primary')).toBe('');
+  });
+
+  it('drops malicious theme values inside the shadow root', async () => {
+    const element = document.createElement(ACCOUNT_ELEMENT_NAME) as IdpnAccountElement;
+    element.setAttribute('client-id', 'app-a');
+    element.theme = { primary: 'red; } body { display: none', background: 'url(javascript:1)' };
+    document.body.appendChild(element);
+
+    await waitFor(() => expect(element.shadowRoot?.textContent).toContain('سارا محمدی'));
+    const root = element.shadowRoot?.querySelector('.idpn-root') as HTMLElement;
+    expect(root.style.getPropertyValue('--idpn-primary')).toBe('');
+    expect(root.style.getPropertyValue('--idpn-background')).toBe('');
+    expect(root.getAttribute('style')).not.toMatch(/javascript|body/i);
   });
 
   it('applies properties set after the element is mounted', async () => {
     const element = mount({}, ACCOUNT_ELEMENT_NAME);
     await waitFor(() => expect(element.shadowRoot?.textContent).toContain('سارا محمدی'));
 
-    element.theme = { brand: '#abcdef' };
+    element.theme = { primary: '#abcdef' };
 
     await waitFor(() => {
       const root = element.shadowRoot?.querySelector('.idpn-root') as HTMLElement;
-      expect(root.style.getPropertyValue('--brand')).toBe('#abcdef');
+      expect(root.style.getPropertyValue('--idpn-primary')).toBe('#abcdef');
     });
   });
 

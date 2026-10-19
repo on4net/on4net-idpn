@@ -33,7 +33,7 @@ const mounted = mountIdpnModule(document.querySelector('#idpn-account')!, {
   apiBaseUrl: '/auth',
   locale: 'fa-IR',
   dir: 'rtl',
-  theme: { brand: '#0057b8' },
+  theme: { primary: '#0057b8', radius: '0.75rem' },
   onEvent: (event) => {
     if (event.type === 'auth:error') console.warn(event.code);
   },
@@ -51,16 +51,16 @@ element.
 
 ## Configuration
 
-| Field            | Required | Notes                                                                               |
-| ---------------- | -------- | ----------------------------------------------------------------------------------- |
-| `clientId`       | yes      | Public client id registered in the IdP; host configuration, never user input.       |
-| `module`         | yes      | `user-management` or `account`.                                                     |
-| `mode`           | yes      | `bff` (recommended) or `spa` (trusted hosts only).                                  |
-| `apiBaseUrl`     | yes      | Host `/auth` prefix (BFF) or IdP API origin (SPA).                                  |
-| `locale` / `dir` | no       | BCP 47 locale and `rtl` / `ltr`; direction is derived from the locale when omitted. |
-| `theme`          | no       | CSS custom properties mapped to `--<name>` / `--idpn-<name>`.                       |
-| `getAccessToken` | SPA only | In-memory getter; cleared automatically in BFF mode. Never an attribute.            |
-| `onEvent`        | no       | Receives `IdpnEvent`; never contains a token.                                       |
+| Field            | Required | Notes                                                                                                                                |
+| ---------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `clientId`       | yes      | Public client id registered in the IdP; host configuration, never user input.                                                        |
+| `module`         | yes      | `user-management` or `account`.                                                                                                      |
+| `mode`           | yes      | `bff` (recommended) or `spa` (trusted hosts only).                                                                                   |
+| `apiBaseUrl`     | yes      | Host `/auth` prefix (BFF) or IdP API origin (SPA).                                                                                   |
+| `locale` / `dir` | no       | BCP 47 locale and `rtl` / `ltr`; direction is derived from the locale when omitted.                                                  |
+| `theme`          | no       | Typed `IdpnTheme` (semantic colors, `radius`, `fontFamily.rtl/ltr`, optional `dark`). Values are sanitized and mapped to `--idpn-*`. |
+| `getAccessToken` | SPA only | In-memory getter; cleared automatically in BFF mode. Never an attribute.                                                             |
+| `onEvent`        | no       | Receives `IdpnEvent`; never contains a token.                                                                                        |
 
 `loginUrl`, `locales`, `loginContext`, `basename` and `features` are part of the shared
 contract for Module Federation hosts; the Web Component helper does not forward them.

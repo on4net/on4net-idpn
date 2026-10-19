@@ -67,6 +67,39 @@ describe('GET /api/v1/clients/:clientId/public-config', () => {
     await app.close();
   });
 
+  it('serves only sanitized theme tokens', async () => {
+    const hostile: PublicClientSource = {
+      ...source,
+      branding: {
+        theme: {
+          primary: 'url(javascript:alert(1))',
+          background: '#ffffff',
+          radius: '8px; color: red',
+          extra: '#123456',
+          dark: { foreground: 'expression(alert(1))', ring: '#abcdef' },
+        },
+      },
+    };
+    const app: FastifyInstance = Fastify({ logger: false });
+    registerPublicConfigRoute(app, {
+      repository: { findPublicClient: async () => hostile },
+      allowedOrigins: async () => [],
+      dependencies: deps,
+    });
+    await app.ready();
+
+    const response = await request(app.server)
+      .get('/api/v1/clients/app-a/public-config')
+      .expect(200);
+
+    expect(response.body.theme).toEqual({
+      background: '#ffffff',
+      dark: { ring: '#abcdef' },
+    });
+    expect(JSON.stringify(response.body)).not.toMatch(/javascript|expression|color: red|extra/);
+    await app.close();
+  });
+
   it('exposes only the client enabled social providers, never credentials', async () => {
     const withProviders: PublicClientSource = {
       ...source,

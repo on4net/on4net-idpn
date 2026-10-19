@@ -46,6 +46,15 @@ export type {
   IdpnThemeTokens,
 } from './contract.js';
 
+export { IDPN_DEFAULT_FONTS, IDPN_THEME_COLOR_KEYS, IDPN_THEME_FONT_KEYS } from './theme.js';
+export type {
+  IdpnTheme,
+  IdpnThemeColorKey,
+  IdpnThemeColors,
+  IdpnThemeFont,
+  IdpnThemeFontFamily,
+} from './theme.js';
+
 export {
   IDPN_MFE_MARKER_ATTRIBUTE,
   IDPN_MFE_TAGS,

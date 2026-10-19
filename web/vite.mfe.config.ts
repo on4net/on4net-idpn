@@ -28,6 +28,9 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
+      '@idpn/contracts/theme': fileURLToPath(
+        new URL('../packages/contracts/src/theme.ts', import.meta.url),
+      ),
     },
   },
   build: {

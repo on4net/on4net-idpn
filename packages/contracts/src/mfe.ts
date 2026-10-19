@@ -6,6 +6,7 @@ import {
   loginMethodSchema,
   socialProviderSchema,
 } from './public-config.js';
+import { idpnThemeSchema } from './theme.js';
 
 /**
  * Version of the MFE config/event contract. Bump it for every breaking change and
@@ -22,7 +23,7 @@ export const publicUserSchema = z
   })
   .strict();
 
-export const mfeThemeSchema = z.record(z.string(), z.string());
+export const mfeThemeSchema = idpnThemeSchema;
 
 export const mfeConfigSchema = z
   .object({

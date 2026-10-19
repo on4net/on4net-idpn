@@ -24,6 +24,26 @@ export {
 } from './mfe.js';
 export type { MfeConfig, MfeEvent, MfeEventType, PublicUser } from './mfe.js';
 
+export {
+  IDPN_DEFAULT_FONTS,
+  IDPN_THEME_COLOR_KEYS,
+  IDPN_THEME_FONT_KEYS,
+  IDPN_THEME_FONT_STACKS,
+  idpnThemeSchema,
+  idpnThemeToCssVariables,
+  sanitizeIdpnColor,
+  sanitizeIdpnFont,
+  sanitizeIdpnRadius,
+  sanitizeIdpnTheme,
+} from './theme.js';
+export type {
+  IdpnTheme,
+  IdpnThemeColorKey,
+  IdpnThemeColors,
+  IdpnThemeFont,
+  IdpnThemeFontFamily,
+} from './theme.js';
+
 export { healthResponseSchema } from './health.js';
 export type { HealthResponse } from './health.js';
 

@@ -28,10 +28,10 @@ Upgrade می‌شود ولی تا آن زمان چیزی رندر نمی‌شو�
 
 ## 2. انتخاب حالت اتصال
 
-| حالت | مناسب برای | ورودی | احراز هویت |
-|---|---|---|---|
-| Module Federation | اپ‌های React 19 | `remoteEntry.js` با نسخهٔ پین‌شده | BFF (کوکی) یا SPA (Getter در حافظه) |
-| Web Component | Vue، Angular، HTML، Legacy | `web-component.js` | BFF (کوکی) یا SPA فقط برای `user-management` |
+| حالت              | مناسب برای                 | ورودی                             | احراز هویت                                   |
+| ----------------- | -------------------------- | --------------------------------- | -------------------------------------------- |
+| Module Federation | اپ‌های React 19            | `remoteEntry.js` با نسخهٔ پین‌شده | BFF (کوکی) یا SPA (Getter در حافظه)          |
+| Web Component     | Vue، Angular، HTML، Legacy | `web-component.js`                | BFF (کوکی) یا SPA فقط برای `user-management` |
 
 ### 2.1 Module Federation (React)
 
@@ -61,11 +61,11 @@ const UserManagement = React.lazy(() => import('idpnMfe/UserManagement'));
 
 Bundle سه المان را ثبت می‌کند:
 
-| المان | ماژول پیش‌فرض | توضیح |
-|---|---|---|
+| المان                           | ماژول پیش‌فرض     | توضیح                               |
+| ------------------------------- | ----------------- | ----------------------------------- |
 | `<on4net-idpn-user-management>` | `user-management` | المان قدیمی؛ بدون تغییر سازگار است. |
-| `<on4net-idpn-account>` | `account` | ماژول حساب کاربری. |
-| `<on4net-idpn-mfe module="…">` | ندارد | انتخاب صریح ماژول با `module`. |
+| `<on4net-idpn-account>`         | `account`         | ماژول حساب کاربری.                  |
+| `<on4net-idpn-mfe module="…">`  | ندارد             | انتخاب صریح ماژول با `module`.      |
 
 ```html
 <on4net-idpn-account
@@ -97,7 +97,7 @@ const config: IdpnMfeConfig = {
   apiBaseUrl: '/auth',
   locale: 'fa-IR',
   dir: 'rtl',
-  theme: { brand: '#0057b8', radius: '0.75rem' },
+  theme: { primary: '#0057b8', radius: '0.75rem' },
   onEvent: (event) => {
     if (event.type === 'auth:logout') window.location.assign('/login');
     if (event.type === 'auth:error') console.warn(`[idpn] ${event.code}`);
@@ -280,30 +280,30 @@ onBeforeUnmount(() => {
 خودش که دو Remote را Lazy بارگذاری می‌کند و منبع آن `idpnMfe` با `IDPN_REMOTE_ENTRY`
 پین می‌شود.
 
-| فایل | نقش |
-|---|---|
-| `host-mf/host-config.ts` | خواندن و اعتبارسنجی `VITE_IDPN_*` و ساخت Propهای ماژول |
-| `host-mf/IdpnModuleHost.tsx` | `React.lazy` + `Suspense` + Error Boundary برای هر Remote |
-| `host-mf/HostApp.tsx` | Shell میزبان، خلاصهٔ Config و بنر `role="alert"` برای `auth:error` |
-| `host-mf/host-events.ts` | لاگ رویدادها با حذف کلیدهای توکن‌مانند و رشته‌های JWT |
-| `host-mf/token-provider.ts` | نگه‌دارندهٔ توکن SPA فقط در حافظه (Closure) |
-| `host-mf/remote-loaders.ts` | Importهای داینامیک `idpnMfe/UserManagement` و `idpnMfe/Account` |
+| فایل                         | نقش                                                                |
+| ---------------------------- | ------------------------------------------------------------------ |
+| `host-mf/host-config.ts`     | خواندن و اعتبارسنجی `VITE_IDPN_*` و ساخت Propهای ماژول             |
+| `host-mf/IdpnModuleHost.tsx` | `React.lazy` + `Suspense` + Error Boundary برای هر Remote          |
+| `host-mf/HostApp.tsx`        | Shell میزبان، خلاصهٔ Config و بنر `role="alert"` برای `auth:error` |
+| `host-mf/host-events.ts`     | لاگ رویدادها با حذف کلیدهای توکن‌مانند و رشته‌های JWT              |
+| `host-mf/token-provider.ts`  | نگه‌دارندهٔ توکن SPA فقط در حافظه (Closure)                        |
+| `host-mf/remote-loaders.ts`  | Importهای داینامیک `idpnMfe/UserManagement` و `idpnMfe/Account`    |
 
 تنظیمات از طریق Environment در زمان Build خوانده می‌شود (هیچ کلیدی از URL یا ورودی کاربر
 گرفته نمی‌شود):
 
-| متغیر | پیش‌فرض | توضیح |
-|---|---|---|
-| `VITE_IDPN_CLIENT_ID` | — (الزامی) | `clientId` اپ؛ تنها منبع Scope درخواست‌ها |
-| `VITE_IDPN_MODE` | `bff` | `bff` (کوکی نشست) یا `spa` (فقط اپ مورد اعتماد) |
-| `VITE_IDPN_API_BASE_URL` | خالی = Same-origin | پیشوند `/auth` در BFF |
-| `VITE_IDPN_LOGIN_URL` | `/oauth2/authorize` | مقصد Fallback Hosted؛ فقط Path یا http(s) |
-| `VITE_IDPN_LOGIN_CONTEXT` | `default` | Context فعال Route؛ فقط نمایشی |
-| `VITE_IDPN_LOCALE` | `fa-IR` | Locale فعال |
-| `VITE_IDPN_DIR` | `auto` | `auto` جهت را از Locale می‌سازد |
-| `VITE_IDPN_MODULE` | `all` | `all`، `user-management` یا `account` |
-| `VITE_IDPN_THEME` | `{}` | JSON از توکن‌های CSS روی `.idpn-root` |
-| `IDPN_REMOTE_ENTRY` | `/remote/remoteEntry.js` | URL پین‌شدهٔ `remoteEntry.js` |
+| متغیر                     | پیش‌فرض                  | توضیح                                                           |
+| ------------------------- | ------------------------ | --------------------------------------------------------------- |
+| `VITE_IDPN_CLIENT_ID`     | — (الزامی)               | `clientId` اپ؛ تنها منبع Scope درخواست‌ها                       |
+| `VITE_IDPN_MODE`          | `bff`                    | `bff` (کوکی نشست) یا `spa` (فقط اپ مورد اعتماد)                 |
+| `VITE_IDPN_API_BASE_URL`  | خالی = Same-origin       | پیشوند `/auth` در BFF                                           |
+| `VITE_IDPN_LOGIN_URL`     | `/oauth2/authorize`      | مقصد Fallback Hosted؛ فقط Path یا http(s)                       |
+| `VITE_IDPN_LOGIN_CONTEXT` | `default`                | Context فعال Route؛ فقط نمایشی                                  |
+| `VITE_IDPN_LOCALE`        | `fa-IR`                  | Locale فعال                                                     |
+| `VITE_IDPN_DIR`           | `auto`                   | `auto` جهت را از Locale می‌سازد                                 |
+| `VITE_IDPN_MODULE`        | `all`                    | `all`، `user-management` یا `account`                           |
+| `VITE_IDPN_THEME`         | `{}`                     | JSON از `IdpnTheme` (رنگ‌های Semantic، `radius`، فونت و `dark`) |
+| `IDPN_REMOTE_ENTRY`       | `/remote/remoteEntry.js` | URL پین‌شدهٔ `remoteEntry.js`                                   |
 
 ```bash
 # ساخت Remote و اجرای میزبان (Remote در host-mf/public/remote سرو می‌شود)
@@ -354,14 +354,14 @@ shadcn/Tailwind و بدون Router که فقط از API عمومی `@idpn/mfe-sd
 ساخته‌شده (`dist-wc/web-component.js`) را بارگذاری می‌کند و هر دو ماژول را برای `clientId`
 تنظیم‌شده Mount می‌کند.
 
-| فایل | نقش |
-|---|---|
-| `host/index.html` | Shell میزبان، Slot هر ماژول، لاگ رویداد و بنر Fallback |
-| `host/host.ts` | Bootstrap؛ Config را از `VITE_IDPN_*` (زمان Build) می‌خواند |
-| `host/host-bootstrap.ts` | بارگذاری Bundle، Mount/Unmount هر دو ماژول، رویدادها، Fallback |
-| `host/bundle-loader.ts` | بارگذاری ES Module و بررسی ثبت Custom Elementها |
-| `host/mfe-config.ts` | ساخت `IdpnMfeConfig` هر ماژول (Same-origin و Getter فقط در SPA) |
-| `host/broken.html` | Fixture عمداً خراب برای اثبات Fallback |
+| فایل                     | نقش                                                             |
+| ------------------------ | --------------------------------------------------------------- |
+| `host/index.html`        | Shell میزبان، Slot هر ماژول، لاگ رویداد و بنر Fallback          |
+| `host/host.ts`           | Bootstrap؛ Config را از `VITE_IDPN_*` (زمان Build) می‌خواند     |
+| `host/host-bootstrap.ts` | بارگذاری Bundle، Mount/Unmount هر دو ماژول، رویدادها، Fallback  |
+| `host/bundle-loader.ts`  | بارگذاری ES Module و بررسی ثبت Custom Elementها                 |
+| `host/mfe-config.ts`     | ساخت `IdpnMfeConfig` هر ماژول (Same-origin و Getter فقط در SPA) |
+| `host/broken.html`       | Fixture عمداً خراب برای اثبات Fallback                          |
 
 Config parsing، Redaction رویداد و Token Holder حافظه‌ای از ماژول‌های Framework-agnostic
 همان میزبان React (`web/host-mf/host-config.ts`، `host-events.ts`، `token-provider.ts`)
@@ -391,7 +391,7 @@ Config parsing، Redaction رویداد و Token Holder حافظه‌ای از �
         apiBaseUrl: '/', // Same-origin؛ یا پیشوند BFF مثل /auth
         locale: 'fa-IR',
         dir: 'rtl',
-        theme: { brand: '#0057b8' },
+        theme: { primary: '#0057b8' },
         onEvent(event) {
           if (event.type === 'auth:logout') window.location.assign('/login');
         },
@@ -467,22 +467,22 @@ pnpm test:e2e --project=wc-host-chromium       # Mount، Isolation، Event، Lif
 
 ## 4. قرارداد تنظیمات
 
-| فیلد | الزامی | نوع | کاربرد |
-|---|---|---|---|
-| `clientId` | بله | `string` | شناسهٔ عمومی کلاینت؛ از تنظیمات اپ، نه ورودی کاربر. |
-| `module` | بله | `'user-management' \| 'account'` | ماژول فعال. |
-| `mode` | بله | `'bff' \| 'spa'` | حالت احراز هویت. |
-| `apiBaseUrl` | بله | `string` | پیشوند `/auth` در BFF یا Origin API در SPA. |
-| `loginUrl` | خیر | `string` | آدرس Hosted Auth برای Redirect سطح‌بالا. |
-| `locale` | خیر | `string` | Locale فعال (BCP 47). |
-| `dir` | خیر | `'rtl' \| 'ltr'` | جهت؛ در صورت نبود از Locale استخراج می‌شود. |
-| `theme` | خیر | `Record<string, string>` | توکن‌ها به‌صورت `--<name>` و `--idpn-<name>` روی ریشه. |
-| `locales` | خیر | `{ default, supported[], dir{} }` | فهرست Localeهای همان اپ. |
-| `loginContext` | خیر | `string` | Context فعال همان Route؛ فقط نمایشی. |
-| `basename` | خیر | `string` | پایهٔ Router داخلی MFE. |
-| `features` | خیر | `{ selfServiceRegistration?, userManagement?, mfa? }` | فعال‌سازی قابلیت‌های اختیاری. |
-| `getAccessToken` | فقط SPA | `() => string \| null` | Getter توکن در حافظه؛ در BFF نادیده گرفته و پاک می‌شود. |
-| `onEvent` | خیر | `(event: IdpnEvent) => void` | دریافت رویدادهای غیرحساس. |
+| فیلد             | الزامی  | نوع                                                   | کاربرد                                                                                                                         |
+| ---------------- | ------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `clientId`       | بله     | `string`                                              | شناسهٔ عمومی کلاینت؛ از تنظیمات اپ، نه ورودی کاربر.                                                                            |
+| `module`         | بله     | `'user-management' \| 'account'`                      | ماژول فعال.                                                                                                                    |
+| `mode`           | بله     | `'bff' \| 'spa'`                                      | حالت احراز هویت.                                                                                                               |
+| `apiBaseUrl`     | بله     | `string`                                              | پیشوند `/auth` در BFF یا Origin API در SPA.                                                                                    |
+| `loginUrl`       | خیر     | `string`                                              | آدرس Hosted Auth برای Redirect سطح‌بالا.                                                                                       |
+| `locale`         | خیر     | `string`                                              | Locale فعال (BCP 47).                                                                                                          |
+| `dir`            | خیر     | `'rtl' \| 'ltr'`                                      | جهت؛ در صورت نبود از Locale استخراج می‌شود.                                                                                    |
+| `theme`          | خیر     | `IdpnTheme`                                           | توکن‌های Semantic (رنگ‌ها، `radius`، `fontFamily.rtl/ltr` و `dark` اختیاری) پس از Sanitize به `--idpn-*` روی ریشه Map می‌شوند. |
+| `locales`        | خیر     | `{ default, supported[], dir{} }`                     | فهرست Localeهای همان اپ.                                                                                                       |
+| `loginContext`   | خیر     | `string`                                              | Context فعال همان Route؛ فقط نمایشی.                                                                                           |
+| `basename`       | خیر     | `string`                                              | پایهٔ Router داخلی MFE.                                                                                                        |
+| `features`       | خیر     | `{ selfServiceRegistration?, userManagement?, mfa? }` | فعال‌سازی قابلیت‌های اختیاری.                                                                                                  |
+| `getAccessToken` | فقط SPA | `() => string \| null`                                | Getter توکن در حافظه؛ در BFF نادیده گرفته و پاک می‌شود.                                                                        |
+| `onEvent`        | خیر     | `(event: IdpnEvent) => void`                          | دریافت رویدادهای غیرحساس.                                                                                                      |
 
 در Web Component، SDK فقط `clientId`، `apiBaseUrl`، `locale`، `dir`، `theme`،
 `getAccessToken` و `onEvent` را منتقل می‌کند. `loginUrl`، `locales`، `loginContext`،
@@ -490,14 +490,14 @@ pnpm test:e2e --project=wc-host-chromium       # Mount، Isolation، Event، Lif
 
 Attributeهای المان:
 
-| Attribute | معادل Config | نامعتبر |
-|---|---|---|
-| `client-id` | `clientId` | پیام `client-id لازم است.` |
-| `api-base` | `apiBaseUrl` | Same-origin |
-| `locale` | `locale` | `fa-IR` |
-| `dir` | `dir` | استخراج از Locale |
-| `module` | `module` | فقط در المان عمومی الزامی است |
-| `page-size` | — | فقط `user-management`، پیش‌فرض `10` |
+| Attribute   | معادل Config | نامعتبر                             |
+| ----------- | ------------ | ----------------------------------- |
+| `client-id` | `clientId`   | پیام `client-id لازم است.`          |
+| `api-base`  | `apiBaseUrl` | Same-origin                         |
+| `locale`    | `locale`     | `fa-IR`                             |
+| `dir`       | `dir`        | استخراج از Locale                   |
+| `module`    | `module`     | فقط در المان عمومی الزامی است       |
+| `page-size` | —            | فقط `user-management`، پیش‌فرض `10` |
 
 ## 5. قرارداد رویدادها
 
@@ -609,17 +609,17 @@ Content-Security-Policy:
 
 ## 8. نسخه‌بندی و انتشار
 
-| موضوع | سیاست |
-|---|---|
-| نسخه SDK | Semantic Versioning؛ تغییر ناسازگار Config/Event = Major جدید |
-| نسخه قرارداد | `IDPN_MFE_CONTRACT_VERSION` معادل `MFE_SCHEMA_VERSION` در `@idpn/contracts` |
-| Remote | `https://cdn.example.com/idpn-mfe/{version}/remoteEntry.js` |
-| Manifest | `https://cdn.example.com/idpn-mfe/manifest.json` (و `mf-manifest.json` هر Build) |
-| Web Component | `https://cdn.example.com/idpn-mfe/{version}/web-component.js` |
-| پین نسخه | میزبان حداقل Major را پین می‌کند؛ نسخهٔ Minor بدون Deploy میزبان قابل ارتقاست |
-| تغییر ناسازگار | Major جدید + مهلت مهاجرت و اعلان قبلی |
-| Deprecation | حداقل دو نسخهٔ Minor پیش از حذف |
-| Rollback | نسخهٔ قبلی روی CDN نگه داشته می‌شود |
+| موضوع          | سیاست                                                                            |
+| -------------- | -------------------------------------------------------------------------------- |
+| نسخه SDK       | Semantic Versioning؛ تغییر ناسازگار Config/Event = Major جدید                    |
+| نسخه قرارداد   | `IDPN_MFE_CONTRACT_VERSION` معادل `MFE_SCHEMA_VERSION` در `@idpn/contracts`      |
+| Remote         | `https://cdn.example.com/idpn-mfe/{version}/remoteEntry.js`                      |
+| Manifest       | `https://cdn.example.com/idpn-mfe/manifest.json` (و `mf-manifest.json` هر Build) |
+| Web Component  | `https://cdn.example.com/idpn-mfe/{version}/web-component.js`                    |
+| پین نسخه       | میزبان حداقل Major را پین می‌کند؛ نسخهٔ Minor بدون Deploy میزبان قابل ارتقاست    |
+| تغییر ناسازگار | Major جدید + مهلت مهاجرت و اعلان قبلی                                            |
+| Deprecation    | حداقل دو نسخهٔ Minor پیش از حذف                                                  |
+| Rollback       | نسخهٔ قبلی روی CDN نگه داشته می‌شود                                              |
 
 انتشار:
 
@@ -643,18 +643,18 @@ pnpm --filter @idpn/web run build:wc    # dist-wc/web-component.js
 
 ## 9. عیب‌یابی
 
-| نشانه | علت احتمالی | راه‌حل |
-|---|---|---|
-| هیچ چیز رندر نمی‌شود | Bundle بارگذاری نشده یا CSP اسکریپت را بلاک کرده | ترتیب `<script type="module">` را بررسی و `script-src` را اصلاح کنید. |
-| `client-id لازم است.` | Attribute `client-id` خالی است | مقدار را از Config اپ بدهید. |
-| `module باید user-management یا account باشد.` | المان عمومی بدون `module` معتبر | `module` را روی `<on4net-idpn-mfe>` تنظیم کنید. |
-| `IdpnMfeConfig.accessToken is not allowed` | توکن به SDK پاس شده | فقط `getAccessToken` در حالت SPA بدهید. |
-| خطای 401 | نشست BFF وجود ندارد | کاربر را به `/login` بفرستید؛ Getter توکن را بررسی کنید. |
-| خطای 403 | نقش ادمین اپ یا `clientId` نادرست | `clientId` و Scope `idp.client-admin` را بررسی کنید. |
-| استایل‌ها اعمال نمی‌شوند | CSP `style-src` مانع `<style>` شده | `'unsafe-inline'` یا Nonce را اضافه کنید. |
-| Module Federation بارگذاری نمی‌شود | اختلاف React یا نسخهٔ Remote | React 19 Singleton و نسخهٔ پین‌شده را بررسی کنید. |
-| جهت/Locale اشتباه | `locale` و `dir` ناسازگار | `dir` را صریح بدهید یا از Locale پشتیبانی‌شده استفاده کنید. |
-| پس از حذف Route دوباره Mount می‌شود | عدم فراخوانی `unmount` | در Cleanup مربوط به Framework، `mounted.unmount()` را صدا بزنید. |
+| نشانه                                          | علت احتمالی                                      | راه‌حل                                                                |
+| ---------------------------------------------- | ------------------------------------------------ | --------------------------------------------------------------------- |
+| هیچ چیز رندر نمی‌شود                           | Bundle بارگذاری نشده یا CSP اسکریپت را بلاک کرده | ترتیب `<script type="module">` را بررسی و `script-src` را اصلاح کنید. |
+| `client-id لازم است.`                          | Attribute `client-id` خالی است                   | مقدار را از Config اپ بدهید.                                          |
+| `module باید user-management یا account باشد.` | المان عمومی بدون `module` معتبر                  | `module` را روی `<on4net-idpn-mfe>` تنظیم کنید.                       |
+| `IdpnMfeConfig.accessToken is not allowed`     | توکن به SDK پاس شده                              | فقط `getAccessToken` در حالت SPA بدهید.                               |
+| خطای 401                                       | نشست BFF وجود ندارد                              | کاربر را به `/login` بفرستید؛ Getter توکن را بررسی کنید.              |
+| خطای 403                                       | نقش ادمین اپ یا `clientId` نادرست                | `clientId` و Scope `idp.client-admin` را بررسی کنید.                  |
+| استایل‌ها اعمال نمی‌شوند                       | CSP `style-src` مانع `<style>` شده               | `'unsafe-inline'` یا Nonce را اضافه کنید.                             |
+| Module Federation بارگذاری نمی‌شود             | اختلاف React یا نسخهٔ Remote                     | React 19 Singleton و نسخهٔ پین‌شده را بررسی کنید.                     |
+| جهت/Locale اشتباه                              | `locale` و `dir` ناسازگار                        | `dir` را صریح بدهید یا از Locale پشتیبانی‌شده استفاده کنید.           |
+| پس از حذف Route دوباره Mount می‌شود            | عدم فراخوانی `unmount`                           | در Cleanup مربوط به Framework، `mounted.unmount()` را صدا بزنید.      |
 
 ## 10. چک‌لیست اتصال
 

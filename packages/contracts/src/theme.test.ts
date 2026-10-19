@@ -1,0 +1,219 @@
+import { describe, expect, it } from 'vitest';
+
+import {
+  IDPN_THEME_COLOR_KEYS,
+  IDPN_THEME_FONT_KEYS,
+  idpnThemeSchema,
+  idpnThemeToCssVariables,
+  sanitizeIdpnColor,
+  sanitizeIdpnFont,
+  sanitizeIdpnRadius,
+  sanitizeIdpnTheme,
+} from './theme.js';
+
+describe('theme color validation', () => {
+  it.each([
+    ['#0f766e', '#0f766e'],
+    ['  #0F766E  ', '#0f766e'],
+    ['#fff', '#fff'],
+    ['#11223344', '#11223344'],
+    ['rgb(15, 118, 110)', 'rgb(15, 118, 110)'],
+    ['rgba(15, 118, 110, 0.5)', 'rgba(15, 118, 110, 0.5)'],
+    ['rgb(15 118 110 / 50%)', 'rgb(15 118 110 / 50%)'],
+    ['hsl(174 84% 24%)', 'hsl(174 84% 24%)'],
+    ['hsla(174, 84%, 24%, 0.8)', 'hsla(174, 84%, 24%, 0.8)'],
+    ['oklch(0.48 0.11 190)', 'oklch(0.48 0.11 190)'],
+    ['oklch(48% 0.11 190 / 90%)', 'oklch(48% 0.11 190 / 90%)'],
+    ['transparent', 'transparent'],
+    ['WHITE', 'white'],
+    ['currentColor', 'currentcolor'],
+  ])('accepts %s', (input, expected) => {
+    expect(sanitizeIdpnColor(input)).toBe(expected);
+  });
+
+  it.each([
+    'red',
+    'rgb(300, 0, 0)',
+    'rgb(0 0 0 / 2)',
+    'hsl(10 120% 50%)',
+    'oklch(1.2 0.1 190)',
+    '#12345',
+    '8px',
+    'transparent; background: url(https://evil.example/x)',
+    'red; } body { display: none',
+    'url(javascript:alert(1))',
+    'expression(alert(1))',
+    'javascript:alert(1)',
+    'var(--primary)',
+    'red !important',
+    '"red"',
+    "'red'",
+    'red\n',
+    '#'.padEnd(120, 'a'),
+    '<script>alert(1)</script>',
+  ])('rejects %s', (input) => {
+    expect(sanitizeIdpnColor(input)).toBeUndefined();
+  });
+
+  it('rejects non-string values', () => {
+    expect(sanitizeIdpnColor(null)).toBeUndefined();
+    expect(sanitizeIdpnColor(42)).toBeUndefined();
+    expect(sanitizeIdpnColor({ color: 'red' })).toBeUndefined();
+  });
+});
+
+describe('theme radius validation', () => {
+  it.each(['0', '0px', '8px', '0.625rem', '12em', '50%'])('accepts %s', (input) => {
+    expect(sanitizeIdpnRadius(input)).toBe(input);
+  });
+
+  it.each([
+    '-4px',
+    '8',
+    '8 px',
+    'calc(1rem + 2px)',
+    '8px; color: red',
+    '99999px',
+    '8px !important',
+  ])('rejects %s', (input) => {
+    expect(sanitizeIdpnRadius(input)).toBeUndefined();
+  });
+});
+
+describe('theme font validation', () => {
+  it.each([
+    ['Vazirmatn', 'vazirmatn'],
+    ["'Inter'", 'inter'],
+    ['system-ui', 'system'],
+    ['SANS-SERIF', 'system'],
+  ])('maps %s to an allowlisted stack', (input, expected) => {
+    expect(sanitizeIdpnFont(input)).toBe(expected);
+  });
+
+  it.each([
+    'Arial',
+    'Inter; color: red',
+    'url(https://evil.example/f.woff)',
+    'Vazirmatn, sans-serif',
+  ])('rejects %s', (input) => {
+    expect(sanitizeIdpnFont(input)).toBeUndefined();
+  });
+});
+
+describe('sanitizeIdpnTheme', () => {
+  it('keeps valid fields, drops invalid and unknown fields', () => {
+    const sanitized = sanitizeIdpnTheme({
+      primary: '#0F766E',
+      background: 'not-a-color',
+      primaryForeground: 'white',
+      radius: '8px',
+      fontFamily: { rtl: 'Vazirmatn', ltr: 'Arial' },
+      dark: { background: '#000000', primary: 'url(javascript:alert(1))' },
+      unknownToken: '#123456',
+      '--primary': '#123456',
+    });
+
+    expect(sanitized).toEqual({
+      primary: '#0f766e',
+      primaryForeground: 'white',
+      radius: '8px',
+      fontFamily: { rtl: 'vazirmatn' },
+      dark: { background: '#000000' },
+    });
+  });
+
+  it('returns an empty theme for non-object input', () => {
+    expect(sanitizeIdpnTheme(null)).toEqual({});
+    expect(sanitizeIdpnTheme('primary=red')).toEqual({});
+    expect(sanitizeIdpnTheme(['#fff'])).toEqual({});
+  });
+
+  it('drops empty nested objects', () => {
+    expect(sanitizeIdpnTheme({ fontFamily: { ltr: 'Comic Sans' }, dark: {} })).toEqual({});
+  });
+});
+
+describe('idpnThemeToCssVariables', () => {
+  it('maps only allowlisted tokens to --idpn-* variables', () => {
+    const variables = idpnThemeToCssVariables(
+      { primary: '#0f766e', radius: '8px', dark: { primary: '#5eead4' } },
+      { dir: 'ltr' },
+    );
+
+    expect(variables['--idpn-primary']).toBe('#0f766e');
+    expect(variables['--idpn-radius']).toBe('8px');
+    expect(variables['--idpn-dark-primary']).toBe('#5eead4');
+    expect(variables['--idpn-font-sans']).toContain("'Inter'");
+    expect(variables).not.toHaveProperty('--primary');
+    expect(variables).not.toHaveProperty('--radius');
+    expect(Object.keys(variables).every((name) => name.startsWith('--idpn-'))).toBe(true);
+  });
+
+  it('applies the RTL font stack for fa-IR and the LTR stack for en-US', () => {
+    const rtl = idpnThemeToCssVariables({}, { dir: 'rtl' });
+    const ltr = idpnThemeToCssVariables({}, { dir: 'ltr' });
+
+    expect(rtl['--idpn-font-sans']).toContain("'Vazirmatn'");
+    expect(ltr['--idpn-font-sans']).toContain("'Inter'");
+    expect(rtl['--idpn-font-rtl']).toContain("'Vazirmatn'");
+    expect(ltr['--idpn-font-ltr']).toContain("'Inter'");
+  });
+
+  it('honours a client font override per direction', () => {
+    const variables = idpnThemeToCssVariables(
+      { fontFamily: { rtl: 'inter', ltr: 'vazirmatn' } },
+      { dir: 'rtl' },
+    );
+
+    expect(variables['--idpn-font-sans']).toContain("'Inter'");
+    expect(variables['--idpn-font-ltr']).toContain("'Vazirmatn'");
+  });
+
+  it('never emits a malicious value', () => {
+    const variables = idpnThemeToCssVariables(
+      {
+        primary: 'red; } body { display: none',
+        background: 'url(javascript:alert(1))',
+        radius: '8px; color: red',
+        fontFamily: { rtl: 'Inter; color: red' },
+      },
+      { dir: 'rtl' },
+    );
+
+    expect(variables['--idpn-primary']).toBeUndefined();
+    expect(variables['--idpn-background']).toBeUndefined();
+    expect(variables['--idpn-radius']).toBeUndefined();
+    expect(JSON.stringify(variables)).not.toMatch(/display|url|javascript|color: red/i);
+    expect(variables['--idpn-font-sans']).toContain("'Vazirmatn'");
+  });
+
+  it('covers every semantic color key', () => {
+    expect(IDPN_THEME_COLOR_KEYS).toHaveLength(12);
+    expect(IDPN_THEME_FONT_KEYS).toEqual(['vazirmatn', 'inter', 'system']);
+  });
+});
+
+describe('idpnThemeSchema', () => {
+  it('accepts the documented public shape and strips unknown fields', () => {
+    expect(
+      idpnThemeSchema.parse({
+        primary: '#0f766e',
+        radius: '8px',
+        fontFamily: { rtl: 'vazirmatn', ltr: 'inter' },
+        dark: { background: '#0a0a0a' },
+        brand: '#123456',
+      }),
+    ).toEqual({
+      primary: '#0f766e',
+      radius: '8px',
+      fontFamily: { rtl: 'vazirmatn', ltr: 'inter' },
+      dark: { background: '#0a0a0a' },
+    });
+  });
+
+  it('rejects a malicious color or radius', () => {
+    expect(idpnThemeSchema.safeParse({ primary: 'url(javascript:alert(1))' }).success).toBe(false);
+    expect(idpnThemeSchema.safeParse({ radius: '8px; color: red' }).success).toBe(false);
+    expect(idpnThemeSchema.safeParse({ fontFamily: { rtl: 'Arial' } }).success).toBe(false);
+  });
+});

@@ -1,8 +1,12 @@
 import {
+  IDPN_THEME_COLOR_KEYS as CONTRACT_THEME_COLOR_KEYS,
+  IDPN_THEME_FONT_KEYS as CONTRACT_THEME_FONT_KEYS,
   MFE_SCHEMA_VERSION,
+  idpnThemeSchema,
   mfeConfigSchema,
   mfeEventSchema,
   mfeEventTypeSchema,
+  sanitizeIdpnTheme,
 } from '@idpn/contracts';
 import { describe, expect, it } from 'vitest';
 
@@ -13,6 +17,7 @@ import {
   type IdpnEvent,
   type IdpnMfeConfig,
 } from './contract.js';
+import { IDPN_THEME_COLOR_KEYS, IDPN_THEME_FONT_KEYS, type IdpnTheme } from './theme.js';
 import { assertIdpnMfeConfig } from './validate.js';
 import { IDPN_MFE_CONTRACT_VERSION } from './version.js';
 
@@ -76,7 +81,7 @@ describe('@idpn/mfe-sdk contract parity', () => {
         dir: { 'fa-IR': 'rtl', 'en-US': 'ltr' },
       },
       loginContext: 'default',
-      theme: { brand: '#0057b8' },
+      theme: { primary: '#0057b8', radius: '8px' },
       basename: '/account',
       features: { userManagement: true, mfa: true },
     };
@@ -100,7 +105,7 @@ describe('@idpn/mfe-sdk contract parity', () => {
         dir: { 'fa-IR': 'rtl', 'en-US': 'ltr' },
       },
       loginContext: 'default',
-      theme: { brand: '#0057b8' },
+      theme: { primary: '#0057b8' },
       basename: '/account',
       features: { mfa: true },
       getAccessToken: () => 'in-memory-token',
@@ -112,6 +117,33 @@ describe('@idpn/mfe-sdk contract parity', () => {
 
   it('covers every supported module', () => {
     expect([...IDPN_MFE_MODULES]).toEqual(['user-management', 'account']);
+  });
+
+  it('keeps the theme contract in parity with @idpn/contracts', () => {
+    expect([...IDPN_THEME_COLOR_KEYS]).toEqual([...CONTRACT_THEME_COLOR_KEYS]);
+    expect([...IDPN_THEME_FONT_KEYS]).toEqual([...CONTRACT_THEME_FONT_KEYS]);
+
+    const theme: IdpnTheme = {
+      background: '#ffffff',
+      foreground: '#0a0a0a',
+      primary: '#0f766e',
+      primaryForeground: 'white',
+      radius: '8px',
+      fontFamily: { rtl: 'vazirmatn', ltr: 'inter' },
+      dark: { background: '#0a0a0a' },
+    };
+
+    expect(idpnThemeSchema.safeParse(theme).success).toBe(true);
+    expect(idpnThemeSchema.safeParse({ primary: 'url(javascript:alert(1))' }).success).toBe(false);
+
+    const sanitized = sanitizeIdpnTheme({
+      ...theme,
+      border: 'red; } body { display: none',
+      extra: '#123456',
+    });
+    expect(sanitized).not.toHaveProperty('extra');
+    expect(sanitized).not.toHaveProperty('border');
+    expect(idpnThemeSchema.safeParse(sanitized).success).toBe(true);
   });
 
   it('keeps the Web Component DOM event name stable for hosts', () => {

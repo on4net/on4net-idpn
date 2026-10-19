@@ -12,6 +12,8 @@
  *   token getter for trusted hosts only).
  */
 
+import type { IdpnTheme } from './theme.js';
+
 export const IDPN_MFE_MODULES = ['user-management', 'account'] as const;
 export type IdpnMfeModule = (typeof IDPN_MFE_MODULES)[number];
 
@@ -32,8 +34,8 @@ export const IDPN_MFE_EVENT_TYPES = [
 ] as const;
 export type IdpnEventType = (typeof IDPN_MFE_EVENT_TYPES)[number];
 
-/** CSS custom properties the host may provide (docs/design-system.md 5). */
-export type IdpnThemeTokens = Record<string, string>;
+/** Client theme tokens mapped to `--idpn-*` variables (docs/design-system.md 5). */
+export type IdpnThemeTokens = IdpnTheme;
 
 /** Non-sensitive user shape exposed in events. */
 export interface IdpnPublicUser {
@@ -109,8 +111,8 @@ export interface IdpnMfeConfig {
   locales?: IdpnLocales;
   /** Active login context of the host route; display only, authorization is server-side. */
   loginContext?: string;
-  /** CSS custom properties mapped to `--<name>` and `--idpn-<name>` on the MFE root. */
-  theme?: IdpnThemeTokens;
+  /** Theme tokens mapped to `--idpn-*` variables on the MFE root. */
+  theme?: IdpnTheme;
   basename?: string;
   features?: IdpnFeatures;
   /**
@@ -140,7 +142,7 @@ export interface IdpnMfeElementProps extends IdpnMfeElementAttributes {
   apiBaseUrl?: string;
   getAccessToken?: () => string | null;
   onEvent?: IdpnEventHandler;
-  theme?: IdpnThemeTokens;
+  theme?: IdpnTheme;
 }
 
 /**
@@ -152,7 +154,7 @@ export interface IdpnReactModuleProps {
   apiBaseUrl?: string;
   locale?: string;
   dir?: IdpnDirection;
-  theme?: IdpnThemeTokens;
+  theme?: IdpnTheme;
   pageSize?: number;
   /** SPA mode only, `user-management` module only. */
   getAccessToken?: () => string | null;

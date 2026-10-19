@@ -1,7 +1,12 @@
 /*
- * shadcn/ui tokens for the spike. Preflight is intentionally NOT imported: the
- * MFE must not reset host styles (docs/design-system.md 7.1). Tokens live on
- * `.idpn-root` so a host keeps its own palette, radius and dark mode.
+ * shadcn/ui tokens for the MFE and Hosted UI. Preflight is intentionally NOT imported: the
+ * MFE must not reset host styles (docs/design-system.md 7.1). All tokens live on
+ * `.idpn-root` so a host keeps its own palette, radius and dark mode, and several clients
+ * can render side by side with different themes.
+ *
+ * Per-client values arrive as `--idpn-*` custom properties written by `IdpnRoot` from the
+ * sanitized public-config theme; the semantic shadcn variables below consume them. The
+ * fallbacks are the built-in light/dark palette.
  */
 @layer theme, base, components, utilities;
 @import 'tailwindcss/theme.css' layer(theme);
@@ -11,44 +16,51 @@
 @source '../';
 
 .idpn-root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
+  --background: var(--idpn-background, oklch(1 0 0));
+  --foreground: var(--idpn-foreground, oklch(0.145 0 0));
+  --card: var(--idpn-card, oklch(1 0 0));
   --card-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.48 0.11 190);
-  --primary-foreground: oklch(0.99 0 0);
-  --secondary: oklch(0.97 0 0);
+  --primary: var(--idpn-primary, oklch(0.48 0.11 190));
+  --primary-foreground: var(--idpn-primary-foreground, oklch(0.99 0 0));
+  --secondary: var(--idpn-secondary, oklch(0.97 0 0));
   --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
+  --muted: var(--idpn-muted, oklch(0.97 0 0));
   --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
+  --accent: var(--idpn-accent, oklch(0.97 0 0));
   --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --radius: 0.625rem;
+  --destructive: var(--idpn-destructive, oklch(0.577 0.245 27.325));
+  --border: var(--idpn-border, oklch(0.922 0 0));
+  --input: var(--idpn-input, oklch(0.922 0 0));
+  --ring: var(--idpn-ring, oklch(0.708 0 0));
+  --radius: var(--idpn-radius, 0.625rem);
 
+  /* Mode-aware aliases for app CSS; the configured brand values stay on `--idpn-*`. */
   --idpn-bg: var(--background);
   --idpn-fg: var(--foreground);
-  --idpn-primary: var(--primary);
   --idpn-primary-fg: var(--primary-foreground);
-  --idpn-border: var(--border);
-  --idpn-radius: var(--radius);
-  --idpn-font-sans: 'Vazirmatn', system-ui, sans-serif;
 
-  font-family: var(--idpn-font-sans);
+  font-family: var(--idpn-font-sans, 'Vazirmatn', 'Inter', system-ui, sans-serif);
   color: var(--idpn-fg);
   background-color: var(--idpn-bg);
 }
 
 .idpn-root.dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --primary: oklch(0.72 0.12 190);
-  --primary-foreground: oklch(0.205 0 0);
-  --border: oklch(1 0 0 / 12%);
-  --input: oklch(1 0 0 / 18%);
+  --background: var(--idpn-dark-background, oklch(0.145 0 0));
+  --foreground: var(--idpn-dark-foreground, oklch(0.985 0 0));
+  --card: var(--idpn-dark-card, oklch(0.205 0 0));
+  --card-foreground: oklch(0.985 0 0);
+  --primary: var(--idpn-dark-primary, oklch(0.72 0.12 190));
+  --primary-foreground: var(--idpn-dark-primary-foreground, oklch(0.205 0 0));
+  --secondary: var(--idpn-dark-secondary, oklch(0.269 0 0));
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: var(--idpn-dark-muted, oklch(0.269 0 0));
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: var(--idpn-dark-accent, oklch(0.371 0 0));
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: var(--idpn-dark-destructive, oklch(0.704 0.191 22.216));
+  --border: var(--idpn-dark-border, oklch(1 0 0 / 12%));
+  --input: var(--idpn-dark-input, oklch(1 0 0 / 18%));
+  --ring: var(--idpn-dark-ring, oklch(0.556 0 0));
 }
 
 @theme inline {

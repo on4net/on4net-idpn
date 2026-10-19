@@ -63,7 +63,10 @@ export function assertIdpnMfeConfig(config: IdpnMfeConfig): void {
   if (config.onEvent !== undefined && typeof config.onEvent !== 'function') {
     throw new TypeError('IdpnMfeConfig.onEvent must be a function when provided.');
   }
-  if (config.theme !== undefined && (config.theme === null || typeof config.theme !== 'object')) {
-    throw new TypeError('IdpnMfeConfig.theme must be an object of CSS custom properties.');
+  if (
+    config.theme !== undefined &&
+    (config.theme === null || typeof config.theme !== 'object' || Array.isArray(config.theme))
+  ) {
+    throw new TypeError('IdpnMfeConfig.theme must be an object of theme tokens.');
   }
 }

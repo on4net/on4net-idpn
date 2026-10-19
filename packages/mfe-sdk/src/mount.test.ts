@@ -119,10 +119,10 @@ describe('mountIdpnModule', () => {
   it('forwards theme tokens as an in-memory property', () => {
     const mounted = mountIdpnModule(
       container,
-      config({ theme: { brand: '#0057b8', radius: '0.75rem' } }),
+      config({ theme: { primary: '#0057b8', radius: '0.75rem' } }),
     );
 
-    expect(mountedElement(mounted).theme).toEqual({ brand: '#0057b8', radius: '0.75rem' });
+    expect(mountedElement(mounted).theme).toEqual({ primary: '#0057b8', radius: '0.75rem' });
     expect(mounted.element.outerHTML).not.toContain('#0057b8');
   });
 

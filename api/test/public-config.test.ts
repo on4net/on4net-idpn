@@ -110,6 +110,50 @@ describe('buildPublicClientConfig', () => {
     expect(config.theme).toEqual({});
     expect(config.defaultLoginContext).toBeUndefined();
   });
+
+  it('sanitizes hostile branding values and keeps the well-formed fields', () => {
+    const hostile: PublicClientSource = {
+      ...source,
+      branding: {
+        theme: {
+          background: '#FFFFFF',
+          foreground: 'red; } body { display: none',
+          primary: 'url(javascript:alert(1))',
+          border: 'expression(alert(1))',
+          unknownField: '#123456',
+          dark: { background: '#0a0a0a', input: 'javascript:alert(1)' },
+        },
+        primaryColor: 'rgb(15, 118, 110)',
+        radius: '12px',
+        fontFamily: { rtl: 'Vazirmatn', ltr: 'Arial' },
+      },
+    };
+
+    const config = buildPublicClientConfig(hostile, deps);
+
+    expect(config.theme).toEqual({
+      background: '#ffffff',
+      primary: 'rgb(15, 118, 110)',
+      radius: '12px',
+      fontFamily: { rtl: 'vazirmatn' },
+      dark: { background: '#0a0a0a' },
+    });
+    const serialized = JSON.stringify(config).toLowerCase();
+    for (const forbidden of ['display', 'url(', 'javascript', 'expression', 'unknownfield']) {
+      expect(serialized).not.toContain(forbidden);
+    }
+  });
+
+  it('ignores a branding theme that is not an object', () => {
+    const malformed: PublicClientSource = {
+      ...source,
+      branding: {
+        theme: 'url(javascript:alert(1))' as unknown,
+      },
+    };
+
+    expect(buildPublicClientConfig(malformed, deps).theme).toEqual({});
+  });
 });
 
 let container: StartedPostgreSqlContainer | undefined;

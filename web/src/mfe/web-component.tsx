@@ -1,4 +1,4 @@
-import { IDPN_MFE_EVENT_NAME, type IdpnEvent } from '@idpn/mfe-sdk';
+import { IDPN_MFE_EVENT_NAME, type IdpnEvent, type IdpnTheme } from '@idpn/mfe-sdk';
 import { createRoot, type Root } from 'react-dom/client';
 
 import { AccountRoot, type AccountEvent } from './account';
@@ -41,7 +41,7 @@ export class IdpnMfeElement extends HTMLElement {
 
   private accessTokenGetter?: () => string | null;
   private eventHandler?: (event: IdpnWebComponentEvent) => void;
-  private themeTokens?: Record<string, string>;
+  private themeTokens?: IdpnTheme;
 
   /** SPA mode only: must return a token held in memory (never persisted). */
   get getAccessToken(): (() => string | null) | undefined {
@@ -85,12 +85,12 @@ export class IdpnMfeElement extends HTMLElement {
     this.eventHandler?.(event);
   };
 
-  /** Host theme tokens, forwarded to the MFE root as CSS custom properties. */
-  get theme(): Record<string, string> | undefined {
+  /** Host theme tokens, forwarded to the MFE root and sanitized before reaching the DOM. */
+  get theme(): IdpnTheme | undefined {
     return this.themeTokens;
   }
 
-  set theme(value: Record<string, string> | undefined) {
+  set theme(value: IdpnTheme | undefined) {
     this.themeTokens = value;
     this.renderModule();
   }

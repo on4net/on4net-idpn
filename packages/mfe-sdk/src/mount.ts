@@ -1,9 +1,5 @@
-import type {
-  IdpnEventHandler,
-  IdpnMfeConfig,
-  IdpnMfeModule,
-  IdpnThemeTokens,
-} from './contract.js';
+import type { IdpnEventHandler, IdpnMfeConfig, IdpnMfeModule } from './contract.js';
+import type { IdpnTheme } from './theme.js';
 import { assertIdpnMfeConfig } from './validate.js';
 
 /** Custom element tag of every module, as registered by the Web Component bundle. */
@@ -27,8 +23,8 @@ export interface IdpnMfeElement extends HTMLElement {
   getAccessToken?: () => string | null;
   /** Non-sensitive module events. Never carries a token. */
   onEvent?: IdpnEventHandler;
-  /** CSS custom properties forwarded to the MFE root. */
-  theme?: IdpnThemeTokens;
+  /** Theme tokens forwarded to the MFE root as `--idpn-*` variables. */
+  theme?: IdpnTheme;
 }
 
 /** Handle returned by {@link mountIdpnModule}. */

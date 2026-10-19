@@ -4,7 +4,7 @@ import type {
   IdpnMfeConfig,
   IdpnMfeMode,
   IdpnMfeModule,
-  IdpnThemeTokens,
+  IdpnTheme,
 } from '@idpn/mfe-sdk';
 
 /**
@@ -21,7 +21,7 @@ export interface HostModuleSettings {
   readonly apiBaseUrl: string;
   readonly locale: string;
   readonly dir: IdpnDirection;
-  readonly theme?: IdpnThemeTokens;
+  readonly theme?: IdpnTheme;
   readonly onEvent: IdpnEventHandler;
   /** SPA mode only; returns a token held in host memory. */
   readonly getAccessToken?: () => string | null;

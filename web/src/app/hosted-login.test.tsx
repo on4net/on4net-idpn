@@ -206,9 +206,31 @@ describe('HostedLoginPage', () => {
     const root = screen.getByTestId('idpn-root');
     expect(root).toHaveAttribute('dir', 'ltr');
     expect(root).toHaveAttribute('data-client-id', 'app-a');
-    expect(root.style.getPropertyValue('--primary')).toBe('#123456');
     expect(root.style.getPropertyValue('--idpn-primary')).toBe('#123456');
+    expect(root.style.getPropertyValue('--idpn-radius')).toBe('4px');
+    expect(root.style.getPropertyValue('--idpn-font-sans')).toContain("'Inter'");
     expect(screen.getByRole('heading', { name: 'Sign in' })).toBeInTheDocument();
+  });
+
+  it('drops malicious theme values from the public config', async () => {
+    const fetchConfig = vi.fn().mockResolvedValue({
+      locale: 'fa-IR',
+      locales: { default: 'fa-IR', supported: ['fa-IR'] },
+      theme: {
+        primary: 'red; } body { display: none',
+        background: 'url(javascript:alert(1))',
+        radius: '4px; color: red',
+      },
+    });
+
+    render(<HostedLoginPage search="?client_id=app-a" fetchConfig={fetchConfig} />);
+
+    expect(await screen.findByTestId('public-config-loaded')).toBeInTheDocument();
+    const root = screen.getByTestId('idpn-root');
+    expect(root.style.getPropertyValue('--idpn-primary')).toBe('');
+    expect(root.style.getPropertyValue('--idpn-background')).toBe('');
+    expect(root.style.getPropertyValue('--idpn-radius')).toBe('');
+    expect(root.getAttribute('style')).not.toMatch(/javascript|color: red|body/i);
   });
 
   it('falls back to defaults when the public config is unavailable', async () => {
@@ -498,7 +520,9 @@ describe('HostedLoginPage', () => {
     render(<HostedLoginPage search="?client_id=app-a" navigate={vi.fn()} />);
 
     expect(await screen.findByTestId('public-config-loaded')).toBeInTheDocument();
-    expect(screen.getByTestId('idpn-root').style.getPropertyValue('--primary')).toBe('#abcdef');
+    expect(screen.getByTestId('idpn-root').style.getPropertyValue('--idpn-primary')).toBe(
+      '#abcdef',
+    );
 
     await user.type(screen.getByLabelText('ایمیل یا نام کاربری'), 'sara');
     await user.type(screen.getByLabelText('رمز عبور'), 'a-very-long-password');

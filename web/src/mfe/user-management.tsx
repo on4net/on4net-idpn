@@ -1,3 +1,4 @@
+import type { IdpnTheme } from '@idpn/mfe-sdk';
 import * as React from 'react';
 
 import { IdpnRoot, usePortalContainer } from '@/app/idpn-root';
@@ -621,8 +622,8 @@ export function UserManagement({
 }
 
 export interface UserManagementRootProps extends UserManagementProps {
-  /** CSS custom properties forwarded to the shared MFE root (docs/design-system.md 5). */
-  theme?: Record<string, string>;
+  /** Client theme tokens forwarded to the shared MFE root (docs/design-system.md 5). */
+  theme?: IdpnTheme;
 }
 
 /**
