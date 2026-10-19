@@ -595,15 +595,18 @@ export function Account({
   );
 }
 
-export type AccountRootProps = AccountProps;
+export interface AccountRootProps extends AccountProps {
+  /** CSS custom properties forwarded to the shared MFE root (docs/design-system.md 5). */
+  theme?: Record<string, string>;
+}
 
 /**
  * Self-contained entry point for hosts: owns `.idpn-root`, direction and portal container.
  */
-export function AccountRoot({ locale = 'fa-IR', dir, ...props }: AccountRootProps) {
+export function AccountRoot({ locale = 'fa-IR', dir, theme, ...props }: AccountRootProps) {
   const activeLocale: Locale = resolveLocale(locale);
   return (
-    <IdpnRoot locale={activeLocale} dir={dir ?? directionOf(activeLocale)}>
+    <IdpnRoot locale={activeLocale} dir={dir ?? directionOf(activeLocale)} theme={theme}>
       <Account {...props} locale={activeLocale} {...(dir === undefined ? {} : { dir })} />
     </IdpnRoot>
   );

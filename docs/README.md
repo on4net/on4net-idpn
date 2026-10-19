@@ -110,6 +110,7 @@
 |---|---|
 | [architecture.md](./architecture.md) | معماری اجزا، جریان SSO، استقرار، الزامات غیرعملکردی، استک |
 | [micro-frontend.md](./micro-frontend.md) | معماری میکرو-فرانت‌اند، Module Federation/Web Component، قرارداد Config/Event، نسخه‌بندی |
+| [mfe-sdk.md](./mfe-sdk.md) | بسته `@idpn/mfe-sdk`، نصب و اتصال، مثال React/Vue/HTML، امنیت BFF/SPA، CSP، نسخه‌بندی و عیب‌یابی |
 | [design-system.md](./design-system.md) | shadcn/ui، توکن‌ها، RTL، ایزولاسیون Tailwind در MFE و Governance |
 | [localization.md](./localization.md) | چندزبانه per-app: تعیین زبان، Override متن، RTL، تاریخ و اعداد |
 | [login-contexts.md](./login-contexts.md) | چند مدل ورود در یک اپ: مدل داده، جریان، نقش‌ها و امنیت |

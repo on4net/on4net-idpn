@@ -620,7 +620,10 @@ export function UserManagement({
   );
 }
 
-export type UserManagementRootProps = UserManagementProps;
+export interface UserManagementRootProps extends UserManagementProps {
+  /** CSS custom properties forwarded to the shared MFE root (docs/design-system.md 5). */
+  theme?: Record<string, string>;
+}
 
 /**
  * Self-contained entry point for hosts: owns `.idpn-root`, direction and portal container so
@@ -629,10 +632,11 @@ export type UserManagementRootProps = UserManagementProps;
 export function UserManagementRoot({
   locale = 'fa-IR',
   dir = 'rtl',
+  theme,
   ...props
 }: UserManagementRootProps) {
   return (
-    <IdpnRoot locale={locale} dir={dir}>
+    <IdpnRoot locale={locale} dir={dir} theme={theme}>
       <UserManagement {...props} locale={locale} dir={dir} />
     </IdpnRoot>
   );

@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+    "baseUrl": ".",
+    "paths": {
+      "@idpn/contracts": ["../contracts/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*.ts", "vitest.config.ts"]
+}

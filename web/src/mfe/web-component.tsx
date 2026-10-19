@@ -1,29 +1,97 @@
 import { createRoot, type Root } from 'react-dom/client';
 
+import { AccountRoot, type AccountEvent } from './account';
 import { UserManagementRoot, type UserManagementEvent } from './user-management';
 import styles from '@/styles/globals.css?inline';
 
-const ELEMENT_NAME = 'on4net-idpn-user-management';
+/** Modules embedded through the Web Component bundle (docs/micro-frontend.md 3). */
+export type IdpnWebComponentModule = 'user-management' | 'account';
+
+type IdpnWebComponentEvent = UserManagementEvent | AccountEvent;
+
+export const USER_MANAGEMENT_ELEMENT_NAME = 'on4net-idpn-user-management';
+export const ACCOUNT_ELEMENT_NAME = 'on4net-idpn-account';
+export const MFE_ELEMENT_NAME = 'on4net-idpn-mfe';
+
+/** Default module per tag; the generic tag requires the `module` attribute. */
+const DEFAULT_MODULE_BY_TAG: Readonly<Record<string, IdpnWebComponentModule>> = {
+  [USER_MANAGEMENT_ELEMENT_NAME]: 'user-management',
+  [ACCOUNT_ELEMENT_NAME]: 'account',
+};
+
+const isModuleName = (value: string | null): value is IdpnWebComponentModule =>
+  value === 'user-management' || value === 'account';
 
 /**
- * Non-React host entry point. Everything (styles, tokens, portals) lives inside a
- * Shadow Root, so a Vue/Angular/legacy host cannot leak CSS into the module or
- * receive MFE styles on its own elements.
+ * Non-React host entry point for both embedded modules. Everything (styles, tokens,
+ * portals) lives inside a Shadow Root, so a Vue/Angular/legacy host cannot leak CSS into
+ * the module or receive MFE styles on its own elements.
  *
- * `client-id` is configuration owned by the host; the access token (SPA mode only) is
- * provided through an in-memory getter, never through an attribute.
+ * - `<on4net-idpn-user-management>` — legacy tag, still defaults to `user-management`.
+ * - `<on4net-idpn-account>` — defaults to `account`.
+ * - `<on4net-idpn-mfe module="…">` — explicit module selection.
+ *
+ * The `module` attribute/property overrides the tag default. `client-id` is configuration
+ * owned by the host; the access token (SPA mode only) is provided through an in-memory
+ * getter, never through an attribute.
  */
-export class IdpnUserManagementElement extends HTMLElement {
-  static observedAttributes = ['client-id', 'locale', 'dir', 'api-base', 'page-size'];
+export class IdpnMfeElement extends HTMLElement {
+  static observedAttributes = ['client-id', 'locale', 'dir', 'api-base', 'page-size', 'module'];
+
+  private accessTokenGetter?: () => string | null;
+  private eventHandler?: (event: IdpnWebComponentEvent) => void;
+  private themeTokens?: Record<string, string>;
 
   /** SPA mode only: must return a token held in memory (never persisted). */
-  getAccessToken?: () => string | null;
+  get getAccessToken(): (() => string | null) | undefined {
+    return this.accessTokenGetter;
+  }
+
+  set getAccessToken(value: (() => string | null) | undefined) {
+    this.accessTokenGetter = value;
+    this.renderModule();
+  }
 
   /** Non-sensitive module events; never contains a token. */
-  onEvent?: (event: UserManagementEvent) => void;
+  get onEvent(): ((event: IdpnWebComponentEvent) => void) | undefined {
+    return this.eventHandler;
+  }
 
+  set onEvent(value: ((event: IdpnWebComponentEvent) => void) | undefined) {
+    this.eventHandler = value;
+    this.renderModule();
+  }
+
+  /** Host theme tokens, forwarded to the MFE root as CSS custom properties. */
+  get theme(): Record<string, string> | undefined {
+    return this.themeTokens;
+  }
+
+  set theme(value: Record<string, string> | undefined) {
+    this.themeTokens = value;
+    this.renderModule();
+  }
+
+  private moduleOverride: IdpnWebComponentModule | null = null;
   private root: Root | null = null;
   private mountPoint: HTMLDivElement | null = null;
+
+  /** Selected module; attribute/property override first, then the tag default. */
+  get module(): IdpnWebComponentModule | null {
+    if (this.moduleOverride !== null) {
+      return this.moduleOverride;
+    }
+    const attribute = this.getAttribute('module');
+    if (isModuleName(attribute)) {
+      return attribute;
+    }
+    return DEFAULT_MODULE_BY_TAG[this.tagName.toLowerCase()] ?? null;
+  }
+
+  set module(value: IdpnWebComponentModule | null) {
+    this.moduleOverride = isModuleName(value) ? value : null;
+    this.renderModule();
+  }
 
   connectedCallback(): void {
     const shadow = this.shadowRoot ?? this.attachShadow({ mode: 'open' });
@@ -63,9 +131,37 @@ export class IdpnUserManagementElement extends HTMLElement {
       return;
     }
 
+    const moduleName = this.module;
+    if (moduleName === null) {
+      this.root.render(
+        <p dir="rtl" role="alert">
+          module باید user-management یا account باشد.
+        </p>,
+      );
+      return;
+    }
+
     const locale = this.getAttribute('locale') ?? 'fa-IR';
-    const dir = this.getAttribute('dir') === 'ltr' ? 'ltr' : 'rtl';
+    const dirAttribute = this.getAttribute('dir');
+    const dir = dirAttribute === 'ltr' || dirAttribute === 'rtl' ? dirAttribute : undefined;
     const apiBaseUrl = this.getAttribute('api-base') ?? undefined;
+    const theme = this.theme;
+    const onEvent = this.onEvent;
+
+    if (moduleName === 'account') {
+      this.root.render(
+        <AccountRoot
+          clientId={clientId}
+          locale={locale}
+          {...(dir === undefined ? {} : { dir })}
+          {...(apiBaseUrl === undefined ? {} : { apiBaseUrl })}
+          {...(theme === undefined ? {} : { theme })}
+          {...(onEvent === undefined ? {} : { onEvent })}
+        />,
+      );
+      return;
+    }
+
     const parsedPageSize = Number(this.getAttribute('page-size'));
     const pageSize =
       Number.isInteger(parsedPageSize) && parsedPageSize > 0 ? parsedPageSize : undefined;
@@ -74,16 +170,29 @@ export class IdpnUserManagementElement extends HTMLElement {
       <UserManagementRoot
         clientId={clientId}
         locale={locale}
-        dir={dir}
+        {...(dir === undefined ? {} : { dir })}
         {...(apiBaseUrl === undefined ? {} : { apiBaseUrl })}
         {...(pageSize === undefined ? {} : { pageSize })}
+        {...(theme === undefined ? {} : { theme })}
         {...(this.getAccessToken === undefined ? {} : { getAccessToken: this.getAccessToken })}
-        {...(this.onEvent === undefined ? {} : { onEvent: this.onEvent })}
+        {...(onEvent === undefined ? {} : { onEvent })}
       />,
     );
   }
 }
 
-if (typeof customElements !== 'undefined' && customElements.get(ELEMENT_NAME) === undefined) {
-  customElements.define(ELEMENT_NAME, IdpnUserManagementElement);
-}
+/** Backwards-compatible element for `<on4net-idpn-user-management>`. */
+export class IdpnUserManagementElement extends IdpnMfeElement {}
+
+/** Element for the embedded account module. */
+export class IdpnAccountElement extends IdpnMfeElement {}
+
+const register = (name: string, element: CustomElementConstructor): void => {
+  if (typeof customElements !== 'undefined' && customElements.get(name) === undefined) {
+    customElements.define(name, element);
+  }
+};
+
+register(USER_MANAGEMENT_ELEMENT_NAME, IdpnUserManagementElement);
+register(ACCOUNT_ELEMENT_NAME, IdpnAccountElement);
+register(MFE_ELEMENT_NAME, IdpnMfeElement);
