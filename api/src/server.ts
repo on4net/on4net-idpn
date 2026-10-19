@@ -4,6 +4,8 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { registerFormBodyParser } from './http/form-body.js';
 import type { AdminRoutesOptions } from './admin/routes.js';
 import { registerAdminRoutes } from './admin/routes.js';
+import type { AuditRoutesOptions } from './admin/audit/routes.js';
+import { registerAuditAdminRoutes } from './admin/audit/routes.js';
 import type { ClientRoutesOptions } from './admin/clients/routes.js';
 import { registerClientAdminRoutes } from './admin/clients/routes.js';
 import type { RbacRoutesOptions } from './admin/rbac/routes.js';
@@ -52,6 +54,8 @@ export interface BuildServerOptions {
   rbac?: Omit<RbacRoutesOptions, 'issuer' | 'verifier'>;
   /** Mounts the client membership endpoints (docs/api.md 3.3.1). */
   adminMembers?: Omit<MemberRoutesOptions, 'issuer' | 'verifier'>;
+  /** Mounts the audit read and export endpoints (docs/api.md 3.8). */
+  audit?: Omit<AuditRoutesOptions, 'issuer' | 'verifier'>;
 }
 
 /**
@@ -140,6 +144,10 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
 
   if (options.adminMembers !== undefined) {
     registerMemberAdminRoutes(app, { ...options.adminMembers, issuer, verifier: keys });
+  }
+
+  if (options.audit !== undefined) {
+    registerAuditAdminRoutes(app, { ...options.audit, issuer, verifier: keys });
   }
 
   return app;

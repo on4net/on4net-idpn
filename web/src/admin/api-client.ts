@@ -56,6 +56,52 @@ export interface ListUsersParams {
   sort?: string;
 }
 
+export interface AdminAuditEvent {
+  id: string;
+  occurredAt: string;
+  actorType: 'user' | 'admin' | 'service' | 'system' | 'anonymous';
+  actorId: string | null;
+  action: string;
+  targetType: string | null;
+  targetId: string | null;
+  clientId: string | null;
+  ip: string | null;
+  userAgent: string | null;
+  result: 'success' | 'failure';
+  metadata: Record<string, unknown>;
+}
+
+export interface AuditEventPage {
+  items: AdminAuditEvent[];
+  page: number;
+  limit: number;
+  total: number;
+}
+
+export interface AuditEventFilters {
+  /** ISO 8601 timestamp. */
+  from?: string;
+  /** ISO 8601 timestamp. */
+  to?: string;
+  action?: string;
+  actorId?: string;
+  /** Public client id. */
+  clientId?: string;
+  targetType?: string;
+  result?: AdminAuditEvent['result'];
+}
+
+export interface ListAuditEventsParams extends AuditEventFilters {
+  page?: number;
+  limit?: number;
+}
+
+export type AuditExportFormat = 'csv' | 'ndjson';
+
+export interface ExportAuditEventsParams extends AuditEventFilters {
+  format: AuditExportFormat;
+}
+
 export interface ActionResult {
   user: AdminUser;
   revokedSessions: number;
@@ -89,6 +135,14 @@ const kindOf = (status: number): AdminApiErrorKind => {
   return 'server';
 };
 
+/** Maps an RFC 9457 problem body to the typed error used by the console. */
+const problemError = (status: number, payload: unknown): AdminApiError => {
+  const problem = payload as { detail?: unknown; title?: unknown } | null;
+  const detail = typeof problem?.detail === 'string' ? problem.detail : undefined;
+  const title = typeof problem?.title === 'string' ? problem.title : 'request failed';
+  return new AdminApiError(kindOf(status), status, title, detail);
+};
+
 export interface AdminApiOptions {
   /** API origin; empty for same-origin deployments (including the dev proxy). */
   baseUrl?: string;
@@ -105,6 +159,9 @@ export interface AdminApiClient {
   enableUser(userId: string): Promise<ActionResult>;
   unlockUser(userId: string): Promise<ActionResult>;
   resetPassword(userId: string, password?: string): Promise<ActionResult>;
+  listAuditEvents(params?: ListAuditEventsParams): Promise<AuditEventPage>;
+  /** Downloads an export, keeping the token out of the returned data. */
+  exportAuditEvents(params: ExportAuditEventsParams): Promise<Blob>;
 }
 
 export function createAdminApiClient(options: AdminApiOptions): AdminApiClient {
@@ -135,10 +192,7 @@ export function createAdminApiClient(options: AdminApiOptions): AdminApiClient {
 
     const payload: unknown = await response.json().catch((): unknown => null);
     if (!response.ok) {
-      const problem = payload as { detail?: unknown; title?: unknown } | null;
-      const detail = typeof problem?.detail === 'string' ? problem.detail : undefined;
-      const title = typeof problem?.title === 'string' ? problem.title : 'request failed';
-      throw new AdminApiError(kindOf(response.status), response.status, title, detail);
+      throw problemError(response.status, payload);
     }
     return payload as T;
   };
@@ -156,6 +210,52 @@ export function createAdminApiClient(options: AdminApiOptions): AdminApiClient {
 
   const post = (path: string, body: unknown = {}): Promise<ActionResult> =>
     call<ActionResult>(path, { method: 'POST', body: JSON.stringify(body) });
+
+  const auditQuery = (
+    params: AuditEventFilters & { page?: number; limit?: number; format?: AuditExportFormat },
+  ): string => {
+    const search = new URLSearchParams();
+    if (params.from !== undefined && params.from !== '') search.set('from', params.from);
+    if (params.to !== undefined && params.to !== '') search.set('to', params.to);
+    if (params.action !== undefined && params.action !== '') search.set('action', params.action);
+    if (params.actorId !== undefined && params.actorId !== '')
+      search.set('actorId', params.actorId);
+    if (params.clientId !== undefined && params.clientId !== '')
+      search.set('clientId', params.clientId);
+    if (params.targetType !== undefined && params.targetType !== '')
+      search.set('targetType', params.targetType);
+    if (params.result !== undefined) search.set('result', params.result);
+    if (params.page !== undefined) search.set('page', String(params.page));
+    if (params.limit !== undefined) search.set('limit', String(params.limit));
+    if (params.format !== undefined) search.set('format', params.format);
+    const serialized = search.toString();
+    return serialized === '' ? '' : `?${serialized}`;
+  };
+
+  const exportAuditEvents = async (params: ExportAuditEventsParams): Promise<Blob> => {
+    const token = options.getToken();
+    if (token === null || token === '') {
+      throw new AdminApiError('unauthorized', 401, 'not signed in');
+    }
+
+    let response: Response;
+    try {
+      response = await doFetch(`${base}/api/v1/audit-events/export${auditQuery(params)}`, {
+        headers: {
+          Accept: params.format === 'ndjson' ? 'application/x-ndjson' : 'text/csv',
+          Authorization: `Bearer ${token}`,
+        },
+      });
+    } catch {
+      throw new AdminApiError('network', 0, 'network error');
+    }
+
+    if (!response.ok) {
+      const payload: unknown = await response.json().catch((): unknown => null);
+      throw problemError(response.status, payload);
+    }
+    return response.blob();
+  };
 
   return {
     me: () => call<AdminMe>('/api/v1/me'),
@@ -186,5 +286,8 @@ export function createAdminApiClient(options: AdminApiOptions): AdminApiClient {
         `/api/v1/users/${encodeURIComponent(userId)}/reset-password`,
         password === undefined ? {} : { password },
       ),
+    listAuditEvents: (params = {}) =>
+      call<AuditEventPage>(`/api/v1/audit-events${auditQuery(params)}`),
+    exportAuditEvents,
   };
 }

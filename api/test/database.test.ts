@@ -261,9 +261,32 @@ describe('initial schema', () => {
     });
   });
 
+  it('rejects updating and deleting audit events', async () => {
+    await inTransaction(async () => {
+      const { rows } = await client.query<{ id: string }>(
+        `INSERT INTO audit_events (actor_type, action, result)
+         VALUES ('system', 'test.append_only', 'success')
+         RETURNING id`,
+      );
+      const event = rows[0];
+      if (event === undefined) {
+        throw new Error('failed to insert audit event');
+      }
+
+      await expectSqlError(
+        `UPDATE audit_events SET action = 'tampered' WHERE id = $1`,
+        [event.id],
+        '42501',
+      );
+      await expectSqlError('DELETE FROM audit_events WHERE id = $1', [event.id], '42501');
+    });
+  });
+
   it('rolls back and re-applies the migrations', async () => {
     const latest = await rollbackLatestMigration({ connectionString });
-    expect(latest).toBe('0002_assignments_nulls_not_distinct');
+    expect(latest).toBe('0003_audit_events_append_only');
+    const second = await rollbackLatestMigration({ connectionString });
+    expect(second).toBe('0002_assignments_nulls_not_distinct');
     const rolledBack = await rollbackLatestMigration({ connectionString });
     expect(rolledBack).toBe('0001_init');
 
@@ -293,7 +316,7 @@ describe('initial schema', () => {
       expect(first.clients).toBe(1);
       expect(first.users).toBe(3);
       expect(first.roles).toBe(6);
-      expect(first.permissions).toBe(27);
+      expect(first.permissions).toBe(28);
       expect(first.assignments).toBe(2);
       expect(first.rolePermissions).toBeGreaterThan(0);
     } finally {

@@ -7,6 +7,7 @@ import { createPrismaAdminClientRepository } from './admin/clients/prisma-client
 import { createPrismaPermissionReader } from './admin/prisma-permission-reader.js';
 import { createPrismaRbacRepository } from './admin/rbac/prisma-rbac-repository.js';
 import { createPrismaMemberRepository } from './admin/members/prisma-member-repository.js';
+import { createPrismaAuditEventRepository } from './admin/audit/prisma-audit-repository.js';
 import { createPrismaEffectiveAccessSource } from './oidc/effective-access.js';
 import { createPrismaAdminUserRepository } from './admin/prisma-user-repository.js';
 import { PrismaClient } from './generated/prisma/client.js';
@@ -111,6 +112,12 @@ const app = buildServer({
     adminClientId: env.ADMIN_CLIENT_ID,
     permissions: permissionReader,
     members: membersRepository,
+    audit: createPrismaAdminAudit(prisma),
+  },
+  audit: {
+    adminClientId: env.ADMIN_CLIENT_ID,
+    permissions: permissionReader,
+    events: createPrismaAuditEventRepository(prisma),
     audit: createPrismaAdminAudit(prisma),
   },
 });

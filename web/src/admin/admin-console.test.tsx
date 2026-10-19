@@ -1,7 +1,9 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
 import { AdminConsole } from '@/admin/admin-console';
+import { adminErrorMessage } from '@/admin/error-message';
 import {
   AdminApiError,
   createAdminApiClient,
@@ -45,6 +47,8 @@ function fakeClient(overrides: Partial<AdminApiClient> = {}): AdminApiClient {
       revokedSessions: 1,
       temporaryPassword: 'tmp-123',
     })),
+    listAuditEvents: vi.fn(async () => ({ items: [], page: 1, limit: 25, total: 0 })),
+    exportAuditEvents: vi.fn(async () => new Blob([''], { type: 'text/csv' })),
     ...overrides,
   };
 }
@@ -168,6 +172,25 @@ describe('AdminConsole', () => {
 
     expect(screen.getByTestId('admin-signed-out')).toBeTruthy();
     expect(client.listUsers).not.toHaveBeenCalled();
+  });
+
+  it('switches to the audit tab and loads audit events only then', async () => {
+    const client = fakeClient();
+    render(<AdminConsole client={client} locale="en-US" />);
+    await screen.findByText('Ali Rezaei');
+
+    expect(client.listAuditEvents).not.toHaveBeenCalled();
+    await userEvent
+      .setup({ pointerEventsCheck: 0 })
+      .click(screen.getByRole('tab', { name: 'Audit' }));
+
+    expect(await screen.findByTestId('admin-audit-viewer')).toBeTruthy();
+    await waitFor(() =>
+      expect(client.listAuditEvents).toHaveBeenCalledWith(
+        expect.objectContaining({ page: 1, limit: 25 }),
+      ),
+    );
+    expect(await screen.findByTestId('admin-audit-empty')).toBeTruthy();
   });
 
   it('pages forward when more users exist', async () => {
@@ -327,6 +350,121 @@ describe('createAdminApiClient', () => {
     });
     await expect(client.me()).rejects.toMatchObject({ kind: 'network' });
   });
+
+  it('lists audit events with every filter in the query string', async () => {
+    const fetchImpl = vi.fn(jsonFetch(200, { items: [], page: 2, limit: 50, total: 0 }));
+    const client = createAdminApiClient({
+      getToken: () => 'token',
+      baseUrl: 'https://api.example.com',
+      fetchImpl,
+    });
+
+    await client.listAuditEvents({
+      page: 2,
+      limit: 50,
+      from: '2026-10-01T00:00:00.000Z',
+      to: '2026-10-02T00:00:00.000Z',
+      action: 'user.login.failed',
+      actorId: '11111111-1111-4111-8111-111111111111',
+      clientId: 'app-a',
+      targetType: 'user',
+      result: 'failure',
+    });
+
+    const url = new URL((fetchImpl.mock.calls[0] as unknown as [string])[0], 'https://base');
+    expect(url.pathname).toBe('/api/v1/audit-events');
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      from: '2026-10-01T00:00:00.000Z',
+      to: '2026-10-02T00:00:00.000Z',
+      action: 'user.login.failed',
+      actorId: '11111111-1111-4111-8111-111111111111',
+      clientId: 'app-a',
+      targetType: 'user',
+      result: 'failure',
+      page: '2',
+      limit: '50',
+    });
+  });
+
+  it('omits empty audit filters from the query string', async () => {
+    const fetchImpl = vi.fn(jsonFetch(200, { items: [], page: 1, limit: 25, total: 0 }));
+    const client = createAdminApiClient({ getToken: () => 't', fetchImpl });
+    await client.listAuditEvents({
+      from: '',
+      to: '',
+      action: '',
+      actorId: '',
+      clientId: '',
+      targetType: '',
+    });
+    expect((fetchImpl.mock.calls[0] as unknown as [string])[0]).toBe('/api/v1/audit-events');
+  });
+
+  it('downloads an audit export as a blob with the bearer token', async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response('id,action\n', {
+          status: 200,
+          headers: { 'Content-Type': 'text/csv' },
+        }),
+    );
+    const client = createAdminApiClient({ getToken: () => 'token-abc', fetchImpl });
+
+    const blob = await client.exportAuditEvents({ format: 'csv', action: 'user.update' });
+
+    expect(blob.size).toBeGreaterThan(0);
+    const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('/api/v1/audit-events/export?action=user.update&format=csv');
+    const headers = init.headers as Record<string, string>;
+    expect(headers.Authorization).toBe('Bearer token-abc');
+    expect(headers.Accept).toBe('text/csv');
+  });
+
+  it('requests NDJSON exports with the matching accept header', async () => {
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response('{}\n', { status: 200, headers: { 'Content-Type': 'application/x-ndjson' } }),
+    );
+    const client = createAdminApiClient({ getToken: () => 't', fetchImpl });
+    await client.exportAuditEvents({ format: 'ndjson' });
+
+    const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('/api/v1/audit-events/export?format=ndjson');
+    expect((init.headers as Record<string, string>).Accept).toBe('application/x-ndjson');
+  });
+
+  it('maps a forbidden export to a typed error', async () => {
+    const client = createAdminApiClient({
+      getToken: () => 't',
+      fetchImpl: (async () =>
+        new Response(
+          JSON.stringify({ title: 'Forbidden', detail: 'permission idp:audit:export is required' }),
+          { status: 403, headers: { 'Content-Type': 'application/problem+json' } },
+        )) as unknown as typeof fetch,
+    });
+
+    await expect(client.exportAuditEvents({ format: 'csv' })).rejects.toMatchObject({
+      kind: 'forbidden',
+      status: 403,
+      detail: 'permission idp:audit:export is required',
+    });
+  });
+
+  it('rejects an export without a token or when the network fails', async () => {
+    await expect(
+      createAdminApiClient({ getToken: () => null }).exportAuditEvents({ format: 'csv' }),
+    ).rejects.toMatchObject({ kind: 'unauthorized' });
+
+    const offline = createAdminApiClient({
+      getToken: () => 't',
+      fetchImpl: (async () => {
+        throw new Error('offline');
+      }) as unknown as typeof fetch,
+    });
+    await expect(offline.exportAuditEvents({ format: 'csv' })).rejects.toMatchObject({
+      kind: 'network',
+    });
+  });
 });
 
 describe('AdminConsole edge states', () => {
@@ -364,6 +502,15 @@ describe('AdminConsole edge states', () => {
     expect(screen.getByText('Locked')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Previous' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
+  });
+});
+
+describe('adminErrorMessage', () => {
+  it('prefers the problem detail for non-auth API errors', () => {
+    expect(adminErrorMessage(new AdminApiError('invalid', 422, 'Bad', 'bad detail'), 'en-US')).toBe(
+      'bad detail',
+    );
+    expect(adminErrorMessage(new Error('boom'), 'en-US')).toBe('An unexpected error occurred.');
   });
 });
 

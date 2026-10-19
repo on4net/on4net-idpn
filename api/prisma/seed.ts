@@ -32,6 +32,7 @@ const BASE_PERMISSIONS = [
   { key: 'idp:session:read', description: 'View active sessions' },
   { key: 'idp:session:revoke', description: 'Revoke sessions' },
   { key: 'idp:audit:read', description: 'Read audit events' },
+  { key: 'idp:audit:export', description: 'Export audit events' },
   { key: 'idp:key:manage', description: 'Manage signing keys' },
   { key: 'idp:mfa:manage', description: 'Manage multi-factor authentication factors' },
 ] as const;
