@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
 import { IdpnRoot } from './idpn-root';
-import { HostedLoginPage } from './hosted-login';
+import { HostedLoginPage, normalizeLoginHint } from './hosted-login';
 import { LoginForm } from './login-form';
 import { directionOf, resolveLocale, translate } from '@/i18n';
 
@@ -104,6 +104,13 @@ describe('LoginForm', () => {
     expect(screen.getByRole('status')).toBeInTheDocument();
   });
 
+  it('prefills the identifier from login_hint', () => {
+    renderForm({ defaultIdentifier: 'sara@example.com' });
+
+    expect(screen.getByLabelText('ایمیل یا نام کاربری')).toHaveValue('sara@example.com');
+    expect(screen.getByLabelText('رمز عبور')).toHaveValue('');
+  });
+
   it('submits the entered credentials', async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();
@@ -121,6 +128,52 @@ describe('LoginForm', () => {
 });
 
 describe('HostedLoginPage', () => {
+  it('normalizes login hints and caps their length', () => {
+    expect(normalizeLoginHint(undefined)).toBeUndefined();
+    expect(normalizeLoginHint(null)).toBeUndefined();
+    expect(normalizeLoginHint('   ')).toBeUndefined();
+    expect(normalizeLoginHint('  sara@example.com ')).toBe('sara@example.com');
+    expect(normalizeLoginHint('x'.repeat(300))).toHaveLength(254);
+  });
+
+  it('prefills the identifier from a login_hint and submits it', async () => {
+    const user = userEvent.setup();
+    const submit = vi.fn().mockResolvedValue({ ok: true });
+
+    render(
+      <HostedLoginPage
+        search="?client_id=app-a&login_hint=sara%40example.com"
+        fetchConfig={vi.fn().mockResolvedValue(null)}
+        submit={submit}
+        navigate={vi.fn()}
+      />,
+    );
+
+    const identifier = screen.getByLabelText('ایمیل یا نام کاربری');
+    expect(identifier).toHaveValue('sara@example.com');
+
+    await user.type(screen.getByLabelText('رمز عبور'), 'a-very-long-password');
+    await user.click(screen.getByRole('button', { name: 'ورود' }));
+
+    expect(submit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        identifier: 'sara@example.com',
+        password: 'a-very-long-password',
+      }),
+    );
+  });
+
+  it('keeps the identifier editable and empty when login_hint is blank', () => {
+    render(
+      <HostedLoginPage
+        search="?client_id=app-a&login_hint=%20%20"
+        fetchConfig={vi.fn().mockResolvedValue(null)}
+      />,
+    );
+
+    expect(screen.getByLabelText('ایمیل یا نام کاربری')).toHaveValue('');
+  });
+
   it('applies the client theme and locale from the public config', async () => {
     const fetchConfig = vi.fn().mockResolvedValue({
       locale: 'fa-IR',

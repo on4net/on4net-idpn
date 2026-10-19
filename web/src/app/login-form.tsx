@@ -20,10 +20,19 @@ export interface LoginFormProps {
   dir: 'rtl' | 'ltr';
   submitting: boolean;
   errorCode: 'invalid_credentials' | 'network' | null;
+  /** Prefills the identifier from `login_hint`; the user may still change it. */
+  defaultIdentifier?: string;
   onSubmit(values: LoginFormValues): void | Promise<void>;
 }
 
-export function LoginForm({ locale, dir, submitting, errorCode, onSubmit }: LoginFormProps) {
+export function LoginForm({
+  locale,
+  dir,
+  submitting,
+  errorCode,
+  defaultIdentifier,
+  onSubmit,
+}: LoginFormProps) {
   void dir;
   const portalContainer = usePortalContainer();
   void portalContainer;
@@ -41,7 +50,7 @@ export function LoginForm({ locale, dir, submitting, errorCode, onSubmit }: Logi
     formState: { errors },
   } = useForm<LoginFormValues>({
     resolver: zodResolver(schema),
-    defaultValues: { identifier: '', password: '' },
+    defaultValues: { identifier: defaultIdentifier ?? '', password: '' },
     shouldFocusError: true,
   });
 

@@ -45,6 +45,8 @@ export interface BuildServerOptions {
     /** Hosted Auth UI used for interactive requests; defaults to `${issuer}/login`. */
     loginUrl?: string;
     isClientAdminEligible?: (userId: string, clientId: string) => Promise<boolean>;
+    /** Consent gate; defaults to granted for first-party clients. */
+    isConsentGranted?: Parameters<typeof registerAuthorizeRoute>[1]['isConsentGranted'];
   };
   /** Mounts the global Admin API user endpoints (docs/api.md 3). */
   admin?: Omit<AdminRoutesOptions, 'issuer' | 'verifier'>;
@@ -94,12 +96,16 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
         clients: options.authorize.clients,
         codes: options.token.codes,
         sessions: options.token.sessions ?? { read: async () => null },
+        ...(options.token.now === undefined ? {} : { now: options.token.now }),
         ...(options.authorize.loginUrl === undefined
           ? {}
           : { loginUrl: options.authorize.loginUrl }),
         ...(options.authorize.isClientAdminEligible === undefined
           ? {}
           : { isClientAdminEligible: options.authorize.isClientAdminEligible }),
+        ...(options.authorize.isConsentGranted === undefined
+          ? {}
+          : { isConsentGranted: options.authorize.isConsentGranted }),
       });
     }
   }

@@ -26,6 +26,21 @@ export interface HostedLoginPageProps {
 
 const DEFAULT_THEME: Record<string, string> = {};
 
+/** RFC 5321 caps a forward path at 256 octets; keep room for the `@domain` part. */
+const MAX_LOGIN_HINT_LENGTH = 254;
+
+/**
+ * `login_hint` is untrusted input from the authorize URL: it only prefills the identifier
+ * field and is never sent anywhere before the user submits the form.
+ */
+export function normalizeLoginHint(value: string | null | undefined): string | undefined {
+  if (value === null || value === undefined) {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed === '' ? undefined : trimmed.slice(0, MAX_LOGIN_HINT_LENGTH);
+}
+
 async function defaultFetchConfig(clientId: string): Promise<PublicConfigLike | null> {
   const response = await fetch(`/api/v1/clients/${encodeURIComponent(clientId)}/public-config`, {
     headers: { Accept: 'application/json' },
@@ -67,9 +82,9 @@ async function defaultSubmit(
 }
 
 /**
- * Hosted Auth UI page: reads `client_id`, `return_to` and `ui_locales`, applies the client
- * theme and renders the localized login form. No token ever reaches this page — only the
- * HttpOnly `idpn_session` cookie set by the API on success.
+ * Hosted Auth UI page: reads `client_id`, `return_to`, `ui_locales` and `login_hint`, applies
+ * the client theme and renders the localized login form. No token ever reaches this page —
+ * only the HttpOnly `idpn_session` cookie set by the API on success.
  */
 export function HostedLoginPage({
   search,
@@ -85,6 +100,7 @@ export function HostedLoginPage({
   const clientId = params.get('client_id') ?? undefined;
   const returnTo = params.get('return_to') ?? params.get('redirect_uri') ?? undefined;
   const uiLocales = params.get('ui_locales') ?? undefined;
+  const loginHint = normalizeLoginHint(params.get('login_hint'));
 
   const [config, setConfig] = React.useState<PublicConfigLike | null>(null);
   const [locale, setLocale] = React.useState<Locale>(() => resolveLocale(uiLocales));
@@ -155,6 +171,7 @@ export function HostedLoginPage({
         dir={dir}
         submitting={submitting}
         errorCode={errorCode}
+        defaultIdentifier={loginHint}
         onSubmit={handleSubmit}
       />
       {config === null ? null : <span hidden data-testid="public-config-loaded" />}

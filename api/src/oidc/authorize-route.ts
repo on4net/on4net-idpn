@@ -187,7 +187,10 @@ export function registerAuthorizeRoute(app: FastifyInstance, options: AuthorizeR
       scope: authorize.scopes,
       nonce: authorize.nonce,
       codeChallenge: authorize.codeChallenge,
-      authTime: new Date(session.createdAt),
+      // `auth_time` is the moment the user actually authenticated, which survives session
+      // rotation (docs/auth-flows.md 3.2); `createdAt` moves on rotation and would overstate
+      // how fresh the authentication is.
+      authTime: new Date(session.authTime),
       acr: session.acr,
       amr: session.amr,
       ...(authorize.loginContext === undefined ? {} : { loginContext: authorize.loginContext }),
