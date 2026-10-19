@@ -21,6 +21,8 @@ let prisma: PrismaClient;
 let user: { id: string };
 let source: ReturnType<typeof createPrismaEffectiveAccessSource>;
 let defaultMembershipId: string;
+let contextMembershipId: string;
+let membershipGatedContextKey: string;
 
 async function migrateDeploy(): Promise<void> {
   await execFileAsync(process.execPath, [PRISMA_CLI, 'migrate', 'deploy'], {
@@ -134,6 +136,8 @@ beforeAll(async () => {
     });
   const customerContext = await context('customer-admin', ['app-a:editor'], true);
   await context('empty-context', []);
+  membershipGatedContextKey = 'membership-gated';
+  await context(membershipGatedContextKey, ['app-a:editor']);
 
   const membership = (clientId: string, loginContextId: string | null, status = 'active') =>
     prisma.clientMembership.create({
@@ -147,7 +151,7 @@ beforeAll(async () => {
       },
     });
   defaultMembershipId = (await membership(appA.id, null)).id;
-  await membership(appA.id, customerContext.id);
+  contextMembershipId = (await membership(appA.id, customerContext.id)).id;
   await membership(appB.id, null);
 
   const assign = (roleId: string, expiresAt: Date | null = null) =>
@@ -227,6 +231,39 @@ describe('effective access', () => {
     });
     expect(access.roles).toEqual([]);
     expect(access.permissions).toEqual([]);
+  });
+
+  it('returns no access for a context without a membership, even when roles match', async () => {
+    const access = await source.resolve({
+      userId: user.id,
+      clientId: 'app-a',
+      loginContext: membershipGatedContextKey,
+    });
+    expect(access.roles).toEqual([]);
+    expect(access.permissions).toEqual([]);
+    expect(access.membership).toBeNull();
+  });
+
+  it('returns no access when the context membership is suspended', async () => {
+    await prisma.clientMembership.update({
+      where: { id: contextMembershipId },
+      data: { status: 'suspended' },
+    });
+    try {
+      const access = await source.resolve({
+        userId: user.id,
+        clientId: 'app-a',
+        loginContext: 'customer-admin',
+      });
+      expect(access.roles).toEqual([]);
+      expect(access.permissions).toEqual([]);
+      expect(access.membership?.status).toBe('suspended');
+    } finally {
+      await prisma.clientMembership.update({
+        where: { id: contextMembershipId },
+        data: { status: 'active' },
+      });
+    }
   });
 
   it('returns no access for an unknown context', async () => {

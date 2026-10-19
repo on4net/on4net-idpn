@@ -41,6 +41,12 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> =>
  * - `idp:*` roles/permissions are dropped unless the client is the admin panel, so an app
  *   token can never carry IdP administration data.
  * - A suspended membership yields no roles and no permissions.
+ * - A requested Login Context requires an **active** membership for that exact context;
+ *   a missing or invited membership yields no roles and no permissions (CTX-003).
+ * - Omitting the context is the deterministic legacy path: the client-wide membership
+ *   (`login_context_id IS NULL`) applies, roles are not narrowed and no `login_context`
+ *   claim is issued. Apps with contexts must always send the parameter (see
+ *   `docs/login-contexts.md` 4.1); the Hosted UI selector is tracked separately.
  */
 export function createPrismaEffectiveAccessSource(
   prisma: PrismaClient,
@@ -103,15 +109,19 @@ export function createPrismaEffectiveAccessSource(
         select: { status: true, attributes: true, loginContext: { select: { key: true } } },
       });
 
+      // A context is a hard access boundary: without an active membership for that exact
+      // context the user gets nothing, even if role assignments exist.
       const suspended = membership?.status === 'suspended';
+      const contextMembershipMissing = context !== null && membership?.status !== 'active';
+      const denied = suspended || contextMembershipMissing;
 
-      const roles = suspended
+      const roles = denied
         ? []
         : [...new Set(rolesForClient.map((role) => role.key))]
             .filter((key) => includesIdp || !key.startsWith('idp:'))
             .sort();
 
-      const permissions = suspended
+      const permissions = denied
         ? []
         : [
             ...new Set(

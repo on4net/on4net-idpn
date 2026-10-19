@@ -16,6 +16,10 @@ import {
   type ClientAuthRepository,
 } from './client-auth.js';
 import type { SigningKeyManager } from './keys.js';
+import {
+  type LoginContextAccessDecision,
+  type LoginContextAccessSource,
+} from './login-context-access.js';
 import { oauthError, type OAuthError } from './oauth-error.js';
 import {
   issueRefreshToken,
@@ -50,6 +54,13 @@ export interface TokenRouteOptions {
   isClientAdminEligible?: (userId: string, clientId: string) => Promise<boolean>;
   /** Effective roles/permissions/membership claim source (docs/domain-model.md 3.2). */
   access?: EffectiveAccessSource;
+  /**
+   * Login-context state check for context-bound codes and refresh tokens
+   * (docs/login-contexts.md 4.1, 6). When a code/token carries `login_context`, the token
+   * endpoint must verify that the context is still active and that the user's membership
+   * for it is still active; otherwise no token is issued. A missing source fails closed.
+   */
+  contextAccess?: LoginContextAccessSource;
   now?: () => Date;
 }
 
@@ -155,6 +166,20 @@ async function authorizationCodeGrant(
     return tokenError(reply, oauthError('invalid_grant', 'unknown subject'));
   }
 
+  // The code is consumed above, so a context that was disabled or a membership that was
+  // suspended between `/authorize` and this call burns the code instead of yielding a token.
+  if (exchange.record.loginContext !== undefined) {
+    const decision = await resolveContextAccess(
+      options,
+      profile.id,
+      client.clientId,
+      exchange.record.loginContext,
+    );
+    if (!decision.ok) {
+      return tokenError(reply, oauthError('access_denied', 'login context is not available'));
+    }
+  }
+
   if (
     exchange.record.scope.includes(CLIENT_ADMIN_SCOPE) &&
     options.isClientAdminEligible !== undefined &&
@@ -238,6 +263,22 @@ async function refreshTokenGrant(
     return tokenError(reply, oauthError('invalid_grant', 'unknown subject'));
   }
 
+  // A refresh token stays bound to the context it was issued for: the request cannot ask
+  // for another one, and the context/membership is re-evaluated on every rotation
+  // (docs/domain-model.md 2.6.2). A revoked context burns the family.
+  if (rotation.record.loginContext !== undefined) {
+    const decision = await resolveContextAccess(
+      options,
+      profile.id,
+      client.clientId,
+      rotation.record.loginContext,
+    );
+    if (!decision.ok) {
+      await options.refreshTokens.revokeFamily(rotation.record.familyId, at);
+      return tokenError(reply, oauthError('invalid_grant', 'refresh token is not valid'));
+    }
+  }
+
   if (
     rotation.record.scope.includes(CLIENT_ADMIN_SCOPE) &&
     options.isClientAdminEligible !== undefined &&
@@ -297,6 +338,11 @@ async function refreshTokenGrant(
     scope: rotation.record.scope,
     ttlSeconds: client.refreshTokenTtl,
     familyId: rotation.record.familyId,
+    // Without this the successor would silently lose its context binding and the next
+    // refresh would issue an unnarrowed token.
+    ...(rotation.record.loginContext === undefined
+      ? {}
+      : { loginContext: rotation.record.loginContext }),
     now: at,
   });
 
@@ -353,6 +399,22 @@ async function clientCredentialsGrant(
     expires_in: client.accessTokenTtl,
     scope: requested.join(' '),
   });
+}
+
+/**
+ * Fails closed when a context-bound token is presented but no context source is wired: an
+ * operator misconfiguration must never turn a narrowed grant into an unnarrowed one.
+ */
+async function resolveContextAccess(
+  options: TokenRouteOptions,
+  userId: string,
+  clientId: string,
+  loginContext: string,
+): Promise<LoginContextAccessDecision> {
+  if (options.contextAccess === undefined) {
+    return { ok: false, reason: 'context_not_found' };
+  }
+  return options.contextAccess.resolve({ userId, clientId, loginContext });
 }
 
 async function resolveAccess(

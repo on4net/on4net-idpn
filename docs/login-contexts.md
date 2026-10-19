@@ -163,6 +163,19 @@ sequenceDiagram
 - `login_context` هرگز از Cookie یا هدر غیرمعتبر خوانده نمی‌شود.
 - Context در `state`/Session سمت اپ ذخیره می‌شود، نه در ورودی کاربر.
 
+**رفتار قطعی وقتی پارامتر ارسال نشود (پیاده‌سازی فعلی):**
+
+- درخواست بدون `login_context` به هیچ Context مقید نمی‌شود: عضویت سراسری کلاینت
+  (`login_context_id IS NULL`) اعمال می‌شود، `allowed_roles` نقشی را فیلتر نمی‌کند و Claim
+  `login_context` صادر نمی‌شود. این رفتار برای اپ‌های تک‌Context قدیمی سازگار است.
+- اپی که Context فعال دارد باید `login_context` را همیشه و از مسیر خودش (مثل `/admin`) بفرستد.
+  انتخاب Context پیش‌فرض/صفحه انتخاب در Hosted UI کار جداگانه‌ای است؛ تا آن زمان API به‌طور
+  خودکار `is_default` را اعمال نمی‌کند تا توکن بدون انتخاب صریح، نقش‌های Context دیگری نگیرد.
+- در `/token`، برای هر Code/Refresh Token دارای `login_context`، فعال‌بودن Context و
+  `active` بودن Membership همان Context دوباره بررسی می‌شود. Context غیرفعال، Membership
+  حذف‌شده/`invited` یا `suspended` توکن جدید نمی‌دهد و Refresh Tokenهای همان خانواده باطل
+  می‌شوند. درخواست Refresh نمی‌تواند Context را عوض کند؛ مقدار توکن ذخیره‌شده مرجع است.
+
 ### 4.2 صفحه انتخاب Context
 
 - اگر اپ `login_context` نفرستد و چند Context فعال داشته باشد، Hosted UI صفحه انتخاب نمایش می‌دهد.

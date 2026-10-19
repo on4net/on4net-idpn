@@ -14,7 +14,9 @@ import { createPrismaRbacRepository } from '../src/admin/rbac/prisma-rbac-reposi
 import { PrismaClient } from '../src/generated/prisma/client.js';
 import type { AuthorizationCodeRecord } from '../src/oidc/authorization-code.js';
 import { s256Challenge } from '../src/oidc/authorization-code.js';
+import { createAuthorizeMembershipStatus } from '../src/oidc/authorize-enforcement.js';
 import { createPrismaEffectiveAccessSource } from '../src/oidc/effective-access.js';
+import { createPrismaLoginContextAccessSource } from '../src/oidc/login-context-access.js';
 import { MemorySigningKeyRepository, SigningKeyManager } from '../src/oidc/keys.js';
 import { createPrismaClientRepository } from '../src/oidc/prisma-client-repository.js';
 import { createPrismaCodeRepository } from '../src/oidc/prisma-code-repository.js';
@@ -331,8 +333,13 @@ beforeAll(async () => {
       },
       isClientAdminEligible,
       access: effectiveAccess,
+      contextAccess: createPrismaLoginContextAccessSource(prisma),
     },
-    authorize: { clients: clientsRepository, isClientAdminEligible },
+    authorize: {
+      clients: clientsRepository,
+      isClientAdminEligible,
+      membershipStatus: createAuthorizeMembershipStatus(prisma),
+    },
     userInfo: { users: usersRepository, access: effectiveAccess },
     rbac: {
       adminClientId,
@@ -1378,14 +1385,15 @@ describe('membership suspension', () => {
     expect(appBAccess.permissions).toEqual(['app-b:secret:read']);
     expect(appBAccess.membership?.status).toBe('active');
 
-    const reopened = await issueTokens(state.memberUserId, state.sessions.member, 'app-a');
-    const reopenedClaims = await verifyAccess(reopened.access_token, 'app-a');
-    expect(reopenedClaims.roles).toEqual([]);
-    expect(reopenedClaims.permissions).toEqual([]);
-    expect(reopenedClaims.membership).toMatchObject({
-      status: 'suspended',
-      attributes: { department: 'sales' },
+    // A suspended membership is denied at authorize (docs/login-contexts.md 4.1): no code
+    // is issued, so a suspended user cannot obtain an unnarrowed/empty token either.
+    const reopened = await requestAuthorization({
+      sessionId: state.sessions.member,
+      clientId: 'app-a',
+      scope: 'openid',
     });
+    expect(reopened.searchParams.get('error')).toBe('access_denied');
+    expect(reopened.searchParams.get('code')).toBeNull();
 
     await request(app.server)
       .patch(`/api/v1/clients/app-a/members/${state.memberUserId}`)

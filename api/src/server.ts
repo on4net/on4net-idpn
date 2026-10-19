@@ -165,6 +165,14 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
         ...(options.authorize.isConsentGranted === undefined
           ? {}
           : { isConsentGranted: options.authorize.isConsentGranted }),
+        // Without these two the server would validate a context key but never enforce the
+        // MFA/step-up policy or the context membership at code issuance.
+        ...(options.authorize.authenticationRequirement === undefined
+          ? {}
+          : { authenticationRequirement: options.authorize.authenticationRequirement }),
+        ...(options.authorize.membershipStatus === undefined
+          ? {}
+          : { membershipStatus: options.authorize.membershipStatus }),
         ...(options.authorize.loginRequests === undefined
           ? {}
           : { loginRequests: options.authorize.loginRequests }),

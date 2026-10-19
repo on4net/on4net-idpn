@@ -11,7 +11,12 @@ import {
 } from '../src/oidc/authorization-code.js';
 import type { ClientAuthClientRecord, ClientAuthRepository } from '../src/oidc/client-auth.js';
 import { MemorySigningKeyRepository, SigningKeyManager } from '../src/oidc/keys.js';
-import type { RefreshTokenRecord, RefreshTokenRepository } from '../src/oidc/refresh-token.js';
+import type { LoginContextAccessSource } from '../src/oidc/login-context-access.js';
+import {
+  hashRefreshToken,
+  type RefreshTokenRecord,
+  type RefreshTokenRepository,
+} from '../src/oidc/refresh-token.js';
 import { registerTokenRoute } from '../src/oidc/token-route.js';
 import type { TokenProfile } from '../src/oidc/token-claims.js';
 
@@ -140,6 +145,7 @@ interface HarnessOptions {
   now?: Date;
   sessionValid?: boolean;
   clientAdminEligible?: boolean;
+  contextAccess?: LoginContextAccessSource;
 }
 
 async function harness(options: HarnessOptions = {}) {
@@ -180,6 +186,7 @@ async function harness(options: HarnessOptions = {}) {
     },
     now: () => options.now ?? new Date('2026-10-18T12:00:00Z'),
     isClientAdminEligible: async () => options.clientAdminEligible ?? true,
+    ...(options.contextAccess === undefined ? {} : { contextAccess: options.contextAccess }),
   });
   await app.ready();
   return { app, codes, refreshTokens, keys };
@@ -188,7 +195,7 @@ async function harness(options: HarnessOptions = {}) {
 async function seedCode(
   codes: AuthorizationCodeRepository,
   scope: string[] = ['openid', 'profile'],
-  overrides: { clientId?: string; redirectUri?: string } = {},
+  overrides: { clientId?: string; redirectUri?: string; loginContext?: string } = {},
 ): Promise<string> {
   const { code } = await issueAuthorizationCode(codes, {
     clientId: overrides.clientId ?? 'spa-app',
@@ -202,9 +209,18 @@ async function seedCode(
     acr: 'urn:on4net:acr:pwd',
     amr: ['pwd'],
     now: new Date('2026-10-18T12:00:00Z'),
+    ...(overrides.loginContext === undefined ? {} : { loginContext: overrides.loginContext }),
   });
   return code;
 }
+
+const allowingContext = (loginContext: string): LoginContextAccessSource => ({
+  async resolve(input) {
+    return input.loginContext === loginContext
+      ? { ok: true, contextId: 'context-uuid' }
+      : { ok: false, reason: 'context_not_found' };
+  },
+});
 
 describe('POST /oauth2/token — authorization_code', () => {
   it('accepts the RFC 6749 form-encoded body with client_secret_basic authentication', async () => {
@@ -530,6 +546,154 @@ describe('POST /oauth2/token — refresh_token', () => {
       .expect(400)
       .expect((response) => expect(response.body.error).toBe('invalid_grant'));
 
+    await app.close();
+  });
+});
+
+describe('POST /oauth2/token — login context enforcement', () => {
+  it('fails closed for a context-bound code when no context source is wired', async () => {
+    const { app, codes } = await harness();
+    const code = await seedCode(codes, ['openid'], { loginContext: 'customer-admin' });
+
+    const response = await request(app.server)
+      .post('/oauth2/token')
+      .send({
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: 'https://spa.example.com/cb',
+        code_verifier: verifier,
+        client_id: 'spa-app',
+      })
+      .expect(400);
+
+    expect(response.body).toMatchObject({ error: 'access_denied' });
+    expect(response.body.access_token).toBeUndefined();
+    await app.close();
+  });
+
+  it('refuses a code whose context membership is suspended', async () => {
+    const { app, codes } = await harness({
+      contextAccess: {
+        async resolve() {
+          return { ok: false, reason: 'membership_suspended' };
+        },
+      },
+    });
+    const code = await seedCode(codes, ['openid'], { loginContext: 'customer-team' });
+
+    const response = await request(app.server)
+      .post('/oauth2/token')
+      .send({
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: 'https://spa.example.com/cb',
+        code_verifier: verifier,
+        client_id: 'spa-app',
+      })
+      .expect(400);
+
+    expect(response.body).toMatchObject({ error: 'access_denied' });
+    expect(response.body.access_token).toBeUndefined();
+    await app.close();
+  });
+
+  it('keeps the context claim and the context binding across two refreshes', async () => {
+    const { app, codes, keys, refreshTokens } = await harness({
+      contextAccess: allowingContext('customer-team'),
+    });
+    const code = await seedCode(codes, ['openid', 'offline_access'], {
+      loginContext: 'customer-team',
+    });
+
+    const issued = await request(app.server)
+      .post('/oauth2/token')
+      .send({
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: 'https://spa.example.com/cb',
+        code_verifier: verifier,
+        client_id: 'spa-app',
+      })
+      .expect(200);
+    const issuedClaims = await keys.verify(issued.body.access_token, {
+      issuer,
+      audience: 'spa-app',
+    });
+    expect(issuedClaims.login_context).toBe('customer-team');
+
+    // A refresh cannot move the grant to another context.
+    const first = await request(app.server)
+      .post('/oauth2/token')
+      .send({
+        grant_type: 'refresh_token',
+        refresh_token: issued.body.refresh_token,
+        client_id: 'spa-app',
+        login_context: 'customer-admin',
+      })
+      .expect(200);
+    const firstClaims = await keys.verify(first.body.access_token, {
+      issuer,
+      audience: 'spa-app',
+    });
+    expect(firstClaims.login_context).toBe('customer-team');
+    expect(
+      refreshTokens.records.get(hashRefreshToken(first.body.refresh_token))?.loginContext,
+    ).toBe('customer-team');
+
+    const second = await request(app.server)
+      .post('/oauth2/token')
+      .send({
+        grant_type: 'refresh_token',
+        refresh_token: first.body.refresh_token,
+        client_id: 'spa-app',
+      })
+      .expect(200);
+    const secondClaims = await keys.verify(second.body.access_token, {
+      issuer,
+      audience: 'spa-app',
+    });
+    expect(secondClaims.login_context).toBe('customer-team');
+    await app.close();
+  });
+
+  it('revokes the refresh family when the context is revoked', async () => {
+    let allowed = true;
+    const { app, codes, refreshTokens } = await harness({
+      contextAccess: {
+        async resolve() {
+          return allowed
+            ? { ok: true, contextId: 'context-uuid' }
+            : { ok: false, reason: 'context_disabled' };
+        },
+      },
+    });
+    const code = await seedCode(codes, ['openid', 'offline_access'], {
+      loginContext: 'customer-team',
+    });
+    const issued = await request(app.server)
+      .post('/oauth2/token')
+      .send({
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: 'https://spa.example.com/cb',
+        code_verifier: verifier,
+        client_id: 'spa-app',
+      })
+      .expect(200);
+
+    allowed = false;
+    const rejected = await request(app.server)
+      .post('/oauth2/token')
+      .send({
+        grant_type: 'refresh_token',
+        refresh_token: issued.body.refresh_token,
+        client_id: 'spa-app',
+      })
+      .expect(400);
+    expect(rejected.body).toMatchObject({ error: 'invalid_grant' });
+    expect([...refreshTokens.records.values()].every((record) => record.revokedAt !== null)).toBe(
+      true,
+    );
     await app.close();
   });
 });

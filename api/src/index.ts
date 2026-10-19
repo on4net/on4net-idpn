@@ -42,6 +42,7 @@ import {
   createAuthorizeAuthenticationRequirement,
   createAuthorizeMembershipStatus,
 } from './oidc/authorize-enforcement.js';
+import { createPrismaLoginContextAccessSource } from './oidc/login-context-access.js';
 import { createPrismaCodeRepository } from './oidc/prisma-code-repository.js';
 import { createPrismaRefreshTokenRepository } from './oidc/prisma-refresh-repository.js';
 import { createPrismaUserRepository } from './oidc/prisma-user-repository.js';
@@ -212,6 +213,8 @@ const isClientAdminEligible = async (userId: string, clientId: string): Promise<
  */
 const authorizeAuthenticationRequirement = createAuthorizeAuthenticationRequirement(mfaRepository);
 const authorizeMembershipStatus = createAuthorizeMembershipStatus(prisma);
+/** Re-checks the context and membership when a context-bound code/refresh is exchanged. */
+const loginContextAccess = createPrismaLoginContextAccessSource(prisma);
 
 const app = buildServer({
   issuer: env.APP_URL,
@@ -224,6 +227,7 @@ const app = buildServer({
     sessions,
     isClientAdminEligible,
     access: effectiveAccess,
+    contextAccess: loginContextAccess,
   },
   userInfo: { users: usersRepository, access: effectiveAccess },
   authorize: {
