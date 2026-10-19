@@ -14,6 +14,17 @@ import {
   type SetPasswordMode,
 } from '@/app/account-flows';
 import { LoginForm, type LoginFormValues } from '@/app/login-form';
+import {
+  contextAllowsPassword,
+  resolveLoginContext,
+  sanitizeLoginContexts,
+  withLoginContext,
+} from '@/app/login-context';
+import {
+  LoginContextMethodNotice,
+  LoginContextPanel,
+  LoginContextSelector,
+} from '@/app/login-context-selector';
 import { MfaForm, type MfaErrorCode, type MfaFormValues } from '@/app/mfa-form';
 import { browserPasskeyDriver, passkeysSupported, type PasskeyDriver } from '@/mfe/passkey-client';
 import {
@@ -42,7 +53,10 @@ interface PublicConfigLike {
   translationsUrl?: string;
   /** Untrusted JSON from the public-config endpoint; sanitized before it reaches the root. */
   theme?: unknown;
-  loginContexts?: { key: string; methods: string[] }[];
+  /** Untrusted context list; validated by `sanitizeLoginContexts` before rendering. */
+  loginContexts?: unknown;
+  /** Key of the context marked `is_default` on the server (active contexts only). */
+  defaultLoginContext?: string;
   socialProviders?: SocialProviderSummary[];
 }
 
@@ -595,6 +609,40 @@ export function HostedLoginPage({
   }, [configState, bundleState]);
 
   const enabledLocales = React.useMemo(() => supportedClientLocales(config), [config]);
+
+  /**
+   * Login contexts of this client. The public config only publishes `active` contexts and
+   * every entry is re-validated here, so a disabled or malformed context can never be
+   * offered (`docs/login-contexts.md` 4.2, 6).
+   */
+  const loginContexts = React.useMemo(() => sanitizeLoginContexts(config?.loginContexts), [config]);
+  /** In-page choice; `login_context` from the redirect still wins as the app's own choice. */
+  const [selectedContextKey, setSelectedContextKey] = React.useState<string | undefined>(undefined);
+  const resolution = React.useMemo(
+    () =>
+      resolveLoginContext({
+        contexts: loginContexts,
+        requestedKey: loginContext,
+        selectedKey: selectedContextKey,
+        defaultKey: config?.defaultLoginContext,
+      }),
+    [loginContexts, loginContext, selectedContextKey, config?.defaultLoginContext],
+  );
+  const activeContext = resolution.context;
+  const activeContextKey = activeContext?.key;
+
+  /**
+   * Context theme is applied over the client theme (docs/design-system.md 5.1). Both sides
+   * are sanitized tokens, so switching context never writes raw CSS and keeps the
+   * documented fallbacks.
+   */
+  const effectiveTheme = React.useMemo((): IdpnTheme => {
+    const contextTheme = activeContext?.branding?.theme;
+    if (contextTheme === undefined) {
+      return theme;
+    }
+    return sanitizeIdpnTheme({ ...(theme as Record<string, unknown>), ...contextTheme });
+  }, [theme, activeContext]);
   const requiresBundle =
     configState === 'ready' && clientId !== undefined && translationsUrl !== undefined;
   const bundleResolved =
@@ -669,13 +717,47 @@ export function HostedLoginPage({
     }
   };
 
+  /**
+   * User-driven context change. The authorize request is preserved: only `login_context`
+   * is added to the original `/oauth2/authorize` URL (`return_to`), so `state`, `nonce`,
+   * the PKCE challenge and `login_hint` survive untouched. The page URL is updated in
+   * place for deep links and no form field is remounted, so typed input is kept.
+   */
+  const changeContext = (next: string): void => {
+    const target = loginContexts.find((candidate) => candidate.key === next);
+    if (target === undefined || target.key === activeContextKey) {
+      return;
+    }
+    setSelectedContextKey(target.key);
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      url.searchParams.set('login_context', target.key);
+      const bound = withLoginContext(url.searchParams.get('return_to') ?? undefined, target.key);
+      if (bound !== undefined) {
+        url.searchParams.set('return_to', bound);
+      }
+      window.history.replaceState(
+        window.history.state,
+        '',
+        `${url.pathname}${url.search}${url.hash}`,
+      );
+    }
+    if (typeof document !== 'undefined') {
+      const detail: IdpnEvent = { type: 'context:changed', loginContext: target.key };
+      document.dispatchEvent(
+        new CustomEvent<IdpnEvent>(IDPN_MFE_EVENT_NAME, { detail, bubbles: true }),
+      );
+    }
+  };
+
   const socialProviders = selectSocialProviders(
     config?.socialProviders,
-    config?.loginContexts,
-    loginContext,
+    loginContexts,
+    activeContextKey,
   );
   const socialErrorKey = socialErrorMessageKey(socialError);
   const showSocial = socialProviders.length > 0 || socialErrorKey !== null;
+  const allowsPassword = contextAllowsPassword(activeContext);
 
   const navigateTo = (target: string): void => {
     if (navigate !== undefined) {
@@ -697,11 +779,17 @@ export function HostedLoginPage({
     setSubmitting(true);
     setErrorCode(null);
     try {
+      /**
+       * The effective context is sent with the credentials because the API resolves the
+       * context MFA policy from it, and the authorize URL is bound to the same context so
+       * the issued token carries `login_context` (docs/login-contexts.md 4.1, 6).
+       */
+      const boundReturnTo = withLoginContext(returnTo, activeContextKey);
       const result = await submit({
         ...values,
         ...(clientId === undefined ? {} : { clientId }),
-        ...(loginContext === undefined ? {} : { loginContext }),
-        ...(returnTo === undefined ? {} : { returnTo }),
+        ...(activeContextKey === undefined ? {} : { loginContext: activeContextKey }),
+        ...(boundReturnTo === undefined ? {} : { returnTo: boundReturnTo }),
       });
       if (!result.ok) {
         if (result.reason === 'mfa_required') {
@@ -786,29 +874,33 @@ export function HostedLoginPage({
   const content =
     flowView ??
     (challengeToken === null ? (
-      <LoginForm
-        locale={locale}
-        dir={dir}
-        submitting={submitting}
-        errorCode={errorCode}
-        defaultIdentifier={loginHint}
-        forgotHref={forgotHref}
-        social={
-          showSocial ? (
-            <SocialLogin
-              locale={locale}
-              clientId={clientId ?? ''}
-              providers={socialProviders}
-              loginRequest={loginRequest}
-              returnTo={returnTo}
-              loginHint={loginHint}
-              errorCode={socialError}
-              navigate={navigate}
-            />
-          ) : undefined
-        }
-        onSubmit={handleSubmit}
-      />
+      allowsPassword ? (
+        <LoginForm
+          locale={locale}
+          dir={dir}
+          submitting={submitting}
+          errorCode={errorCode}
+          defaultIdentifier={loginHint}
+          forgotHref={forgotHref}
+          social={
+            showSocial ? (
+              <SocialLogin
+                locale={locale}
+                clientId={clientId ?? ''}
+                providers={socialProviders}
+                loginRequest={loginRequest}
+                returnTo={returnTo}
+                loginHint={loginHint}
+                errorCode={socialError}
+                navigate={navigate}
+              />
+            ) : undefined
+          }
+          onSubmit={handleSubmit}
+        />
+      ) : (
+        <LoginContextMethodNotice locale={locale} dir={dir} />
+      )
     ) : (
       <MfaForm
         locale={locale}
@@ -827,17 +919,37 @@ export function HostedLoginPage({
     <IdpnRoot
       locale={locale}
       dir={dir}
-      theme={theme}
+      theme={effectiveTheme}
       data-client-id={clientId}
       data-config-state={configState}
       data-bundle-state={bundleState}
       aria-busy={showSkeleton || submitting || mfaSubmitting || passkeySubmitting}
     >
       <TranslationProvider locale={locale} messages={translations}>
-        <div className="w-full max-w-sm">
+        <div className="w-full max-w-sm" data-login-context={activeContextKey}>
           {configState === 'ready' ? (
             <LanguageSwitcher locale={locale} locales={enabledLocales} onChange={changeLocale} />
           ) : null}
+          {showSkeleton || flowView !== null ? null : (
+            <>
+              {resolution.requiresSelection && challengeToken === null && activeContextKey ? (
+                <LoginContextSelector
+                  locale={locale}
+                  dir={dir}
+                  contexts={loginContexts}
+                  value={activeContextKey}
+                  {...(config?.defaultLoginContext === undefined
+                    ? {}
+                    : { defaultKey: config.defaultLoginContext })}
+                  invalidRequested={resolution.invalidRequested}
+                  onChange={changeContext}
+                />
+              ) : null}
+              {activeContext === undefined ? null : (
+                <LoginContextPanel locale={locale} dir={dir} context={activeContext} />
+              )}
+            </>
+          )}
           {showSkeleton ? <HostedLoginSkeleton locale={locale} /> : content}
         </div>
         {config === null ? null : <span hidden data-testid="public-config-loaded" />}

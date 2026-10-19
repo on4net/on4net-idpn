@@ -17,7 +17,40 @@ export interface UiFixtureOptions {
   locale?: 'fa-IR' | 'en-US';
   /** Per-client overrides returned by `…/translations/bundle` (base keys only). */
   translations?: Record<string, string>;
+  /**
+   * Login-context shape of the public config. `multi` publishes two active contexts with
+   * branding so the selector/branding suite has a deterministic two-context client.
+   */
+  contexts?: 'single' | 'multi';
 }
+
+/** Branded context pair used by the two-context suite (docs/login-contexts.md 7.1). */
+const MULTI_CONTEXTS = [
+  {
+    key: 'customer-admin',
+    name: 'Customer admin',
+    description: 'Manages users and billing',
+    methods: ['password', 'google'],
+    mfaPolicy: 'required_all',
+    registrationPolicy: 'invite_only',
+    branding: {
+      title: 'Customer admin console',
+      logoUrl: 'https://assets.idpn.test/customer-admin.svg',
+      theme: { primary: '#0f766e' },
+    },
+  },
+  {
+    key: 'customer-team',
+    name: 'Customer team',
+    description: 'Day-to-day operations',
+    methods: ['password', 'facebook'],
+    mfaPolicy: 'optional',
+    registrationPolicy: 'self_service',
+  },
+] as const;
+
+const ADMIN_LOGO_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="6" fill="#0f766e"/></svg>';
 
 const NOW = '2026-10-19T09:00:00.000Z';
 
@@ -69,6 +102,14 @@ export async function installUiFixtures(page: Page, options: UiFixtureOptions = 
   const login = options.login ?? 'success';
   const locale = options.locale ?? 'fa-IR';
   const translations = options.translations ?? {};
+  const multi = options.contexts === 'multi';
+
+  if (multi) {
+    // Deterministic logo response: the branded header renders without touching the network.
+    await page.route('**/assets.idpn.test/customer-admin.svg', (route) =>
+      route.fulfill({ status: 200, contentType: 'image/svg+xml', body: ADMIN_LOGO_SVG }),
+    );
+  }
 
   await page.route('**/api/v1/**', async (route) => {
     const request = route.request();
@@ -86,8 +127,16 @@ export async function installUiFixtures(page: Page, options: UiFixtureOptions = 
           },
           translationsUrl: '/api/v1/clients/admin-panel/translations/bundle',
           theme: { primary: '#0057b8', radius: '8px' },
-          loginContexts: [{ key: 'default', methods: ['password'] }],
-          socialProviders: [],
+          loginContexts: multi ? MULTI_CONTEXTS : [{ key: 'default', methods: ['password'] }],
+          ...(multi
+            ? {
+                defaultLoginContext: 'customer-team',
+                socialProviders: [
+                  { provider: 'google', label: 'Google' },
+                  { provider: 'facebook', label: 'Facebook' },
+                ],
+              }
+            : { socialProviders: [] }),
         }),
       );
       return;

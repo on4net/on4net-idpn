@@ -58,6 +58,26 @@ export const registrationPolicySchema = z.enum(['invite_only', 'self_service', '
 export const loginMethodSchema = z.enum(['password', 'google', 'facebook', 'otp', 'sso']);
 export const socialProviderSchema = z.enum(['google', 'facebook']);
 
+/**
+ * Per-context presentation published to the Hosted UI (docs/design-system.md 5.1).
+ *
+ * `title` is plain text and `logoUrl` must be an `http(s)` URL; `theme` is the same token
+ * schema as the client theme, so a context can restyle the page without shipping CSS.
+ * All fields are optional so a context without branding keeps the client look.
+ */
+export const loginContextBrandingSchema = z
+  .object({
+    title: z.string().min(1).max(120).optional(),
+    logoUrl: z
+      .string()
+      .url()
+      .max(2048)
+      .refine((value) => /^https?:\/\//i.test(value), 'must be an http(s) URL')
+      .optional(),
+    theme: idpnThemeSchema.optional(),
+  })
+  .strict();
+
 export const loginContextSummarySchema = z
   .object({
     key: z.string().min(1),
@@ -65,6 +85,9 @@ export const loginContextSummarySchema = z
     description: z.string().optional(),
     methods: z.array(loginMethodSchema).min(1),
     mfaPolicy: mfaPolicySchema,
+    /** Messaging on the Hosted UI; the context policy is enforced server-side. */
+    registrationPolicy: registrationPolicySchema.optional(),
+    branding: loginContextBrandingSchema.optional(),
   })
   .strict();
 
@@ -131,4 +154,5 @@ export const publicClientConfigSchema = z
 
 export type PublicClientConfig = z.infer<typeof publicClientConfigSchema>;
 export type LoginContextSummary = z.infer<typeof loginContextSummarySchema>;
+export type LoginContextBranding = z.infer<typeof loginContextBrandingSchema>;
 export type LocaleBundle = z.infer<typeof localeBundleSchema>;

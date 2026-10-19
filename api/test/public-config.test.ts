@@ -40,6 +40,12 @@ const source: PublicClientSource = {
       description: 'مدیریت کاربران',
       methods: ['password', 'google', 'unknown-method'],
       mfaPolicy: 'required_all',
+      registrationPolicy: 'invite_only',
+      branding: {
+        title: 'پنل مدیر مشتری',
+        logoUrl: 'https://app-a.example.com/admin.svg',
+        theme: { primary: '#0f766e', unknownField: '#000000' },
+      },
     },
   ],
   socialProviders: [
@@ -66,6 +72,63 @@ describe('buildPublicClientConfig', () => {
       { provider: 'google', label: 'Google' },
       { provider: 'facebook', label: 'Facebook' },
     ]);
+  });
+
+  it('publishes only the documented context branding and registration policy', () => {
+    const config = buildPublicClientConfig(source, deps);
+
+    expect(config.loginContexts[0]).toMatchObject({
+      key: 'customer-admin',
+      registrationPolicy: 'invite_only',
+      branding: {
+        title: 'پنل مدیر مشتری',
+        logoUrl: 'https://app-a.example.com/admin.svg',
+        theme: { primary: '#0f766e' },
+      },
+    });
+    // Unknown branding keys never reach the browser.
+    expect(config.loginContexts[0]?.branding?.theme).not.toHaveProperty('unknownField');
+  });
+
+  it('drops hostile or unsafe context branding values', () => {
+    const hostile: PublicClientSource = {
+      ...source,
+      loginContexts: [
+        {
+          ...source.loginContexts[0]!,
+          branding: {
+            title: 'Admin\u0000Portal',
+            logoUrl: 'javascript:alert(1)',
+            theme: { primary: 'url(javascript:alert(1))', background: '#111111' },
+            allowedRoles: ['app-a:admin'],
+            rawCss: 'body { display: none }',
+          },
+        },
+      ],
+    };
+
+    const config = buildPublicClientConfig(hostile, deps);
+
+    expect(config.loginContexts[0]?.branding?.title).toBeUndefined();
+    expect(config.loginContexts[0]?.branding?.logoUrl).toBeUndefined();
+    expect(config.loginContexts[0]?.branding?.theme).toEqual({ background: '#111111' });
+    const serialized = JSON.stringify(config).toLowerCase();
+    for (const forbidden of ['javascript', 'allowedroles', 'rawcss', 'display']) {
+      expect(serialized).not.toContain(forbidden);
+    }
+  });
+
+  it('omits context branding when nothing valid is stored', () => {
+    for (const branding of ['url(javascript:alert(1))', 42, ['title'], { title: '  ' }]) {
+      const malformed: PublicClientSource = {
+        ...source,
+        loginContexts: [{ ...source.loginContexts[0]!, branding }],
+      };
+
+      expect(buildPublicClientConfig(malformed, deps).loginContexts[0]).not.toHaveProperty(
+        'branding',
+      );
+    }
   });
 
   it('omits a default context key that is not among the active contexts', () => {

@@ -12,12 +12,22 @@ import {
   type Locale,
 } from '@idpn/i18n/locale';
 
+export interface PublicLoginContextBranding {
+  title?: string;
+  logoUrl?: string;
+  /** Sanitized theme tokens; raw branding JSON never reaches the browser. */
+  theme?: Record<string, unknown>;
+}
+
 export interface PublicLoginContext {
   key: string;
   name: string;
   description?: string | null;
   methods: string[];
   mfaPolicy: 'optional' | 'required_admins' | 'required_all';
+  registrationPolicy?: 'invite_only' | 'self_service' | 'disabled';
+  /** Optional presentation override; raw admin JSON, sanitized by the builder (docs/design-system.md 5.1). */
+  branding?: unknown;
 }
 
 export interface PublicSocialProvider {
@@ -70,6 +80,68 @@ function isLoginMethod(
   method: string,
 ): method is 'password' | 'google' | 'facebook' | 'otp' | 'sso' {
   return LOGIN_METHODS.has(method);
+}
+
+/** Bounds of the context presentation fields (docs/api.md 2.7). */
+const MAX_CONTEXT_TITLE_LENGTH = 120;
+const MAX_CONTEXT_LOGO_URL_LENGTH = 2048;
+
+/** Newlines/tabs in a title would break the single-line header; reject them outright. */
+function hasControlCharacters(value: string): boolean {
+  for (const character of value) {
+    const code = character.codePointAt(0) ?? 0;
+    if (code < 0x20 || code === 0x7f) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Context `branding` is admin-authored JSON and is not shape-validated on write, so only
+ * the documented presentation fields are copied: a plain-text title, an `http(s)` logo URL
+ * and theme tokens sanitized by the shared contract. Anything else is dropped, so a stored
+ * `url(...)`, `javascript:` or unknown field can never reach the browser.
+ */
+function sanitizeContextBranding(raw: unknown): PublicLoginContextBranding | undefined {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    return undefined;
+  }
+  const source = raw as Record<string, unknown>;
+
+  const rawTitle = source['title'];
+  const title =
+    typeof rawTitle === 'string' &&
+    rawTitle.trim() !== '' &&
+    rawTitle.trim().length <= MAX_CONTEXT_TITLE_LENGTH &&
+    !hasControlCharacters(rawTitle)
+      ? rawTitle.trim()
+      : undefined;
+
+  let logoUrl: string | undefined;
+  const rawLogo = source['logoUrl'];
+  if (
+    typeof rawLogo === 'string' &&
+    rawLogo.trim() !== '' &&
+    rawLogo.trim().length <= MAX_CONTEXT_LOGO_URL_LENGTH
+  ) {
+    try {
+      const parsed = new URL(rawLogo.trim());
+      if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+        logoUrl = parsed.toString();
+      }
+    } catch {
+      // Not an absolute URL: leave the logo out instead of failing the whole config.
+    }
+  }
+
+  const theme = sanitizeIdpnTheme(source['theme']);
+  const branding: PublicLoginContextBranding = {
+    ...(title === undefined ? {} : { title }),
+    ...(logoUrl === undefined ? {} : { logoUrl }),
+    ...(Object.keys(theme).length === 0 ? {} : { theme: theme as Record<string, unknown> }),
+  };
+  return Object.keys(branding).length === 0 ? undefined : branding;
 }
 
 interface SanitizedLocales {
@@ -154,15 +226,22 @@ export function buildPublicClientConfig(
     ...(client.branding.fontFamily === undefined ? {} : { fontFamily: client.branding.fontFamily }),
   });
 
-  const loginContexts = client.loginContexts.map((context) => ({
-    key: context.key,
-    name: context.name,
-    ...(context.description === undefined || context.description === null
-      ? {}
-      : { description: context.description }),
-    methods: context.methods.filter(isLoginMethod),
-    mfaPolicy: context.mfaPolicy,
-  }));
+  const loginContexts = client.loginContexts.map((context) => {
+    const branding = sanitizeContextBranding(context.branding);
+    return {
+      key: context.key,
+      name: context.name,
+      ...(context.description === undefined || context.description === null
+        ? {}
+        : { description: context.description }),
+      methods: context.methods.filter(isLoginMethod),
+      mfaPolicy: context.mfaPolicy,
+      ...(context.registrationPolicy === undefined
+        ? {}
+        : { registrationPolicy: context.registrationPolicy }),
+      ...(branding === undefined ? {} : { branding }),
+    };
+  });
   // The client row mirrors the default context key. Only publish it when that context is
   // actually active, otherwise the UI would offer a definition that no longer exists
   // (docs/login-contexts.md 7.1).

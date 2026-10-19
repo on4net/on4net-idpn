@@ -183,6 +183,25 @@ sequenceDiagram
 - متن و ترتیب از `sort_order` و `branding` هر Context می‌آید.
 - انتخاب کاربر در `state` همان درخواست باقی می‌ماند.
 
+**رفتار پیاده‌سازی‌شده Hosted UI (پیاده‌سازی فعلی):**
+
+- Context مؤثر به این ترتیب انتخاب می‌شود: `login_context` ارسالی اپ ← انتخاب کاربر در صفحه ←
+  `defaultLoginContext` (همان `is_default` سرور) ← اولین Context فعال.
+- Context پیش‌فرض از قبل انتخاب شده است؛ کلاینت تک‌Context هیچ انتخابگری نشان نمی‌دهد.
+- انتخاب کاربر فقط `login_context` را به همان URL اصلی `/oauth2/authorize` (`return_to`) اضافه
+  می‌کند؛ `state`، `nonce`، `code_challenge` و `login_hint` دست‌نخورده می‌مانند و URL صفحه هم
+  (`login_context=`) قابل Deep-link است.
+- Context مؤثر با `POST /api/v1/login` هم ارسال می‌شود تا سیاست MFA همان Context اعمال شود؛
+  نهایتاً `/authorize` و `/token` مرجع اعتبارسنجی هستند.
+- Context نامعتبر/غیرفعال هرگز اعمال نمی‌شود؛ انتخابگر با پیام «در دسترس نیست» نمایش داده
+  می‌شود و Context پیش‌فرض انتخاب می‌ماند.
+- فقط روش‌های ورود همان Context نمایش داده می‌شود (`login_methods`): فرم رمز عبور و
+  Providerهای سوشال فیلتر می‌شوند. صفحه انتخاب فقط نمایش است؛ مرز دسترسی سمت سرور اعمال می‌شود.
+- تم Context روی تم کلاینت اعمال می‌شود (فقط توکن‌های معتبر تم؛ بدون CSS خام) و رویداد
+  `context:changed` پس از تغییر Context منتشر می‌شود.
+- جریان سوشال به `login_request` سمت سرور مقید است؛ تغییر Context در Hosted UI آن را بازنویسی
+  نمی‌کند، پس برای Binding درست، اپ باید `login_context` را از مسیر خودش در `/authorize` بفرستد.
+
 ## 5. نقش‌ها و مجوزها
 
 محاسبه مجوز مؤثر برای توکن:
@@ -235,7 +254,12 @@ filter: permission.client_id is null OR permission.client_id = context.client_id
       "description": "مدیریت کاربران و صورتحساب",
       "methods": ["password", "google"],
       "mfaPolicy": "required_all",
-      "branding": { "title": "پنل مدیر مشتری", "logoUrl": "https://app-a.../admin.svg" }
+      "registrationPolicy": "invite_only",
+      "branding": {
+        "title": "پنل مدیر مشتری",
+        "logoUrl": "https://app-a.../admin.svg",
+        "theme": { "primary": "#0f766e" }
+      }
     },
     {
       "key": "customer-team",
@@ -250,6 +274,8 @@ filter: permission.client_id is null OR permission.client_id = context.client_id
 
 - فقط Contextهای `active`.
 - هیچ `allowed_roles` یا داده حساسی منتشر نمی‌شود.
+- `branding` فقط شامل `title` (متن ساده)، `logoUrl` (فقط `http(s)`) و `theme` با توکن‌های
+  معتبر تم است؛ CSS خام، فیلد ناشناخته یا مقدار نامعتبر حذف می‌شود.
 
 ### 7.2 Admin API
 

@@ -33,6 +33,8 @@ export function createPrismaPublicConfigRepository(prisma: PrismaClient): Public
               description: true,
               loginMethods: true,
               mfaPolicy: true,
+              registrationPolicy: true,
+              branding: true,
             },
           },
           socialProviders: {
@@ -62,6 +64,8 @@ export function createPrismaPublicConfigRepository(prisma: PrismaClient): Public
           description: context.description,
           methods: context.loginMethods,
           mfaPolicy: context.mfaPolicy,
+          registrationPolicy: context.registrationPolicy,
+          ...(context.branding === null ? {} : { branding: context.branding }),
         })),
         socialProviders: row.socialProviders.map((provider) => ({
           provider: provider.provider,

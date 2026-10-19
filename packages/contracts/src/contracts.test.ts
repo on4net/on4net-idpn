@@ -35,6 +35,12 @@ const publicConfigFixture = {
       description: 'Manages users and billing',
       methods: ['password', 'google'],
       mfaPolicy: 'required_all',
+      registrationPolicy: 'invite_only',
+      branding: {
+        title: 'Customer admin console',
+        logoUrl: 'https://app-a.example.com/admin.svg',
+        theme: { primary: '#0f766e' },
+      },
     },
   ],
   defaultLoginContext: 'customer-admin',
@@ -74,6 +80,41 @@ describe('public client config contract', () => {
     });
 
     expect(result.success).toBe(false);
+  });
+
+  it('rejects context branding that is not documented or not an http(s) logo', () => {
+    const context = publicConfigFixture.loginContexts[0]!;
+    const cases = [
+      { ...context, branding: { logoUrl: 'javascript:alert(1)' } },
+      { ...context, branding: { title: 'Admin', rawCss: 'body{}' } },
+      { ...context, branding: { theme: { primary: 'url(javascript:alert(1))' } } },
+      { ...context, registrationPolicy: 'approval_required' },
+    ];
+
+    for (const loginContext of cases) {
+      expect(
+        publicClientConfigSchema.safeParse({
+          ...publicConfigFixture,
+          loginContexts: [loginContext],
+        }).success,
+      ).toBe(false);
+    }
+  });
+
+  it('accepts a context without branding or registration policy', () => {
+    const minimal = {
+      key: 'support',
+      name: 'Support',
+      methods: ['password'],
+      mfaPolicy: 'optional',
+    };
+
+    expect(
+      publicClientConfigSchema.safeParse({
+        ...publicConfigFixture,
+        loginContexts: [minimal],
+      }).success,
+    ).toBe(true);
   });
 
   it('rejects locale bundles that are not internally consistent', () => {
