@@ -2,6 +2,9 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { Redis } from 'ioredis';
 
 import { loadApiEnv } from './config/env.js';
+import { createPrismaAdminAudit } from './admin/prisma-audit.js';
+import { createPrismaPermissionReader } from './admin/prisma-permission-reader.js';
+import { createPrismaAdminUserRepository } from './admin/prisma-user-repository.js';
 import { PrismaClient } from './generated/prisma/client.js';
 import { FileSigningKeyRepository } from './oidc/file-key-repository.js';
 import { SigningKeyManager } from './oidc/keys.js';
@@ -70,6 +73,12 @@ const app = buildServer({
       remoteEntry: `${(env.MFE_PUBLIC_URL ?? env.APP_URL).replace(/\/+$/, '')}/${env.MFE_VERSION}/remoteEntry.js`,
     },
     translationsUrlTemplate: `${env.APP_URL.replace(/\/+$/, '')}/api/v1/clients/{clientId}/translations/bundle`,
+  },
+  admin: {
+    adminClientId: env.ADMIN_CLIENT_ID,
+    permissions: createPrismaPermissionReader(prisma),
+    users: createPrismaAdminUserRepository(prisma),
+    audit: createPrismaAdminAudit(prisma),
   },
 });
 

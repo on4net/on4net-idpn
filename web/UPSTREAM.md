@@ -17,7 +17,7 @@
 
 | کامپوننت | مبدأ | تاریخ | Patch محلی |
 |---|---|---|---|
-| Button | shadcn `button` | 2026-10-18 | از پکیج یکپارچه `radix-ui` استفاده می‌کند |
+| Button | shadcn `button` | 2026-10-18 | از پکیج یکپارچه `radix-ui` استفاده می‌کند؛ واریانت `destructive` طبق Upstream (2026-10-19) |
 | Input | shadcn `input` | 2026-10-18 | `aria-invalid:border-destructive` |
 | Label | shadcn `label` | 2026-10-18 | — |
 | Dialog | shadcn `dialog` | 2026-10-18 | prop `container` برای Portal داخل `.idpn-root`؛ مرکزچین با flex |

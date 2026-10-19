@@ -27,7 +27,7 @@ export default defineConfig({
   projects: [
     {
       name: 'api-chromium',
-      testMatch: 'health.spec.ts',
+      testMatch: ['health.spec.ts', 'admin/*.spec.ts'],
       use: { ...devices['Desktop Chrome'], baseURL: apiURL },
     },
     {

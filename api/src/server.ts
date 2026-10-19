@@ -2,6 +2,8 @@ import { healthResponseSchema, type HealthResponse } from '@idpn/contracts';
 import Fastify, { type FastifyInstance } from 'fastify';
 
 import { registerFormBodyParser } from './http/form-body.js';
+import type { AdminRoutesOptions } from './admin/routes.js';
+import { registerAdminRoutes } from './admin/routes.js';
 import { MemorySigningKeyRepository, SigningKeyManager } from './oidc/keys.js';
 import { registerAuthorizeRoute } from './oidc/authorize-route.js';
 import { registerOidcRoutes } from './oidc/routes.js';
@@ -32,6 +34,8 @@ export interface BuildServerOptions {
     /** Hosted Auth UI used for interactive requests; defaults to `${issuer}/login`. */
     loginUrl?: string;
   };
+  /** Mounts the global Admin API user endpoints (docs/api.md 3). */
+  admin?: Omit<AdminRoutesOptions, 'issuer' | 'verifier'>;
 }
 
 /**
@@ -96,6 +100,10 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
 
   if (options.login !== undefined) {
     registerLoginRoute(app, { ...options.login, appUrl: issuer });
+  }
+
+  if (options.admin !== undefined) {
+    registerAdminRoutes(app, { ...options.admin, issuer, verifier: keys });
   }
 
   return app;
