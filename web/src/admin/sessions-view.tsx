@@ -132,7 +132,7 @@ export function SessionsView({
     setNotice(null);
     try {
       await client.revokeSession(session.id);
-      setNotice(t('admin.sessions.revoked', { id: session.id }));
+      setNotice(t('sessions.revoked', { id: session.id }));
       await load(page, applied);
     } catch (caught) {
       setError(adminErrorMessage(caught, locale));
@@ -150,7 +150,7 @@ export function SessionsView({
   return (
     <Card dir={directionOf(locale)} lang={locale} data-testid="sessions-view">
       <CardHeader>
-        <CardTitle>{t('admin.sessions.title')}</CardTitle>
+        <CardTitle>{t('sessions.title')}</CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         {signedOut ? (
@@ -162,7 +162,7 @@ export function SessionsView({
 
         <form className="flex flex-wrap items-end gap-2" role="search" onSubmit={apply}>
           <div className="flex flex-col gap-1">
-            <Label htmlFor="sessions-user">{t('admin.sessions.userId')}</Label>
+            <Label htmlFor="sessions-user">{t('sessions.userId')}</Label>
             <Input
               id="sessions-user"
               value={filters.userId}
@@ -172,7 +172,7 @@ export function SessionsView({
             />
           </div>
           <div className="flex flex-col gap-1">
-            <Label htmlFor="sessions-client">{t('admin.sessions.clientId')}</Label>
+            <Label htmlFor="sessions-client">{t('sessions.clientId')}</Label>
             <Input
               id="sessions-client"
               value={filters.clientId}
@@ -182,27 +182,27 @@ export function SessionsView({
             />
           </div>
           <div className="flex flex-col gap-1">
-            <Label htmlFor="sessions-status">{t('admin.sessions.status')}</Label>
+            <Label htmlFor="sessions-status">{t('sessions.status')}</Label>
             <Select
               value={filters.status}
               onValueChange={(value) => setFilters({ ...filters, status: value as StatusFilter })}
             >
-              <SelectTrigger id="sessions-status" aria-label={t('admin.sessions.status')}>
+              <SelectTrigger id="sessions-status" aria-label={t('sessions.status')}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">{t('admin.sessions.status.all')}</SelectItem>
-                <SelectItem value="active">{t('admin.sessions.status.active')}</SelectItem>
-                <SelectItem value="revoked">{t('admin.sessions.status.revoked')}</SelectItem>
-                <SelectItem value="expired">{t('admin.sessions.status.expired')}</SelectItem>
+                <SelectItem value="all">{t('sessions.status.all')}</SelectItem>
+                <SelectItem value="active">{t('sessions.status.active')}</SelectItem>
+                <SelectItem value="revoked">{t('sessions.status.revoked')}</SelectItem>
+                <SelectItem value="expired">{t('sessions.status.expired')}</SelectItem>
               </SelectContent>
             </Select>
           </div>
           <Button type="submit" variant="outline" disabled={signedOut}>
-            {t('admin.sessions.apply')}
+            {t('sessions.apply')}
           </Button>
           <Button type="button" variant="outline" disabled={signedOut} onClick={() => void reset()}>
-            {t('admin.sessions.reset')}
+            {t('sessions.reset')}
           </Button>
         </form>
 
@@ -219,7 +219,7 @@ export function SessionsView({
                   className="mt-2"
                   onClick={() => void load(page, applied)}
                 >
-                  {t('admin.sessions.retry')}
+                  {t('sessions.retry')}
                 </Button>
               </AlertDescription>
             </Alert>
@@ -239,16 +239,16 @@ export function SessionsView({
         ) : (
           <Table>
             <caption className="pb-2 text-start text-sm text-muted-foreground">
-              {t('admin.sessions.caption', { total })}
+              {t('sessions.caption', { total })}
             </caption>
             <TableHeader>
               <TableRow>
-                <TableHead>{t('admin.sessions.columnUser')}</TableHead>
-                <TableHead>{t('admin.sessions.columnClient')}</TableHead>
-                <TableHead>{t('admin.sessions.columnStatus')}</TableHead>
-                <TableHead>{t('admin.sessions.columnCreated')}</TableHead>
-                <TableHead>{t('admin.sessions.columnLastSeen')}</TableHead>
-                <TableHead>{t('admin.sessions.columnAddress')}</TableHead>
+                <TableHead>{t('sessions.columnUser')}</TableHead>
+                <TableHead>{t('sessions.columnClient')}</TableHead>
+                <TableHead>{t('sessions.columnStatus')}</TableHead>
+                <TableHead>{t('sessions.columnCreated')}</TableHead>
+                <TableHead>{t('sessions.columnLastSeen')}</TableHead>
+                <TableHead>{t('sessions.columnAddress')}</TableHead>
                 <TableHead>{t('admin.columnActions')}</TableHead>
               </TableRow>
             </TableHeader>
@@ -256,7 +256,7 @@ export function SessionsView({
               {sessions.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={7} data-testid="sessions-empty">
-                    {t('admin.sessions.empty')}
+                    {t('sessions.empty')}
                   </TableCell>
                 </TableRow>
               ) : (
@@ -268,17 +268,17 @@ export function SessionsView({
                       </span>
                     </TableCell>
                     <TableCell>
-                      <bdi>{session.clientId ?? t('admin.audit.none')}</bdi>
+                      <bdi>{session.clientId ?? t('audit.none')}</bdi>
                     </TableCell>
                     <TableCell>
                       <Badge variant={statusVariant(session.status)}>
-                        {t(`admin.sessions.status.${session.status}`)}
+                        {t(`sessions.status.${session.status}`)}
                       </Badge>
                     </TableCell>
                     <TableCell>{formatDate(session.createdAt)}</TableCell>
                     <TableCell>{formatDate(session.lastSeenAt)}</TableCell>
                     <TableCell>
-                      <bdi>{session.ip ?? t('admin.audit.none')}</bdi>
+                      <bdi>{session.ip ?? t('audit.none')}</bdi>
                       {session.userAgent === null ? null : (
                         <span className="block max-w-48 truncate text-xs text-muted-foreground">
                           <bdi>{session.userAgent}</bdi>
@@ -291,10 +291,10 @@ export function SessionsView({
                         size="sm"
                         variant="destructive"
                         disabled={busyId === session.id || session.status !== 'active'}
-                        aria-label={t('admin.sessions.revokeFor', { id: session.id })}
+                        aria-label={t('sessions.revokeFor', { id: session.id })}
                         onClick={() => void revoke(session)}
                       >
-                        {t('admin.sessions.revoke')}
+                        {t('sessions.revoke')}
                       </Button>
                     </TableCell>
                   </TableRow>

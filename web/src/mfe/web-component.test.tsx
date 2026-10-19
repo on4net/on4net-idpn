@@ -133,6 +133,33 @@ describe('IdpnUserManagementElement', () => {
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain('limit=5');
   });
 
+  it('resolves the locale against the host locales config and sets lang/dir on the element', async () => {
+    const element = mount({ locale: 'de-DE' });
+    element.locales = {
+      default: 'en-US',
+      supported: ['en-US'],
+      dir: { 'en-US': 'ltr' },
+    };
+
+    await waitFor(() => expect(element.shadowRoot?.textContent).toContain('Member management'));
+    expect(element).toHaveAttribute('lang', 'en-US');
+    const root = element.shadowRoot?.querySelector('.idpn-root');
+    expect(root).toHaveAttribute('lang', 'en-US');
+    expect(root).toHaveAttribute('dir', 'ltr');
+  });
+
+  it('honours the validated per-locale direction override from the host config', async () => {
+    const element = mount({ locale: 'fa-IR' });
+    element.locales = {
+      default: 'fa-IR',
+      supported: ['fa-IR'],
+      dir: { 'fa-IR': 'ltr' },
+    };
+
+    await waitFor(() => expect(element.shadowRoot?.textContent).toContain('سارا محمدی'));
+    expect(element.shadowRoot?.querySelector('.idpn-root')).toHaveAttribute('dir', 'ltr');
+  });
+
   it('passes an in-memory token getter to the API client', async () => {
     const element = document.createElement(ELEMENT) as IdpnUserManagementElement;
     element.setAttribute('client-id', 'app-a');

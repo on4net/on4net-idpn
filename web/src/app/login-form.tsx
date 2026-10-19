@@ -62,7 +62,7 @@ export function LoginForm({
       : errorCode === 'network'
         ? t('login.errorNetwork')
         : errorCode === 'mfa_enrollment_required'
-          ? t('login.mfa.enrollmentRequired')
+          ? t('mfa.enrollmentRequired')
           : null;
 
   return (

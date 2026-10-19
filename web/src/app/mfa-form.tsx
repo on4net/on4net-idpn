@@ -69,17 +69,17 @@ export function MfaForm({
 
   const errorMessage =
     errorCode === 'invalid_code'
-      ? t('login.mfa.codeInvalid')
+      ? t('mfa.codeInvalid')
       : errorCode === 'expired'
-        ? t('login.mfa.expired')
+        ? t('mfa.expired')
         : errorCode === 'rate_limited'
-          ? t('login.mfa.rateLimited')
+          ? t('mfa.rateLimited')
           : errorCode === 'network'
-            ? t('login.mfa.network')
+            ? t('mfa.network')
             : errorCode === 'passkey_failed'
-              ? t('login.mfa.passkeyFailed')
+              ? t('mfa.passkeyFailed')
               : errorCode === 'passkey_unsupported'
-                ? t('login.mfa.passkeyUnsupported')
+                ? t('mfa.passkeyUnsupported')
                 : null;
 
   const switchMethod = (): void => {
@@ -92,18 +92,18 @@ export function MfaForm({
     event.preventDefault();
     const trimmed = code.trim();
     if (trimmed === '') {
-      setFieldError(t('login.mfa.codeRequired'));
+      setFieldError(t('mfa.codeRequired'));
       return;
     }
     if (method === 'totp' && !/^\d{6}$/.test(trimmed)) {
-      setFieldError(t('login.mfa.codeFormat'));
+      setFieldError(t('mfa.codeFormat'));
       return;
     }
     if (
       method === 'recovery' &&
       !RECOVERY_PATTERN.test(trimmed.toUpperCase().replace(/[^A-Z0-9]/g, ''))
     ) {
-      setFieldError(t('login.mfa.recoveryFormat'));
+      setFieldError(t('mfa.recoveryFormat'));
       return;
     }
     setFieldError(null);
@@ -122,12 +122,12 @@ export function MfaForm({
       dir={dir}
       className="w-full max-w-sm rounded-lg border border-border bg-card p-6 text-start shadow-sm"
     >
-      <h1 className="mb-1 text-xl font-semibold text-foreground">{t('login.mfa.title')}</h1>
-      <p className="mb-6 text-sm text-muted-foreground">{t('login.mfa.subtitle')}</p>
+      <h1 className="mb-1 text-xl font-semibold text-foreground">{t('mfa.title')}</h1>
+      <p className="mb-6 text-sm text-muted-foreground">{t('mfa.subtitle')}</p>
 
       {errorMessage === null ? null : (
         <Alert variant="destructive" className="mb-4" aria-live="assertive">
-          <AlertTitle>{t('login.mfa.errorTitle')}</AlertTitle>
+          <AlertTitle>{t('mfa.errorTitle')}</AlertTitle>
           <AlertDescription id="mfa-error">{errorMessage}</AlertDescription>
         </Alert>
       )}
@@ -140,7 +140,7 @@ export function MfaForm({
       >
         <div className="grid gap-2">
           <Label htmlFor={CODE_ID}>
-            {method === 'totp' ? t('login.mfa.codeLabel') : t('login.mfa.recoveryLabel')}
+            {method === 'totp' ? t('mfa.codeLabel') : t('mfa.recoveryLabel')}
           </Label>
           <Input
             id={CODE_ID}
@@ -159,7 +159,7 @@ export function MfaForm({
           />
           {method === 'recovery' ? (
             <p id={CODE_HINT_ID} className="text-xs text-muted-foreground">
-              {t('login.mfa.recoveryHint')}
+              {t('mfa.recoveryHint')}
             </p>
           ) : null}
           {fieldError === null ? null : (
@@ -171,11 +171,11 @@ export function MfaForm({
 
         <Button type="submit" disabled={submitting} className="gap-2">
           {submitting ? <Spinner label={t('common.loading')} /> : null}
-          <span>{submitting ? t('login.mfa.submitting') : t('login.mfa.submit')}</span>
+          <span>{submitting ? t('mfa.submitting') : t('mfa.submit')}</span>
         </Button>
 
         <Button type="button" variant="outline" onClick={switchMethod} disabled={submitting}>
-          {method === 'totp' ? t('login.mfa.useRecovery') : t('login.mfa.useTotp')}
+          {method === 'totp' ? t('mfa.useRecovery') : t('mfa.useTotp')}
         </Button>
 
         {passkeyAvailable && onPasskey !== undefined ? (
@@ -188,15 +188,13 @@ export function MfaForm({
             onClick={() => void onPasskey()}
           >
             {passkeySubmitting ? <Spinner label={t('common.loading')} /> : null}
-            <span>
-              {passkeySubmitting ? t('login.mfa.passkeySubmitting') : t('login.mfa.passkey')}
-            </span>
+            <span>{passkeySubmitting ? t('mfa.passkeySubmitting') : t('mfa.passkey')}</span>
           </Button>
         ) : null}
 
         {onBack === undefined ? null : (
           <Button type="button" variant="ghost" onClick={onBack} disabled={submitting}>
-            {t('login.mfa.back')}
+            {t('mfa.back')}
           </Button>
         )}
       </form>

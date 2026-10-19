@@ -25,12 +25,12 @@ export interface ForgotPasswordPageProps {
 
 const errorKey = (error: AccountFlowError): string =>
   error === 'network'
-    ? 'accountFlow.errorNetwork'
+    ? 'account.flow.errorNetwork'
     : error === 'rate_limited'
-      ? 'accountFlow.errorRateLimited'
+      ? 'account.flow.errorRateLimited'
       : error === 'invalid_token'
-        ? 'accountFlow.errorInvalidToken'
-        : 'accountFlow.errorGeneric';
+        ? 'account.flow.errorInvalidToken'
+        : 'account.flow.errorGeneric';
 
 function FlowCard({
   title,
@@ -71,7 +71,7 @@ export function ForgotPasswordPage({
     setError(null);
     setFieldError(null);
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
-      setFieldError('accountFlow.emailInvalid');
+      setFieldError('account.flow.emailInvalid');
       return;
     }
     setSubmitting(true);
@@ -88,17 +88,17 @@ export function ForgotPasswordPage({
   };
 
   return (
-    <FlowCard title={t('accountFlow.forgotTitle')} subtitle={t('accountFlow.forgotSubtitle')}>
+    <FlowCard title={t('account.flow.forgotTitle')} subtitle={t('account.flow.forgotSubtitle')}>
       {sent ? (
         <Alert data-testid="forgot-sent" aria-live="polite">
-          <AlertTitle>{t('accountFlow.forgotTitle')}</AlertTitle>
-          <AlertDescription>{t('accountFlow.forgotSent')}</AlertDescription>
+          <AlertTitle>{t('account.flow.forgotTitle')}</AlertTitle>
+          <AlertDescription>{t('account.flow.forgotSent')}</AlertDescription>
         </Alert>
       ) : (
         <form className="grid gap-4" noValidate onSubmit={(event) => void submit(event)}>
           {error === null ? null : (
             <Alert variant="destructive" aria-live="assertive">
-              <AlertTitle>{t('accountFlow.errorTitle')}</AlertTitle>
+              <AlertTitle>{t('account.flow.errorTitle')}</AlertTitle>
               <AlertDescription>{t(errorKey(error))}</AlertDescription>
             </Alert>
           )}
@@ -123,13 +123,15 @@ export function ForgotPasswordPage({
           </div>
           <Button type="submit" disabled={submitting} className="gap-2">
             {submitting ? <Spinner label={t('common.loading')} /> : null}
-            <span>{submitting ? t('accountFlow.submitting') : t('accountFlow.forgotSubmit')}</span>
+            <span>
+              {submitting ? t('account.flow.submitting') : t('account.flow.forgotSubmit')}
+            </span>
           </Button>
         </form>
       )}
       <p className="mt-4 text-sm">
         <a href={backHref} className="text-primary underline-offset-4 hover:underline">
-          {t('accountFlow.backToLogin')}
+          {t('account.flow.backToLogin')}
         </a>
       </p>
     </FlowCard>
@@ -177,12 +179,12 @@ export function SetPasswordPage({
     setViolations([]);
     const errors: { password?: string; confirmation?: string } = {};
     if (Array.from(password).length < 12) {
-      errors.password = 'accountFlow.tooShort';
+      errors.password = 'account.flow.tooShort';
     } else if (Array.from(password).length > 128) {
-      errors.password = 'accountFlow.tooLong';
+      errors.password = 'account.flow.tooLong';
     }
     if (confirmation !== password) {
-      errors.confirmation = 'accountFlow.mismatch';
+      errors.confirmation = 'account.flow.mismatch';
     }
     setFieldErrors(errors);
     if (errors.password !== undefined || errors.confirmation !== undefined) {
@@ -205,27 +207,27 @@ export function SetPasswordPage({
     }
   };
 
-  const title = mode === 'invite' ? t('accountFlow.inviteTitle') : t('accountFlow.resetTitle');
+  const title = mode === 'invite' ? t('account.flow.inviteTitle') : t('account.flow.resetTitle');
   const subtitle =
-    mode === 'invite' ? t('accountFlow.inviteSubtitle') : t('accountFlow.resetSubtitle');
+    mode === 'invite' ? t('account.flow.inviteSubtitle') : t('account.flow.resetSubtitle');
 
   return (
     <FlowCard title={title} subtitle={subtitle}>
       {done ? (
         <Alert data-testid="password-done" aria-live="polite">
-          <AlertTitle>{t('accountFlow.passwordDoneTitle')}</AlertTitle>
-          <AlertDescription>{t('accountFlow.passwordDone')}</AlertDescription>
+          <AlertTitle>{t('account.flow.passwordDoneTitle')}</AlertTitle>
+          <AlertDescription>{t('account.flow.passwordDone')}</AlertDescription>
         </Alert>
       ) : invalid ? (
         <Alert variant="destructive" data-testid="password-invalid-token">
-          <AlertTitle>{t('accountFlow.errorTitle')}</AlertTitle>
-          <AlertDescription>{t('accountFlow.errorInvalidToken')}</AlertDescription>
+          <AlertTitle>{t('account.flow.errorTitle')}</AlertTitle>
+          <AlertDescription>{t('account.flow.errorInvalidToken')}</AlertDescription>
         </Alert>
       ) : (
         <form className="grid gap-4" noValidate onSubmit={(event) => void submit(event)}>
           {error === null ? null : (
             <Alert variant="destructive" data-testid="password-flow-error" aria-live="assertive">
-              <AlertTitle>{t('accountFlow.errorTitle')}</AlertTitle>
+              <AlertTitle>{t('account.flow.errorTitle')}</AlertTitle>
               <AlertDescription>
                 {error === 'password_policy' ? (
                   <ul className="list-disc ps-5">
@@ -241,7 +243,7 @@ export function SetPasswordPage({
           )}
 
           <div className="grid gap-2">
-            <Label htmlFor="set-password-new">{t('accountFlow.newPassword')}</Label>
+            <Label htmlFor="set-password-new">{t('account.flow.newPassword')}</Label>
             <Input
               id="set-password-new"
               type="password"
@@ -267,7 +269,7 @@ export function SetPasswordPage({
           </div>
 
           <div className="grid gap-2">
-            <Label htmlFor="set-password-confirm">{t('accountFlow.confirmPassword')}</Label>
+            <Label htmlFor="set-password-confirm">{t('account.flow.confirmPassword')}</Label>
             <Input
               id="set-password-confirm"
               type="password"
@@ -288,13 +290,13 @@ export function SetPasswordPage({
 
           <Button type="submit" disabled={submitting} className="gap-2">
             {submitting ? <Spinner label={t('common.loading')} /> : null}
-            <span>{submitting ? t('accountFlow.submitting') : t('accountFlow.setPassword')}</span>
+            <span>{submitting ? t('account.flow.submitting') : t('account.flow.setPassword')}</span>
           </Button>
         </form>
       )}
       <p className="mt-4 text-sm">
         <a href={backHref} className="text-primary underline-offset-4 hover:underline">
-          {t('accountFlow.backToLogin')}
+          {t('account.flow.backToLogin')}
         </a>
       </p>
     </FlowCard>
@@ -336,7 +338,7 @@ export function VerifyEmailPage({
   }, [onConfirm, token]);
 
   return (
-    <FlowCard title={t('accountFlow.verifyTitle')} subtitle={t('accountFlow.verifySubtitle')}>
+    <FlowCard title={t('account.flow.verifyTitle')} subtitle={t('account.flow.verifySubtitle')}>
       {status === 'checking' ? (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Spinner label={t('common.loading')} />
@@ -345,25 +347,25 @@ export function VerifyEmailPage({
       ) : null}
       {status === 'done' ? (
         <Alert data-testid="verify-done" aria-live="polite">
-          <AlertTitle>{t('accountFlow.verifyDoneTitle')}</AlertTitle>
-          <AlertDescription>{t('accountFlow.verifyDone')}</AlertDescription>
+          <AlertTitle>{t('account.flow.verifyDoneTitle')}</AlertTitle>
+          <AlertDescription>{t('account.flow.verifyDone')}</AlertDescription>
         </Alert>
       ) : null}
       {status === 'invalid' ? (
         <Alert variant="destructive" data-testid="verify-invalid">
-          <AlertTitle>{t('accountFlow.errorTitle')}</AlertTitle>
-          <AlertDescription>{t('accountFlow.errorInvalidToken')}</AlertDescription>
+          <AlertTitle>{t('account.flow.errorTitle')}</AlertTitle>
+          <AlertDescription>{t('account.flow.errorInvalidToken')}</AlertDescription>
         </Alert>
       ) : null}
       {status === 'error' ? (
         <Alert variant="destructive" data-testid="verify-error">
-          <AlertTitle>{t('accountFlow.errorTitle')}</AlertTitle>
-          <AlertDescription>{t('accountFlow.errorNetwork')}</AlertDescription>
+          <AlertTitle>{t('account.flow.errorTitle')}</AlertTitle>
+          <AlertDescription>{t('account.flow.errorNetwork')}</AlertDescription>
         </Alert>
       ) : null}
       <p className="mt-4 text-sm">
         <a href={backHref} className="text-primary underline-offset-4 hover:underline">
-          {t('accountFlow.backToLogin')}
+          {t('account.flow.backToLogin')}
         </a>
       </p>
     </FlowCard>

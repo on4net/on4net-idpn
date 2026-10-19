@@ -184,7 +184,7 @@ export function AuditViewer({
       anchor.click();
       anchor.remove();
       URL.revokeObjectURL(url);
-      setNotice({ kind: 'info', message: t('admin.audit.exported') });
+      setNotice({ kind: 'info', message: t('audit.exported') });
     } catch (error) {
       setNotice({ kind: 'error', message: adminErrorMessage(error, locale) });
     } finally {
@@ -197,7 +197,7 @@ export function AuditViewer({
   return (
     <Card dir={directionOf(locale)} lang={locale} data-testid="admin-audit-viewer">
       <CardHeader>
-        <CardTitle>{t('admin.audit.title')}</CardTitle>
+        <CardTitle>{t('audit.title')}</CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         {signedOut ? (
@@ -211,10 +211,10 @@ export function AuditViewer({
           className="flex flex-wrap items-end gap-2"
           onSubmit={submit}
           role="search"
-          aria-label={t('admin.audit.filters')}
+          aria-label={t('audit.filters')}
         >
           <div className="flex flex-col gap-1">
-            <Label htmlFor="audit-from">{t('admin.audit.from')}</Label>
+            <Label htmlFor="audit-from">{t('audit.from')}</Label>
             <Input
               id="audit-from"
               type="datetime-local"
@@ -223,7 +223,7 @@ export function AuditViewer({
             />
           </div>
           <div className="flex flex-col gap-1">
-            <Label htmlFor="audit-to">{t('admin.audit.to')}</Label>
+            <Label htmlFor="audit-to">{t('audit.to')}</Label>
             <Input
               id="audit-to"
               type="datetime-local"
@@ -232,7 +232,7 @@ export function AuditViewer({
             />
           </div>
           <div className="flex flex-col gap-1">
-            <Label htmlFor="audit-action">{t('admin.audit.action')}</Label>
+            <Label htmlFor="audit-action">{t('audit.action')}</Label>
             <Input
               id="audit-action"
               value={filters.action}
@@ -241,7 +241,7 @@ export function AuditViewer({
             />
           </div>
           <div className="flex flex-col gap-1">
-            <Label htmlFor="audit-actor">{t('admin.audit.actorId')}</Label>
+            <Label htmlFor="audit-actor">{t('audit.actorId')}</Label>
             <Input
               id="audit-actor"
               value={filters.actorId}
@@ -250,7 +250,7 @@ export function AuditViewer({
             />
           </div>
           <div className="flex flex-col gap-1">
-            <Label htmlFor="audit-client">{t('admin.audit.clientId')}</Label>
+            <Label htmlFor="audit-client">{t('audit.clientId')}</Label>
             <Input
               id="audit-client"
               value={filters.clientId}
@@ -259,7 +259,7 @@ export function AuditViewer({
             />
           </div>
           <div className="flex flex-col gap-1">
-            <Label htmlFor="audit-target">{t('admin.audit.targetType')}</Label>
+            <Label htmlFor="audit-target">{t('audit.targetType')}</Label>
             <Input
               id="audit-target"
               value={filters.targetType}
@@ -268,29 +268,29 @@ export function AuditViewer({
             />
           </div>
           <div className="flex flex-col gap-1">
-            <Label htmlFor="audit-result">{t('admin.audit.result')}</Label>
+            <Label htmlFor="audit-result">{t('audit.result')}</Label>
             <Select value={filters.result} onValueChange={(value) => update('result', value)}>
               <SelectTrigger id="audit-result" className="w-36">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">{t('admin.audit.result.all')}</SelectItem>
-                <SelectItem value="success">{t('admin.audit.result.success')}</SelectItem>
-                <SelectItem value="failure">{t('admin.audit.result.failure')}</SelectItem>
+                <SelectItem value="all">{t('audit.result.all')}</SelectItem>
+                <SelectItem value="success">{t('audit.result.success')}</SelectItem>
+                <SelectItem value="failure">{t('audit.result.failure')}</SelectItem>
               </SelectContent>
             </Select>
           </div>
           <Button type="submit" variant="outline">
-            {t('admin.audit.apply')}
+            {t('audit.apply')}
           </Button>
           <Button type="button" variant="ghost" onClick={reset}>
-            {t('admin.audit.reset')}
+            {t('audit.reset')}
           </Button>
         </form>
 
         <div className="flex flex-wrap items-end gap-2">
           <div className="flex flex-col gap-1">
-            <Label htmlFor="audit-format">{t('admin.audit.format')}</Label>
+            <Label htmlFor="audit-format">{t('audit.format')}</Label>
             <Select
               value={format}
               onValueChange={(value) => setFormat(value === 'ndjson' ? 'ndjson' : 'csv')}
@@ -311,7 +311,7 @@ export function AuditViewer({
             onClick={() => void runExport()}
             data-testid="admin-audit-export"
           >
-            {exporting ? t('admin.audit.exporting') : t('admin.audit.export')}
+            {exporting ? t('audit.exporting') : t('audit.export')}
           </Button>
         </div>
 
@@ -337,23 +337,23 @@ export function AuditViewer({
         ) : (
           <Table>
             <caption className="pb-2 text-start text-sm text-muted-foreground">
-              {t('admin.audit.caption', { total })}
+              {t('audit.caption', { total })}
             </caption>
             <TableHeader>
               <TableRow>
-                <TableHead>{t('admin.audit.columnTime')}</TableHead>
-                <TableHead>{t('admin.audit.columnAction')}</TableHead>
-                <TableHead>{t('admin.audit.columnActor')}</TableHead>
-                <TableHead>{t('admin.audit.columnTarget')}</TableHead>
-                <TableHead>{t('admin.audit.columnClient')}</TableHead>
-                <TableHead>{t('admin.audit.columnResult')}</TableHead>
+                <TableHead>{t('audit.columnTime')}</TableHead>
+                <TableHead>{t('audit.columnAction')}</TableHead>
+                <TableHead>{t('audit.columnActor')}</TableHead>
+                <TableHead>{t('audit.columnTarget')}</TableHead>
+                <TableHead>{t('audit.columnClient')}</TableHead>
+                <TableHead>{t('audit.columnResult')}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {events.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={6} data-testid="admin-audit-empty">
-                    {t('admin.audit.empty')}
+                    {t('audit.empty')}
                   </TableCell>
                 </TableRow>
               ) : (
@@ -366,13 +366,13 @@ export function AuditViewer({
                       <bdi>{event.action}</bdi>
                     </TableCell>
                     <TableCell>
-                      <bdi>{event.actorId ?? t('admin.audit.systemActor')}</bdi>
+                      <bdi>{event.actorId ?? t('audit.systemActor')}</bdi>
                       <span className="block text-xs text-muted-foreground">
                         <bdi>{event.actorType}</bdi>
                       </span>
                     </TableCell>
                     <TableCell>
-                      <bdi>{event.targetType ?? t('admin.audit.none')}</bdi>
+                      <bdi>{event.targetType ?? t('audit.none')}</bdi>
                       {event.targetId === null ? null : (
                         <span className="block text-xs text-muted-foreground">
                           <bdi>{event.targetId}</bdi>
@@ -380,11 +380,11 @@ export function AuditViewer({
                       )}
                     </TableCell>
                     <TableCell>
-                      <bdi>{event.clientId ?? t('admin.audit.none')}</bdi>
+                      <bdi>{event.clientId ?? t('audit.none')}</bdi>
                     </TableCell>
                     <TableCell>
                       <Badge variant={resultVariant(event.result)}>
-                        {t(`admin.audit.result.${event.result}`)}
+                        {t(`audit.result.${event.result}`)}
                       </Badge>
                     </TableCell>
                   </TableRow>

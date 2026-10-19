@@ -1,7 +1,12 @@
-import { IDPN_MFE_EVENT_NAME, type IdpnEvent, type IdpnTheme } from '@idpn/mfe-sdk';
+import {
+  IDPN_MFE_EVENT_NAME,
+  type IdpnEvent,
+  type IdpnLocales,
+  type IdpnTheme,
+} from '@idpn/mfe-sdk';
 import { createRoot, type Root } from 'react-dom/client';
 
-import { directionOf } from '@/i18n';
+import { isDirection, resolveDirection, resolveLocale, translate } from '@/i18n';
 
 import { AccountRoot, type AccountEvent } from './account';
 import { UserManagementRoot, type UserManagementEvent } from './user-management';
@@ -44,6 +49,7 @@ export class IdpnMfeElement extends HTMLElement {
   private accessTokenGetter?: () => string | null;
   private eventHandler?: (event: IdpnWebComponentEvent) => void;
   private themeTokens?: IdpnTheme;
+  private localesConfig?: IdpnLocales;
 
   /** SPA mode only: must return a token held in memory (never persisted). */
   get getAccessToken(): (() => string | null) | undefined {
@@ -97,6 +103,19 @@ export class IdpnMfeElement extends HTMLElement {
     this.renderModule();
   }
 
+  /**
+   * Locales enabled by the client. Kept as an in-memory property (like `theme`) so only
+   * validated values reach the module; the SDK forwards it from `IdpnMfeConfig.locales`.
+   */
+  get locales(): IdpnLocales | undefined {
+    return this.localesConfig;
+  }
+
+  set locales(value: IdpnLocales | undefined) {
+    this.localesConfig = value;
+    this.renderModule();
+  }
+
   private moduleOverride: IdpnWebComponentModule | null = null;
   private root: Root | null = null;
   private mountPoint: HTMLDivElement | null = null;
@@ -146,18 +165,26 @@ export class IdpnMfeElement extends HTMLElement {
     if (this.root === null) {
       return;
     }
-    const locale = this.getAttribute('locale') ?? 'fa-IR';
+    const locale = resolveLocale({
+      configLocale: this.getAttribute('locale'),
+      supported: this.localesConfig?.supported,
+      clientDefault: this.localesConfig?.default,
+    });
     const dirAttribute = this.getAttribute('dir');
-    // Configuration errors are rendered before any module root exists, so they carry the
-    // host's direction themselves instead of assuming Persian/RTL.
-    const dir =
-      dirAttribute === 'ltr' || dirAttribute === 'rtl' ? dirAttribute : directionOf(locale);
+    const configDir = this.localesConfig?.dir?.[locale];
+    const dir = resolveDirection(locale, isDirection(dirAttribute) ? dirAttribute : configDir);
+    // The element is the host boundary; `lang` is mirrored so assistive technology sees
+    // the resolved language even before entering the shadow root. Direction lives on
+    // `.idpn-root` (and is only overwritten on the element when the host sets it).
+    if (this.getAttribute('lang') !== locale) {
+      this.setAttribute('lang', locale);
+    }
 
     const clientId = this.getAttribute('client-id') ?? '';
     if (clientId === '') {
       this.root.render(
         <p dir={dir} lang={locale} role="alert">
-          client-id لازم است.
+          {translate(locale, 'errors.clientIdRequired')}
         </p>,
       );
       return;
@@ -167,7 +194,7 @@ export class IdpnMfeElement extends HTMLElement {
     if (moduleName === null) {
       this.root.render(
         <p dir={dir} lang={locale} role="alert">
-          module باید user-management یا account باشد.
+          {translate(locale, 'errors.moduleInvalid')}
         </p>,
       );
       return;
@@ -175,6 +202,7 @@ export class IdpnMfeElement extends HTMLElement {
 
     const apiBaseUrl = this.getAttribute('api-base') ?? undefined;
     const theme = this.theme;
+    const locales = this.localesConfig;
     const onEvent = this.deliverEvent;
 
     if (moduleName === 'account') {
@@ -182,7 +210,8 @@ export class IdpnMfeElement extends HTMLElement {
         <AccountRoot
           clientId={clientId}
           locale={locale}
-          {...(dir === undefined ? {} : { dir })}
+          dir={dir}
+          {...(locales === undefined ? {} : { locales })}
           {...(apiBaseUrl === undefined ? {} : { apiBaseUrl })}
           {...(theme === undefined ? {} : { theme })}
           onEvent={onEvent}
@@ -199,7 +228,8 @@ export class IdpnMfeElement extends HTMLElement {
       <UserManagementRoot
         clientId={clientId}
         locale={locale}
-        {...(dir === undefined ? {} : { dir })}
+        dir={dir}
+        {...(locales === undefined ? {} : { locales })}
         {...(apiBaseUrl === undefined ? {} : { apiBaseUrl })}
         {...(pageSize === undefined ? {} : { pageSize })}
         {...(theme === undefined ? {} : { theme })}

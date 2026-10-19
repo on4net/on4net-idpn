@@ -20,14 +20,14 @@ const renderInRoot = (node: React.ReactNode, locale: 'fa-IR' | 'en-US' = 'fa-IR'
 
 describe('account flow i18n', () => {
   it('ships every flow key in Persian and English', () => {
-    const keys = Object.keys(MESSAGES['fa-IR']).filter((key) => key.startsWith('accountFlow.'));
+    const keys = Object.keys(MESSAGES['fa-IR']).filter((key) => key.startsWith('account.flow.'));
 
     expect(keys.length).toBeGreaterThan(20);
     for (const key of keys) {
       expect(MESSAGES['en-US'][key], key).toBeTruthy();
     }
-    expect(translate('fa-IR', 'accountFlow.forgotSent')).toContain('اگر این ایمیل');
-    expect(translate('en-US', 'accountFlow.forgotSent')).toBe(
+    expect(translate('fa-IR', 'account.flow.forgotSent')).toContain('اگر این ایمیل');
+    expect(translate('en-US', 'account.flow.forgotSent')).toBe(
       'If that email exists, a reset link has been sent.',
     );
   });

@@ -65,4 +65,13 @@ export type { IdpnMfeElement, IdpnMountedModule } from './mount.js';
 
 export { assertIdpnMfeConfig } from './validate.js';
 
+export {
+  IDPN_BASE_LOCALES,
+  idpnDirectionOf,
+  isIdpnDirection,
+  isIdpnLocaleCode,
+  resolveMfeDirection,
+  resolveMfeLocale,
+} from './locale.js';
+
 export { IDPN_MFE_CONTRACT_VERSION, IDPN_MFE_SDK_VERSION } from './version.js';

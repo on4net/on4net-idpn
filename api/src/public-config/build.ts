@@ -3,6 +3,14 @@ import {
   sanitizeIdpnTheme,
   type PublicClientConfig,
 } from '@idpn/contracts';
+import {
+  directionOf,
+  isDirection,
+  isLocaleCode,
+  normalizeLocale,
+  type Direction,
+  type Locale,
+} from '@idpn/i18n/locale';
 
 export interface PublicLoginContext {
   key: string;
@@ -51,7 +59,7 @@ export interface PublicConfigDependencies {
   mfe: { version: string; remoteEntry: string };
 }
 
-const DEFAULT_LOCALE = 'fa-IR';
+const DEFAULT_LOCALE: Locale = 'fa-IR';
 const SOCIAL_LABELS: Record<PublicSocialProvider['provider'], string> = {
   google: 'Google',
   facebook: 'Facebook',
@@ -64,8 +72,59 @@ function isLoginMethod(
   return LOGIN_METHODS.has(method);
 }
 
-function directionOf(locale: string): 'rtl' | 'ltr' {
-  return locale.startsWith('fa') || locale.startsWith('ar') ? 'rtl' : 'ltr';
+interface SanitizedLocales {
+  default: string;
+  supported: string[];
+  dir: Record<string, Direction>;
+}
+
+/**
+ * The client row is admin input and may predate validation. Values that are not locale
+ * codes are dropped, duplicates are folded, a default outside `supported` falls back to
+ * the first enabled locale, and a direction is always derived unless a valid override was
+ * stored (docs/localization.md 3 and 6.1).
+ */
+function sanitizeLocales(locales: PublicClientSource['locales']): SanitizedLocales {
+  const supported: string[] = [];
+  const requestedSupported = Array.isArray(locales.supported)
+    ? locales.supported
+    : [DEFAULT_LOCALE];
+  for (const value of requestedSupported) {
+    const normalized = normalizeLocale(value);
+    if (
+      normalized !== undefined &&
+      isLocaleCode(normalized) &&
+      !supported.some((locale) => locale.toLowerCase() === normalized.toLowerCase())
+    ) {
+      supported.push(normalized);
+    }
+  }
+  if (supported.length === 0) {
+    supported.push(DEFAULT_LOCALE);
+  }
+
+  const requestedDefault = normalizeLocale(locales.default);
+  const defaultLocale =
+    (requestedDefault === undefined
+      ? undefined
+      : supported.find((locale) => locale.toLowerCase() === requestedDefault.toLowerCase())) ??
+    supported[0] ??
+    DEFAULT_LOCALE;
+
+  const dir: Record<string, Direction> = {};
+  const overrides =
+    locales.dir !== null && typeof locales.dir === 'object' && !Array.isArray(locales.dir)
+      ? locales.dir
+      : {};
+  for (const locale of supported) {
+    const key = Object.keys(overrides).find(
+      (candidate) => candidate.toLowerCase() === locale.toLowerCase(),
+    );
+    const override = key === undefined ? undefined : overrides[key];
+    dir[locale] = isDirection(override) ? override : directionOf(locale);
+  }
+
+  return { default: defaultLocale, supported, dir };
 }
 
 /**
@@ -77,12 +136,8 @@ export function buildPublicClientConfig(
   client: PublicClientSource,
   dependencies: PublicConfigDependencies,
 ): PublicClientConfig {
-  const supported = client.locales.supported ?? [DEFAULT_LOCALE];
-  const defaultLocale = client.locales.default ?? supported[0] ?? DEFAULT_LOCALE;
-  const dir: Record<string, 'rtl' | 'ltr'> = {};
-  for (const locale of supported) {
-    dir[locale] = client.locales.dir?.[locale] ?? directionOf(locale);
-  }
+  const locales = sanitizeLocales(client.locales);
+  const defaultLocale = locales.default;
 
   const rawTheme =
     typeof client.branding.theme === 'object' &&
@@ -105,9 +160,7 @@ export function buildPublicClientConfig(
     ...(client.branding.logoUrl === undefined ? {} : { logoUrl: client.branding.logoUrl }),
     locale: defaultLocale,
     locales: {
-      default: defaultLocale,
-      supported,
-      dir,
+      ...locales,
       ...(client.locales.version === undefined ? {} : { version: client.locales.version }),
     },
     ...(dependencies.translationsUrl === undefined

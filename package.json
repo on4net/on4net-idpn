@@ -17,7 +17,7 @@
     "format:check": "prettier --check \"**/*.{ts,tsx,js,mjs,cjs,json,yaml,yml,css}\"",
     "typecheck": "pnpm -r --if-present run typecheck",
     "test": "pnpm -r --if-present run test",
-    "test:unit": "pnpm --filter @idpn/config --filter @idpn/contracts --filter @idpn/mfe-sdk --filter @idpn/example-bff --filter @idpn/web run test:coverage",
+    "test:unit": "pnpm --filter @idpn/config --filter @idpn/contracts --filter @idpn/i18n --filter @idpn/mfe-sdk --filter @idpn/example-bff --filter @idpn/web run test:coverage",
     "test:integration": "pnpm --filter @idpn/api run test:coverage",
     "test:e2e": "playwright test",
     "contract:generate": "pnpm --filter @idpn/contracts run generate",

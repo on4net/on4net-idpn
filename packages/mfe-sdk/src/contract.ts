@@ -143,6 +143,8 @@ export interface IdpnMfeElementProps extends IdpnMfeElementAttributes {
   getAccessToken?: () => string | null;
   onEvent?: IdpnEventHandler;
   theme?: IdpnTheme;
+  /** Locales enabled by the client; the element resolves and derives `dir` from them. */
+  locales?: IdpnLocales;
 }
 
 /**
@@ -154,6 +156,8 @@ export interface IdpnReactModuleProps {
   apiBaseUrl?: string;
   locale?: string;
   dir?: IdpnDirection;
+  /** Locales enabled by the client; only these are honoured by the module root. */
+  locales?: IdpnLocales;
   theme?: IdpnTheme;
   pageSize?: number;
   /** SPA mode only, `user-management` module only. */

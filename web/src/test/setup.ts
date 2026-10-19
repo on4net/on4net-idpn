@@ -20,4 +20,6 @@ if (typeof Element !== 'undefined') {
 
 afterEach(() => {
   cleanup();
+  document.documentElement.removeAttribute('lang');
+  document.documentElement.removeAttribute('dir');
 });

@@ -1,4 +1,5 @@
-import type { IdpnEventHandler, IdpnMfeConfig, IdpnMfeModule } from './contract.js';
+import type { IdpnEventHandler, IdpnLocales, IdpnMfeConfig, IdpnMfeModule } from './contract.js';
+import { resolveMfeDirection, resolveMfeLocale } from './locale.js';
 import type { IdpnTheme } from './theme.js';
 import { assertIdpnMfeConfig } from './validate.js';
 
@@ -25,6 +26,8 @@ export interface IdpnMfeElement extends HTMLElement {
   onEvent?: IdpnEventHandler;
   /** Theme tokens forwarded to the MFE root as `--idpn-*` variables. */
   theme?: IdpnTheme;
+  /** Enabled locales; the element uses them to resolve `locale` and `dir`. */
+  locales?: IdpnLocales;
 }
 
 /** Handle returned by {@link mountIdpnModule}. */
@@ -40,6 +43,7 @@ const clearHandlers = (element: IdpnMfeElement): void => {
   element.getAccessToken = undefined;
   element.onEvent = undefined;
   element.theme = undefined;
+  element.locales = undefined;
 };
 
 const createElement = (module: IdpnMfeModule): IdpnMfeElement => {
@@ -82,9 +86,23 @@ const setOptionalAttribute = (element: Element, name: string, value: string | un
 const applyConfig = (element: IdpnMfeElement, config: IdpnMfeConfig): void => {
   element.setAttribute('client-id', config.clientId);
   element.setAttribute('api-base', config.apiBaseUrl);
-  setOptionalAttribute(element, 'locale', config.locale);
-  setOptionalAttribute(element, 'dir', config.dir);
+  const hasLocaleConfig = config.locale !== undefined || config.locales !== undefined;
+  const locale = hasLocaleConfig ? resolveMfeLocale(config.locale, config.locales) : undefined;
+  setOptionalAttribute(element, 'locale', locale);
+  setOptionalAttribute(
+    element,
+    'dir',
+    locale === undefined ? config.dir : resolveMfeDirection(locale, config.dir, config.locales),
+  );
 
+  element.locales =
+    config.locales === undefined
+      ? undefined
+      : {
+          default: config.locales.default,
+          supported: [...config.locales.supported],
+          dir: { ...config.locales.dir },
+        };
   element.theme = config.theme === undefined ? undefined : { ...config.theme };
   element.onEvent = config.onEvent;
   element.getAccessToken = config.mode === 'spa' ? config.getAccessToken : undefined;

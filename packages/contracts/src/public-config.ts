@@ -5,12 +5,53 @@ import { idpnThemeSchema } from './theme.js';
 /** Direction of a locale; used by both the public config and the MFE contract. */
 export const localeDirSchema = z.enum(['rtl', 'ltr']);
 
-export const localeBundleSchema = z.object({
-  default: z.string().min(1),
-  supported: z.array(z.string().min(1)).min(1),
-  dir: z.record(z.string(), localeDirSchema),
-  version: z.string().optional(),
-});
+/**
+ * BCP-47-shaped language tag. The public config is browser input, so a value with markup
+ * or whitespace must never reach `lang`/`dir` or a translation request.
+ */
+export const localeCodeSchema = z
+  .string()
+  .regex(/^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/, 'must be a locale code');
+
+export const localeBundleSchema = z
+  .object({
+    default: localeCodeSchema,
+    supported: z.array(localeCodeSchema).min(1),
+    dir: z.record(localeCodeSchema, localeDirSchema),
+    version: z.string().optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const normalized = value.supported.map((locale) => locale.toLowerCase());
+    if (new Set(normalized).size !== normalized.length) {
+      ctx.addIssue({ code: 'custom', path: ['supported'], message: 'must not contain duplicates' });
+    }
+    if (!normalized.includes(value.default.toLowerCase())) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['default'],
+        message: 'default must be one of the supported locales',
+      });
+    }
+    for (const locale of value.supported) {
+      if (value.dir[locale] === undefined) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['dir'],
+          message: `missing direction for ${locale}`,
+        });
+      }
+    }
+    for (const locale of Object.keys(value.dir)) {
+      if (!value.supported.includes(locale)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['dir'],
+          message: `${locale} is not a supported locale`,
+        });
+      }
+    }
+  });
 
 export const mfaPolicySchema = z.enum(['optional', 'required_admins', 'required_all']);
 export const registrationPolicySchema = z.enum(['invite_only', 'self_service', 'disabled']);
@@ -70,7 +111,23 @@ export const publicClientConfigSchema = z
     features: clientFeaturesSchema,
     mfe: mfeReleaseSchema,
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.locale !== value.locales.default) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['locale'],
+        message: 'locale must equal locales.default',
+      });
+    }
+    if (value.locales.dir[value.locale] === undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['locales', 'dir'],
+        message: 'the active locale needs a direction',
+      });
+    }
+  });
 
 export type PublicClientConfig = z.infer<typeof publicClientConfigSchema>;
 export type LoginContextSummary = z.infer<typeof loginContextSummarySchema>;

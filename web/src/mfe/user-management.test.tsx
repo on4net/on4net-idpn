@@ -395,6 +395,6 @@ describe('UserManagement MFE module', () => {
     expect(section).toHaveAttribute('dir', 'ltr');
     expect(section).toHaveAttribute('lang', 'en-US');
     expect(screen.getByText('sara@example.com')).toHaveAttribute('dir', 'ltr');
-    expect(screen.getByRole('columnheader', { name: 'ایمیل' })).toHaveClass('text-start');
+    expect(screen.getByRole('columnheader', { name: 'Email' })).toHaveClass('text-start');
   });
 });

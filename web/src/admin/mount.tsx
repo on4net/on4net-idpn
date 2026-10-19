@@ -9,6 +9,8 @@ export interface MountAdminConsoleOptions {
   /** Supplies the access token; the admin panel's BFF keeps it out of browser storage. */
   getToken: AdminApiOptions['getToken'];
   locale: Locale;
+  /** Direction override from the validated admin config; derived from the locale otherwise. */
+  dir?: 'rtl' | 'ltr';
   /** API origin when the panel and the API are on different hosts. */
   baseUrl?: string;
   pageSize?: number;
@@ -27,7 +29,9 @@ export function mountAdminConsole(element: HTMLElement, options: MountAdminConso
   });
 
   const root = createRoot(element);
-  element.setAttribute('dir', directionOf(options.locale));
+  const dir = options.dir ?? directionOf(options.locale);
+  element.setAttribute('dir', dir);
+  element.setAttribute('lang', options.locale);
   root.render(
     <StrictMode>
       <AdminConsole

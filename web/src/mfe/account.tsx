@@ -1,4 +1,4 @@
-import type { IdpnTheme } from '@idpn/mfe-sdk';
+import type { IdpnLocales, IdpnTheme } from '@idpn/mfe-sdk';
 import * as React from 'react';
 
 import { IdpnRoot } from '@/app/idpn-root';
@@ -18,7 +18,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { directionOf, resolveLocale, translate, type Locale } from '@/i18n';
+import { resolveDirection, resolveLocale, translate, type Locale } from '@/i18n';
 import {
   AccountApiError,
   createAccountApiClient,
@@ -39,6 +39,8 @@ export interface AccountProps {
   apiBaseUrl?: string;
   locale?: string;
   dir?: 'rtl' | 'ltr';
+  /** Languages enabled by the client; only these are honoured. */
+  locales?: IdpnLocales;
   /** Host configuration only; used for diagnostics, never for authorization. */
   clientId?: string;
   /** Receives non-sensitive module events; never contains a token. */
@@ -83,13 +85,18 @@ export function Account({
   apiBaseUrl,
   locale = 'fa-IR',
   dir,
+  locales,
   clientId,
   onEvent,
   apiClient,
   passkeys,
 }: AccountProps) {
-  const activeLocale: Locale = resolveLocale(locale);
-  const direction = dir ?? directionOf(activeLocale);
+  const activeLocale: Locale = resolveLocale({
+    configLocale: locale,
+    supported: locales?.supported,
+    clientDefault: locales?.default,
+  });
+  const direction = resolveDirection(activeLocale, dir ?? locales?.dir?.[activeLocale]);
   const t = React.useCallback(
     (key: string, values: Record<string, string | number> = {}) =>
       translate(activeLocale, key, values),
@@ -616,11 +623,21 @@ export interface AccountRootProps extends AccountProps {
 /**
  * Self-contained entry point for hosts: owns `.idpn-root`, direction and portal container.
  */
-export function AccountRoot({ locale = 'fa-IR', dir, theme, ...props }: AccountRootProps) {
-  const activeLocale: Locale = resolveLocale(locale);
+export function AccountRoot({ locale = 'fa-IR', dir, locales, theme, ...props }: AccountRootProps) {
+  const activeLocale: Locale = resolveLocale({
+    configLocale: locale,
+    supported: locales?.supported,
+    clientDefault: locales?.default,
+  });
+  const direction = resolveDirection(activeLocale, dir ?? locales?.dir?.[activeLocale]);
   return (
-    <IdpnRoot locale={activeLocale} dir={dir ?? directionOf(activeLocale)} theme={theme}>
-      <Account {...props} locale={activeLocale} {...(dir === undefined ? {} : { dir })} />
+    <IdpnRoot locale={activeLocale} dir={direction} theme={theme}>
+      <Account
+        {...props}
+        locale={activeLocale}
+        dir={direction}
+        {...(locales === undefined ? {} : { locales })}
+      />
     </IdpnRoot>
   );
 }

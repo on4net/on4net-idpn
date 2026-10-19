@@ -78,6 +78,47 @@ describe('mountIdpnModule', () => {
     expect(mounted.element.getAttribute('client-id')).toBe('app-a');
   });
 
+  it('normalizes the locale and derives the direction from the locales config', () => {
+    const mounted = mountIdpnModule(
+      container,
+      config({
+        locale: 'en',
+        dir: undefined,
+        locales: {
+          default: 'fa-IR',
+          supported: ['fa-IR', 'en-US'],
+          dir: { 'fa-IR': 'rtl', 'en-US': 'ltr' },
+        },
+      }),
+    );
+
+    expect(mounted.element.getAttribute('locale')).toBe('en-US');
+    expect(mounted.element.getAttribute('dir')).toBe('ltr');
+    expect((mountedElement(mounted) as unknown as { locales?: unknown }).locales).toEqual({
+      default: 'fa-IR',
+      supported: ['fa-IR', 'en-US'],
+      dir: { 'fa-IR': 'rtl', 'en-US': 'ltr' },
+    });
+  });
+
+  it('falls back to the client default when the requested locale is unsupported', () => {
+    const mounted = mountIdpnModule(
+      container,
+      config({
+        locale: 'de-DE',
+        dir: undefined,
+        locales: {
+          default: 'en-US',
+          supported: ['en-US'],
+          dir: { 'en-US': 'ltr' },
+        },
+      }),
+    );
+
+    expect(mounted.element.getAttribute('locale')).toBe('en-US');
+    expect(mounted.element.getAttribute('dir')).toBe('ltr');
+  });
+
   it('keeps the token getter and event handler in memory, never in attributes', () => {
     const getAccessToken = () => 'secret-access-token';
     const onEvent = vi.fn();
@@ -243,6 +284,30 @@ describe('mountIdpnModule config validation', () => {
     ['getAccessToken is not a function', config({ getAccessToken: 'token' as never })],
     ['onEvent is not a function', config({ onEvent: {} as never })],
     ['theme is null', config({ theme: null as never })],
+    [
+      'locales default is invalid',
+      config({ locales: { default: '<x>', supported: ['fa-IR'], dir: {} } }),
+    ],
+    [
+      'locales supported is empty',
+      config({ locales: { default: 'fa-IR', supported: [], dir: {} } }),
+    ],
+    [
+      'locales supported contains duplicates',
+      config({
+        locales: { default: 'fa-IR', supported: ['fa-IR', 'fa-ir'], dir: { 'fa-IR': 'rtl' } },
+      }),
+    ],
+    [
+      'locales dir is invalid',
+      config({
+        locales: {
+          default: 'fa-IR',
+          supported: ['fa-IR'],
+          dir: { 'fa-IR': 'up' as never },
+        },
+      }),
+    ],
     ['accessToken is passed in config', { ...config(), accessToken: 'secret' } as IdpnMfeConfig],
     ['refreshToken is passed in config', { ...config(), refreshToken: 'secret' } as IdpnMfeConfig],
     ['clientSecret is passed in config', { ...config(), clientSecret: 'secret' } as IdpnMfeConfig],

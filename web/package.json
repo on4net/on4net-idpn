@@ -23,6 +23,7 @@
     "@hookform/resolvers": "5.9.2",
     "@idpn/config": "workspace:*",
     "@idpn/contracts": "workspace:*",
+    "@idpn/i18n": "workspace:*",
     "@simplewebauthn/browser": "14.0.0",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",

@@ -19,11 +19,15 @@ import {
   socialErrorMessageKey,
   type SocialProviderSummary,
 } from '@/app/social-login';
-import { directionOf, resolveLocale, type Locale } from '@/i18n';
+import { resolveDirection, resolveLocale, type Locale } from '@/i18n';
 
 interface PublicConfigLike {
   locale?: string;
-  locales?: { default?: string; supported?: string[] };
+  locales?: {
+    default?: string;
+    supported?: string[];
+    dir?: Record<string, 'rtl' | 'ltr'>;
+  };
   /** Untrusted JSON from the public-config endpoint; sanitized before it reaches the root. */
   theme?: unknown;
   loginContexts?: { key: string; methods: string[] }[];
@@ -47,6 +51,8 @@ export type MfaVerifyResult =
 export interface HostedLoginPageProps {
   /** Reads the query string; injectable for tests. */
   search?: string;
+  /** Browser preference; injectable so tests never depend on the host machine. */
+  acceptLanguage?: string;
   fetchConfig?: (clientId: string) => Promise<PublicConfigLike | null>;
   submit?: (
     values: LoginFormValues & { clientId?: string; loginContext?: string; returnTo?: string },
@@ -73,6 +79,18 @@ export interface HostedLoginPageProps {
 }
 
 const DEFAULT_THEME: IdpnTheme = {};
+
+/** `Accept-Language` of the browser; empty during SSR and in non-browser environments. */
+function browserAcceptLanguage(): string {
+  if (typeof navigator === 'undefined') {
+    return '';
+  }
+  const languages = navigator.languages;
+  if (Array.isArray(languages) && languages.length > 0) {
+    return languages.join(',');
+  }
+  return navigator.language ?? '';
+}
 
 /** RFC 5321 caps a forward path at 256 octets; keep room for the `@domain` part. */
 const MAX_LOGIN_HINT_LENGTH = 254;
@@ -393,6 +411,7 @@ export function safeRedirectTarget(value: string | undefined): string {
  */
 export function HostedLoginPage({
   search,
+  acceptLanguage,
   fetchConfig = defaultFetchConfig,
   submit = defaultSubmit,
   verify = defaultVerify,
@@ -443,7 +462,7 @@ export function HostedLoginPage({
   }, [backHref]);
 
   const [config, setConfig] = React.useState<PublicConfigLike | null>(null);
-  const [locale, setLocale] = React.useState<Locale>(() => resolveLocale(uiLocales));
+  const [locale, setLocale] = React.useState<Locale>(() => resolveLocale({ uiLocales }));
   const [theme, setTheme] = React.useState<IdpnTheme>(DEFAULT_THEME);
   const [submitting, setSubmitting] = React.useState(false);
   const [errorCode, setErrorCode] = React.useState<
@@ -460,6 +479,7 @@ export function HostedLoginPage({
     if (clientId === undefined) {
       return;
     }
+    const preference = acceptLanguage ?? browserAcceptLanguage();
     let cancelled = false;
     void fetchConfig(clientId)
       .then((loaded) => {
@@ -468,7 +488,12 @@ export function HostedLoginPage({
         }
         setConfig(loaded);
         setLocale(
-          resolveLocale(uiLocales, loaded.locales?.supported ?? ['fa-IR'], loaded.locales?.default),
+          resolveLocale({
+            uiLocales,
+            acceptLanguage: preference,
+            clientDefault: loaded.locales?.default ?? loaded.locale,
+            supported: loaded.locales?.supported,
+          }),
         );
         setTheme(sanitizeIdpnTheme(loaded.theme));
       })
@@ -478,9 +503,21 @@ export function HostedLoginPage({
     return () => {
       cancelled = true;
     };
-  }, [clientId, fetchConfig, uiLocales]);
+  }, [clientId, fetchConfig, uiLocales, acceptLanguage]);
 
-  const dir = directionOf(locale);
+  const dir = resolveDirection(locale, config?.locales?.dir?.[locale]);
+
+  /**
+   * The Hosted UI owns the document, so the document language/direction follow the
+   * resolved locale. Embedded MFE roots only set attributes on their own root.
+   */
+  React.useEffect(() => {
+    if (typeof document === 'undefined') {
+      return;
+    }
+    document.documentElement.lang = locale;
+    document.documentElement.dir = dir;
+  }, [locale, dir]);
 
   const socialProviders = selectSocialProviders(
     config?.socialProviders,

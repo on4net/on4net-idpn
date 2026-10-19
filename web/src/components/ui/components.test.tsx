@@ -88,8 +88,8 @@ describe('Alert', () => {
 });
 
 describe('Spinner', () => {
-  it('announces a loading state to screen readers', () => {
-    render(<Spinner />);
+  it('announces the localized loading state to screen readers', () => {
+    render(<Spinner label="در حال بارگذاری" />);
 
     expect(screen.getByRole('status')).toHaveTextContent('در حال بارگذاری');
   });

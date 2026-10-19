@@ -68,6 +68,56 @@ describe('buildPublicClientConfig', () => {
     ]);
   });
 
+  it('sanitizes hostile locale rows deterministically', () => {
+    const messy: PublicClientSource = {
+      ...source,
+      locales: {
+        default: 'de-DE',
+        supported: ['fa-ir', 'fa-IR', '<script>', 'en_us', 'ar-SA'],
+        dir: { 'fa-ir': 'ltr', 'ar-SA': 'rtl' },
+      },
+    };
+
+    const config = buildPublicClientConfig(messy, deps);
+
+    expect(config.locale).toBe('fa-IR');
+    expect(config.locales).toMatchObject({
+      default: 'fa-IR',
+      supported: ['fa-IR', 'en-US', 'ar-SA'],
+      dir: { 'fa-IR': 'ltr', 'en-US': 'ltr', 'ar-SA': 'rtl' },
+    });
+    expect(JSON.stringify(config)).not.toContain('<script>');
+  });
+
+  it('derives a direction for every supported locale and ignores invalid overrides', () => {
+    const invalid: PublicClientSource = {
+      ...source,
+      locales: {
+        default: 'en-US',
+        supported: ['en-US', 'fa-IR'],
+        dir: { 'en-US': 'sideways' as 'ltr', 'fa-IR': 'ltr' },
+      },
+    };
+
+    const config = buildPublicClientConfig(invalid, deps);
+    expect(config.locales.dir).toEqual({ 'en-US': 'ltr', 'fa-IR': 'ltr' });
+    expect(config.locales.supported).toEqual(['en-US', 'fa-IR']);
+  });
+
+  it('falls back to fa-IR when the locale row is empty or entirely invalid', () => {
+    for (const locales of [
+      {},
+      { default: 'de-DE', supported: ['<x>', 'not a locale'] },
+      { supported: 'fa-IR' as unknown as string[], dir: null as unknown as Record<string, 'rtl'> },
+    ] as PublicClientSource['locales'][]) {
+      const config = buildPublicClientConfig({ ...source, locales }, deps);
+      expect(config.locale).toBe('fa-IR');
+      expect(config.locales.default).toBe('fa-IR');
+      expect(config.locales.supported).toEqual(['fa-IR']);
+      expect(config.locales.dir).toEqual({ 'fa-IR': 'rtl' });
+    }
+  });
+
   it('never exposes secrets, redirect URIs or role lists', () => {
     const serialized = JSON.stringify(buildPublicClientConfig(source, deps));
 

@@ -75,6 +75,33 @@ describe('public client config contract', () => {
 
     expect(result.success).toBe(false);
   });
+
+  it('rejects locale bundles that are not internally consistent', () => {
+    const cases = [
+      { ...publicConfigFixture.locales, default: 'ar-SA' },
+      { ...publicConfigFixture.locales, supported: ['fa-IR', 'fa-ir'] },
+      { ...publicConfigFixture.locales, supported: ['fa-IR', 'en-US', '<script>'] },
+      { ...publicConfigFixture.locales, dir: { 'fa-IR': 'rtl' } },
+      { ...publicConfigFixture.locales, dir: { 'fa-IR': 'rtl', 'en-US': 'ltr', 'de-DE': 'ltr' } },
+    ];
+    for (const locales of cases) {
+      expect(publicClientConfigSchema.safeParse({ ...publicConfigFixture, locales }).success).toBe(
+        false,
+      );
+    }
+  });
+
+  it('requires locale to match locales.default and have a direction', () => {
+    expect(
+      publicClientConfigSchema.safeParse({ ...publicConfigFixture, locale: 'en-US' }).success,
+    ).toBe(false);
+    expect(
+      publicClientConfigSchema.safeParse({
+        ...publicConfigFixture,
+        locales: { ...publicConfigFixture.locales, dir: { 'en-US': 'ltr' } },
+      }).success,
+    ).toBe(false);
+  });
 });
 
 describe('MFE config contract', () => {

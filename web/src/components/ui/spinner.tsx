@@ -2,11 +2,11 @@ import { cn } from '@/lib/utils';
 
 export interface SpinnerProps {
   className?: string;
-  /** Visible to screen readers only. */
-  label?: string;
+  /** Visible to screen readers only; pass the localized loading message. */
+  label: string;
 }
 
-export function Spinner({ className, label = 'در حال بارگذاری' }: SpinnerProps) {
+export function Spinner({ className, label }: SpinnerProps) {
   return (
     <span role="status" className={cn('inline-flex items-center', className)}>
       <svg

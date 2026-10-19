@@ -25,11 +25,13 @@ function renderForm(overrides: Partial<React.ComponentProps<typeof LoginForm>> =
 
 describe('i18n', () => {
   it('resolves ui_locales against the client locales, then the default', () => {
-    expect(resolveLocale('en-US fa-IR', ['fa-IR', 'en-US'])).toBe('en-US');
-    expect(resolveLocale('en', ['fa-IR', 'en-US'])).toBe('en-US');
-    expect(resolveLocale('de-DE', ['fa-IR', 'en-US'])).toBe('fa-IR');
-    expect(resolveLocale(undefined, ['fa-IR', 'en-US'], 'en-US')).toBe('en-US');
-    expect(resolveLocale(undefined, ['fa-IR'])).toBe('fa-IR');
+    expect(resolveLocale({ uiLocales: 'en-US fa-IR', supported: ['fa-IR', 'en-US'] })).toBe(
+      'en-US',
+    );
+    expect(resolveLocale({ uiLocales: 'en', supported: ['fa-IR', 'en-US'] })).toBe('en-US');
+    expect(resolveLocale({ uiLocales: 'de-DE', supported: ['fa-IR', 'en-US'] })).toBe('fa-IR');
+    expect(resolveLocale({ clientDefault: 'en-US', supported: ['fa-IR', 'en-US'] })).toBe('en-US');
+    expect(resolveLocale({ supported: ['fa-IR'] })).toBe('fa-IR');
   });
 
   it('derives direction from the locale', () => {
@@ -213,6 +215,45 @@ describe('HostedLoginPage', () => {
     expect(root.style.getPropertyValue('--idpn-radius')).toBe('4px');
     expect(root.style.getPropertyValue('--idpn-font-sans')).toContain("'Inter'");
     expect(screen.getByRole('heading', { name: 'Sign in' })).toBeInTheDocument();
+  });
+
+  it('uses Accept-Language only for locales the client enables', async () => {
+    const fetchConfig = vi.fn().mockResolvedValue({
+      locale: 'fa-IR',
+      locales: { default: 'fa-IR', supported: ['fa-IR', 'en-US'] },
+    });
+
+    render(
+      <HostedLoginPage
+        search="?client_id=app-a"
+        acceptLanguage="de-DE, en-US;q=0.9, fa-IR;q=0.4"
+        fetchConfig={fetchConfig}
+      />,
+    );
+
+    expect(await screen.findByTestId('public-config-loaded')).toBeInTheDocument();
+    const root = screen.getByTestId('idpn-root');
+    expect(root).toHaveAttribute('lang', 'en-US');
+    expect(root).toHaveAttribute('dir', 'ltr');
+    await waitFor(() => expect(document.documentElement).toHaveAttribute('lang', 'en-US'));
+    await waitFor(() => expect(document.documentElement).toHaveAttribute('dir', 'ltr'));
+    expect(screen.getByRole('heading', { name: 'Sign in' })).toBeInTheDocument();
+  });
+
+  it('honours the validated per-locale direction override from the config', async () => {
+    const fetchConfig = vi.fn().mockResolvedValue({
+      locales: {
+        default: 'fa-IR',
+        supported: ['fa-IR'],
+        dir: { 'fa-IR': 'ltr', 'en-US': 'rtl' },
+      },
+    });
+
+    render(<HostedLoginPage search="?client_id=app-a" fetchConfig={fetchConfig} />);
+
+    expect(await screen.findByTestId('public-config-loaded')).toBeInTheDocument();
+    expect(screen.getByTestId('idpn-root')).toHaveAttribute('dir', 'ltr');
+    await waitFor(() => expect(document.documentElement).toHaveAttribute('dir', 'ltr'));
   });
 
   it('drops malicious theme values from the public config', async () => {

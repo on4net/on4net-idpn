@@ -1,4 +1,4 @@
-import type { IdpnTheme } from '@idpn/mfe-sdk';
+import type { IdpnLocales, IdpnTheme } from '@idpn/mfe-sdk';
 import * as React from 'react';
 
 import { IdpnRoot } from '@/app/idpn-root';
@@ -40,6 +40,7 @@ import {
   type MfeRole,
   type MemberStatus,
 } from './api-client';
+import { resolveDirection, resolveLocale, translate, type Locale } from '@/i18n';
 
 export interface UserManagementEvent {
   type: 'auth:error';
@@ -55,6 +56,8 @@ export interface UserManagementProps {
   getAccessToken?: () => string | null;
   locale?: string;
   dir?: 'rtl' | 'ltr';
+  /** Languages enabled by the client; only these are honoured. */
+  locales?: IdpnLocales;
   pageSize?: number;
   /** Receives non-sensitive module events; never contains a token. */
   onEvent?: (event: UserManagementEvent) => void;
@@ -62,36 +65,27 @@ export interface UserManagementProps {
   apiClient?: MfeApiClient;
 }
 
-const STATUS_LABEL: Record<MemberStatus, string> = {
-  invited: 'دعوت‌شده',
-  active: 'فعال',
-  suspended: 'معلق',
-};
-
 const STATUS_VARIANT: Record<MemberStatus, 'default' | 'outline' | 'destructive'> = {
   invited: 'outline',
   active: 'default',
   suspended: 'destructive',
 };
 
-const STATUS_OPTIONS: readonly { value: 'all' | MemberStatus; label: string }[] = [
-  { value: 'all', label: 'همه وضعیت‌ها' },
-  { value: 'invited', label: STATUS_LABEL.invited },
-  { value: 'active', label: STATUS_LABEL.active },
-  { value: 'suspended', label: STATUS_LABEL.suspended },
-];
+const STATUS_VALUES: readonly ('all' | MemberStatus)[] = ['all', 'invited', 'active', 'suspended'];
 
-const describeError = (error: unknown): string => {
+type Translate = (key: string, values?: Record<string, string | number>) => string;
+
+const describeError = (error: unknown, t: Translate): string => {
   if (error instanceof MfeApiError) {
     if (error.kind === 'unauthorized' || error.kind === 'forbidden') {
-      return 'دسترسی به مدیریت اعضای این اپ مجاز نیست.';
+      return t('members.errorForbidden');
     }
     if (error.kind === 'network') {
-      return 'ارتباط با سرور برقرار نشد.';
+      return t('members.errorNetwork');
     }
-    return error.detail ?? 'درخواست انجام نشد.';
+    return error.detail ?? t('members.errorRequest');
   }
-  return 'خطای غیرمنتظره رخ داد.';
+  return t('members.errorUnexpected');
 };
 
 const isAbort = (error: unknown): boolean =>
@@ -114,11 +108,28 @@ export function UserManagement({
   apiBaseUrl,
   getAccessToken,
   locale = 'fa-IR',
-  dir = 'rtl',
+  dir,
+  locales,
   pageSize = 10,
   onEvent,
   apiClient,
 }: UserManagementProps) {
+  const activeLocale: Locale = resolveLocale({
+    configLocale: locale,
+    supported: locales?.supported,
+    clientDefault: locales?.default,
+  });
+  const direction = resolveDirection(activeLocale, dir ?? locales?.dir?.[activeLocale]);
+  const t = React.useCallback(
+    (key: string, values: Record<string, string | number> = {}) =>
+      translate(activeLocale, key, values),
+    [activeLocale],
+  );
+  const statusOptions = React.useMemo(
+    () => STATUS_VALUES.map((value) => ({ value, label: t(`members.status.${value}`) })),
+    [t],
+  );
+  const statusLabel = (status: MemberStatus): string => t(`members.status.${status}`);
   const api = React.useMemo(
     () =>
       apiClient ??
@@ -146,9 +157,9 @@ export function UserManagement({
       if (caught instanceof MfeApiError) {
         onEvent?.({ type: 'auth:error', code: caught.kind });
       }
-      return describeError(caught);
+      return describeError(caught, t);
     },
-    [onEvent],
+    [onEvent, t],
   );
 
   React.useEffect(() => {
@@ -254,7 +265,7 @@ export function UserManagement({
         }
         attributes = parsed as Record<string, unknown>;
       } catch {
-        setInviteError('ویژگی‌ها باید یک شیء JSON معتبر باشند.');
+        setInviteError(t('members.inviteInvalidAttributes'));
         return;
       }
     }
@@ -311,11 +322,11 @@ export function UserManagement({
     }
   };
 
-  const rolePicker = (selected: string[], onToggle: (key: string) => void) =>
+  const rolePicker = (selected: string[], onToggle: (key: string) => void, label: string) =>
     roles.length === 0 ? (
-      <p className="text-sm text-muted-foreground">نقشی برای این اپ تعریف نشده است.</p>
+      <p className="text-sm text-muted-foreground">{t('members.noRoles')}</p>
     ) : (
-      <div role="group" aria-label="نقش‌های این اپ" className="flex flex-wrap gap-2">
+      <div role="group" aria-label={label} className="flex flex-wrap gap-2">
         {roles.map((role) => (
           <Button
             key={role.key}
@@ -337,13 +348,13 @@ export function UserManagement({
     <section
       className="w-full max-w-4xl rounded-lg border border-border bg-card p-6"
       aria-busy={loading}
-      dir={dir}
-      lang={locale}
+      dir={direction}
+      lang={activeLocale}
       data-client-id={clientId}
     >
       <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h2 className="text-lg font-semibold text-foreground">مدیریت کاربران</h2>
+          <h2 className="text-lg font-semibold text-foreground">{t('members.title')}</h2>
           <p className="text-sm text-muted-foreground">
             <bdi dir="ltr">{clientId}</bdi>
           </p>
@@ -359,16 +370,16 @@ export function UserManagement({
           }}
         >
           <DialogTrigger asChild>
-            <Button>دعوت کاربر</Button>
+            <Button>{t('members.invite')}</Button>
           </DialogTrigger>
           <DialogContent aria-describedby="invite-member-description">
-            <DialogTitle>دعوت عضو جدید</DialogTitle>
+            <DialogTitle>{t('members.inviteTitle')}</DialogTitle>
             <DialogDescription id="invite-member-description" className="mt-2">
-              کاربر فقط به همین اپ اضافه می‌شود.
+              {t('members.inviteDescription')}
             </DialogDescription>
             <form className="mt-4 grid gap-3" onSubmit={submitInvite} noValidate>
               <div className="grid gap-1">
-                <Label htmlFor="mfe-invite-email">ایمیل</Label>
+                <Label htmlFor="mfe-invite-email">{t('members.email')}</Label>
                 <Input
                   id="mfe-invite-email"
                   type="email"
@@ -379,7 +390,7 @@ export function UserManagement({
                 />
               </div>
               <div className="grid gap-1">
-                <Label htmlFor="mfe-invite-name">نام نمایشی (اختیاری)</Label>
+                <Label htmlFor="mfe-invite-name">{t('members.displayNameOptional')}</Label>
                 <Input
                   id="mfe-invite-name"
                   value={inviteName}
@@ -387,13 +398,15 @@ export function UserManagement({
                 />
               </div>
               <div className="grid gap-1">
-                <Label>نقش‌ها</Label>
-                {rolePicker(inviteRoleKeys, (key) =>
-                  setInviteRoleKeys((keys) => toggleKey(keys, key)),
+                <Label>{t('members.roles')}</Label>
+                {rolePicker(
+                  inviteRoleKeys,
+                  (key) => setInviteRoleKeys((keys) => toggleKey(keys, key)),
+                  t('members.rolesGroup'),
                 )}
               </div>
               <div className="grid gap-1">
-                <Label htmlFor="mfe-invite-attributes">ویژگی‌ها (JSON، اختیاری)</Label>
+                <Label htmlFor="mfe-invite-attributes">{t('members.attributesOptional')}</Label>
                 <textarea
                   id="mfe-invite-attributes"
                   className="min-h-24 w-full rounded-md border border-input bg-background p-2 text-start text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -403,23 +416,23 @@ export function UserManagement({
                   aria-describedby="mfe-invite-attributes-help"
                 />
                 <p id="mfe-invite-attributes-help" className="text-xs text-muted-foreground">
-                  ویژگی‌ها باید با طرح عضویت این اپ هم‌خوان باشند.
+                  {t('members.attributesHint')}
                 </p>
               </div>
               {inviteError !== null && (
                 <Alert variant="destructive">
-                  <AlertTitle>دعوت انجام نشد</AlertTitle>
+                  <AlertTitle>{t('members.inviteFailed')}</AlertTitle>
                   <AlertDescription>{inviteError}</AlertDescription>
                 </Alert>
               )}
               <div className="mt-2 flex justify-end gap-2">
                 <DialogClose asChild>
                   <Button variant="outline" type="button">
-                    انصراف
+                    {t('members.cancel')}
                   </Button>
                 </DialogClose>
                 <Button type="submit" disabled={inviting}>
-                  {inviting ? 'در حال ارسال…' : 'دعوت'}
+                  {inviting ? t('members.inviting') : t('members.inviteSubmit')}
                 </Button>
               </div>
             </form>
@@ -429,16 +442,16 @@ export function UserManagement({
 
       <form className="mb-4 flex flex-wrap items-end gap-3" role="search" onSubmit={submitSearch}>
         <div className="grid gap-1">
-          <Label htmlFor="mfe-member-search">جست‌وجو</Label>
+          <Label htmlFor="mfe-member-search">{t('members.search')}</Label>
           <Input
             id="mfe-member-search"
-            placeholder="نام یا ایمیل"
+            placeholder={t('members.searchPlaceholder')}
             value={searchInput}
             onChange={(event) => setSearchInput(event.target.value)}
           />
         </div>
         <div className="grid gap-1">
-          <Label htmlFor="mfe-member-status">وضعیت</Label>
+          <Label htmlFor="mfe-member-status">{t('members.statusFilter')}</Label>
           <Select
             value={status}
             onValueChange={(value) => {
@@ -446,11 +459,11 @@ export function UserManagement({
               setPage(1);
             }}
           >
-            <SelectTrigger id="mfe-member-status" aria-label="وضعیت عضویت">
+            <SelectTrigger id="mfe-member-status" aria-label={t('members.statusLabel')}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {STATUS_OPTIONS.map((option) => (
+              {statusOptions.map((option) => (
                 <SelectItem key={option.value} value={option.value}>
                   {option.label}
                 </SelectItem>
@@ -459,13 +472,13 @@ export function UserManagement({
           </Select>
         </div>
         <Button type="submit" variant="secondary">
-          جست‌وجو
+          {t('members.search')}
         </Button>
       </form>
 
       {error !== null && (
         <Alert variant="destructive" className="mb-4">
-          <AlertTitle>خطا در دریافت اعضا</AlertTitle>
+          <AlertTitle>{t('members.loadFailed')}</AlertTitle>
           <AlertDescription>
             <p>{error}</p>
             <Button
@@ -475,7 +488,7 @@ export function UserManagement({
               className="mt-2"
               onClick={() => setReloadKey((value) => value + 1)}
             >
-              تلاش دوباره
+              {t('members.retry')}
             </Button>
           </AlertDescription>
         </Alert>
@@ -484,29 +497,27 @@ export function UserManagement({
       <div aria-live="polite" className="mb-2 min-h-6 text-sm text-muted-foreground">
         {loading ? (
           <span className="inline-flex items-center gap-2">
-            <Spinner /> در حال بارگذاری…
+            <Spinner label="" /> {t('members.loading')}
           </span>
         ) : (
-          `${total} عضو`
+          t('members.caption', { total })
         )}
       </div>
 
       {!loading && error === null && members.length === 0 && (
-        <p className="py-8 text-center text-muted-foreground">کاربری یافت نشد.</p>
+        <p className="py-8 text-center text-muted-foreground">{t('members.empty')}</p>
       )}
 
       {!loading && members.length > 0 && error === null && (
         <Table>
-          <TableCaption>
-            اعضای اپ <bdi dir="ltr">{clientId}</bdi>
-          </TableCaption>
+          <TableCaption>{t('members.tableCaption', { clientId })}</TableCaption>
           <TableHeader>
             <TableRow>
-              <TableHead>نام</TableHead>
-              <TableHead>ایمیل</TableHead>
-              <TableHead>وضعیت</TableHead>
-              <TableHead>نقش‌ها</TableHead>
-              <TableHead>عملیات</TableHead>
+              <TableHead>{t('members.columnName')}</TableHead>
+              <TableHead>{t('members.columnEmail')}</TableHead>
+              <TableHead>{t('members.columnStatus')}</TableHead>
+              <TableHead>{t('members.columnRoles')}</TableHead>
+              <TableHead>{t('members.columnActions')}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -518,11 +529,15 @@ export function UserManagement({
                 </TableCell>
                 <TableCell>
                   <Badge variant={STATUS_VARIANT[member.status]}>
-                    {STATUS_LABEL[member.status]}
+                    {statusLabel(member.status)}
                   </Badge>
                 </TableCell>
                 <TableCell className="text-muted-foreground">
-                  <bdi>{member.roleKeys.length === 0 ? '—' : member.roleKeys.join('، ')}</bdi>
+                  <bdi>
+                    {member.roleKeys.length === 0
+                      ? t('members.none')
+                      : member.roleKeys.join(t('members.roleSeparator'))}
+                  </bdi>
                 </TableCell>
                 <TableCell>
                   <div className="flex flex-wrap gap-2">
@@ -533,7 +548,7 @@ export function UserManagement({
                         variant="outline"
                         onClick={() => void changeStatus(member, 'suspended')}
                       >
-                        تعلیق
+                        {t('members.suspend')}
                       </Button>
                     ) : (
                       <Button
@@ -542,7 +557,7 @@ export function UserManagement({
                         variant="outline"
                         onClick={() => void changeStatus(member, 'active')}
                       >
-                        فعال‌سازی
+                        {t('members.activate')}
                       </Button>
                     )}
                     <Button
@@ -551,7 +566,7 @@ export function UserManagement({
                       variant="secondary"
                       onClick={() => openRoleDialog(member)}
                     >
-                      نقش‌ها
+                      {t('members.rolesButton')}
                     </Button>
                   </div>
                 </TableCell>
@@ -563,7 +578,7 @@ export function UserManagement({
 
       <div className="mt-4 flex items-center justify-between gap-2">
         <span className="text-sm text-muted-foreground">
-          صفحه <bdi>{page}</bdi> از <bdi>{pageCount}</bdi>
+          {t('members.pageOf', { page, pageCount })}
         </span>
         <div className="flex gap-2">
           <Button
@@ -572,7 +587,7 @@ export function UserManagement({
             disabled={loading || page <= 1}
             onClick={() => setPage((value) => value - 1)}
           >
-            قبلی
+            {t('members.previous')}
           </Button>
           <Button
             type="button"
@@ -580,7 +595,7 @@ export function UserManagement({
             disabled={loading || page >= pageCount}
             onClick={() => setPage((value) => value + 1)}
           >
-            بعدی
+            {t('members.next')}
           </Button>
         </div>
       </div>
@@ -595,26 +610,32 @@ export function UserManagement({
         }}
       >
         <DialogContent aria-describedby="member-roles-description">
-          <DialogTitle>نقش‌های {roleTarget?.displayName ?? ''}</DialogTitle>
+          <DialogTitle>
+            {t('members.rolesDialogTitle', { name: roleTarget?.displayName ?? '' })}
+          </DialogTitle>
           <DialogDescription id="member-roles-description" className="mt-2">
-            فقط نقش‌های همین اپ قابل تخصیص هستند.
+            {t('members.rolesDialogDescription')}
           </DialogDescription>
           <div className="mt-4 grid gap-3">
-            {rolePicker(roleDraft, (key) => setRoleDraft((keys) => toggleKey(keys, key)))}
+            {rolePicker(
+              roleDraft,
+              (key) => setRoleDraft((keys) => toggleKey(keys, key)),
+              t('members.rolesGroup'),
+            )}
             {roleError !== null && (
               <Alert variant="destructive">
-                <AlertTitle>ذخیره نقش‌ها انجام نشد</AlertTitle>
+                <AlertTitle>{t('members.rolesSaveFailed')}</AlertTitle>
                 <AlertDescription>{roleError}</AlertDescription>
               </Alert>
             )}
             <div className="flex justify-end gap-2">
               <DialogClose asChild>
                 <Button variant="outline" type="button">
-                  انصراف
+                  {t('members.cancel')}
                 </Button>
               </DialogClose>
               <Button type="button" disabled={savingRoles} onClick={() => void saveRoles()}>
-                {savingRoles ? 'در حال ذخیره…' : 'ذخیره نقش‌ها'}
+                {savingRoles ? t('members.savingRoles') : t('members.saveRoles')}
               </Button>
             </div>
           </div>
@@ -635,13 +656,25 @@ export interface UserManagementRootProps extends UserManagementProps {
  */
 export function UserManagementRoot({
   locale = 'fa-IR',
-  dir = 'rtl',
+  dir,
+  locales,
   theme,
   ...props
 }: UserManagementRootProps) {
+  const activeLocale: Locale = resolveLocale({
+    configLocale: locale,
+    supported: locales?.supported,
+    clientDefault: locales?.default,
+  });
+  const direction = resolveDirection(activeLocale, dir ?? locales?.dir?.[activeLocale]);
   return (
-    <IdpnRoot locale={locale} dir={dir} theme={theme}>
-      <UserManagement {...props} locale={locale} dir={dir} />
+    <IdpnRoot locale={activeLocale} dir={direction} theme={theme}>
+      <UserManagement
+        {...props}
+        locale={activeLocale}
+        dir={direction}
+        {...(locales === undefined ? {} : { locales })}
+      />
     </IdpnRoot>
   );
 }

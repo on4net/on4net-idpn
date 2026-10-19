@@ -1,6 +1,7 @@
 export {
   clientFeaturesSchema,
   localeBundleSchema,
+  localeCodeSchema,
   localeDirSchema,
   loginContextSummarySchema,
   loginMethodSchema,
