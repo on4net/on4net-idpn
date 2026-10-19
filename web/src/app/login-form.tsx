@@ -22,6 +22,8 @@ export interface LoginFormProps {
   errorCode: 'invalid_credentials' | 'network' | 'mfa_enrollment_required' | null;
   /** Prefills the identifier from `login_hint`; the user may still change it. */
   defaultIdentifier?: string;
+  /** Forgot-password link target; the Hosted UI keeps its client parameters in it. */
+  forgotHref?: string;
   /** Optional social login block rendered above the password form, inside the same card. */
   social?: React.ReactNode;
   onSubmit(values: LoginFormValues): void | Promise<void>;
@@ -33,6 +35,7 @@ export function LoginForm({
   submitting,
   errorCode,
   defaultIdentifier,
+  forgotHref = '/forgot-password',
   social,
   onSubmit,
 }: LoginFormProps) {
@@ -131,7 +134,7 @@ export function LoginForm({
       </form>
 
       <p className="mt-4 text-sm">
-        <a href="/forgot-password" className="text-primary underline-offset-4 hover:underline">
+        <a href={forgotHref} className="text-primary underline-offset-4 hover:underline">
           {t('login.forgot')}
         </a>
       </p>

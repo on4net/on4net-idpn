@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { z } from 'zod';
 
 import type { AdminAudit } from '../admin-types.js';
+import { createMemoryRateLimiter, type RateLimiter } from '../../http/rate-limit.js';
 import {
   authorizeAdminRequest,
   type AdminAuthorization,
@@ -25,6 +26,15 @@ export interface MemberRoutesOptions {
   permissions: PermissionReader;
   members: AdminMemberRepository;
   audit: AdminAudit;
+  /**
+   * Sends the invitation/notification mail. Omitted in deployments without SMTP; the invite
+   * itself still succeeds and the resend endpoint answers `503`.
+   */
+  notifications?: {
+    sendInvite(userId: string): Promise<'invitation' | 'notification' | 'skipped'>;
+  };
+  /** Shared limiter for resend; a per-process limiter is used when omitted. */
+  rateLimit?: RateLimiter;
 }
 
 const MEMBER_READ = 'idp:client-member:read';
@@ -41,6 +51,7 @@ export function registerMemberAdminRoutes(
   app: FastifyInstance,
   options: MemberRoutesOptions,
 ): void {
+  const resendLimiter = options.rateLimit ?? createMemoryRateLimiter();
   const guard = async (
     request: FastifyRequest,
     reply: FastifyReply,
@@ -169,12 +180,107 @@ export function registerMemberAdminRoutes(
         return sendFailure(reply, result);
       }
       const { member, createdUser } = result.value;
+      let delivery: 'invitation' | 'notification' | 'skipped' | 'mail_failed' | 'disabled' =
+        'disabled';
+      if (options.notifications !== undefined) {
+        try {
+          delivery = await options.notifications.sendInvite(member.userId);
+        } catch (error) {
+          delivery = 'mail_failed';
+          // Mail bodies carry invite tokens; log only the transport error.
+          const message = error instanceof Error ? error.message : 'unknown error';
+          console.error(`invite mail failed: ${message}`);
+        }
+      }
       await audit(request, principal, 'member.invite', clientId, member.membershipId, {
         userId: member.userId,
         roleKeys: member.roleKeys,
         createdUser,
+        delivery,
       });
       return reply.code(201).send({ member, createdUser, invited: true });
+    },
+  );
+
+  app.post<{ Params: { clientId: string; userId: string } }>(
+    '/api/v1/clients/:clientId/members/:userId/invite/resend',
+    async (request, reply) => {
+      const { clientId, userId } = request.params;
+      const principal = await guard(request, reply, { permission: MEMBER_INVITE, clientId });
+      if (principal === null) {
+        return reply;
+      }
+      const member = await options.members.find(clientId, userId);
+      if (member === null) {
+        return sendProblem(reply, 404, 'not-found', 'Not found', 'membership does not exist');
+      }
+      if (member.status !== 'invited') {
+        return sendProblem(
+          reply,
+          409,
+          'conflict',
+          'Conflict',
+          'only a pending invitation can be resent',
+        );
+      }
+      // 5 resends per hour per membership (docs/security.md 3.2, email sending limit).
+      if (
+        !(await resendLimiter.consume(`member-invite-resend:${clientId}:${userId}`, {
+          windowSeconds: 3600,
+          max: 5,
+        }))
+      ) {
+        reply.header('Retry-After', '3600');
+        return sendProblem(reply, 429, 'rate-limited', 'Too many requests', 'try again later');
+      }
+      if (options.notifications === undefined) {
+        return sendProblem(
+          reply,
+          503,
+          'service-unavailable',
+          'Service unavailable',
+          'mail delivery is not configured',
+        );
+      }
+
+      let delivery: 'invitation' | 'notification' | 'skipped';
+      try {
+        delivery = await options.notifications.sendInvite(userId);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'unknown error';
+        console.error(`invite resend mail failed: ${message}`);
+        await audit(
+          request,
+          principal,
+          'member.invite.resend_failed',
+          clientId,
+          member.membershipId,
+          {
+            userId,
+          },
+        );
+        return sendProblem(
+          reply,
+          503,
+          'service-unavailable',
+          'Service unavailable',
+          'invitation mail could not be sent',
+        );
+      }
+      if (delivery === 'skipped') {
+        return sendProblem(
+          reply,
+          409,
+          'conflict',
+          'Conflict',
+          'the invited account is no longer available',
+        );
+      }
+      await audit(request, principal, 'member.invite.resend', clientId, member.membershipId, {
+        userId,
+        delivery,
+      });
+      return reply.code(202).send({ status: 'accepted', delivery });
     },
   );
 

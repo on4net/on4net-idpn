@@ -45,7 +45,7 @@ export interface AccountRoutesOptions {
 
 const PROBLEM_BASE = 'https://on4net.dev/problems';
 
-type ProblemSlug =
+export type ProblemSlug =
   | 'unauthorized'
   | 'forbidden'
   | 'invalid-current-password'
@@ -56,6 +56,8 @@ type ProblemSlug =
   | 'not-found'
   | 'conflict'
   | 'invalid-mfa-code'
+  | 'invalid-token'
+  | 'rate-limited'
   | 'service-unavailable';
 
 interface ProblemExtension {
@@ -68,9 +70,9 @@ interface ProblemExtension {
  * RFC 9457 problem response. `code` and `violations` are extension members so the MFE can
  * translate policy failures without parsing an English sentence.
  */
-function sendProblem(
+export function sendProblem(
   reply: FastifyReply,
-  status: 400 | 401 | 403 | 404 | 409 | 422 | 503,
+  status: 400 | 401 | 403 | 404 | 409 | 422 | 429 | 503,
   slug: ProblemSlug,
   title: string,
   detail: string,
@@ -108,7 +110,7 @@ const expectedOrigin = (appUrl: string): string => {
  * - `PUT` additionally requires `application/json`, so a cross-site HTML form (which can
  *   only send GET/POST with simple content types) can never reach the handler.
  */
-function isSameOriginRequest(request: FastifyRequest, appUrl: string): boolean {
+export function isSameOriginRequest(request: FastifyRequest, appUrl: string): boolean {
   const origin = request.headers.origin;
   const site = request.headers['sec-fetch-site'];
   const expected = expectedOrigin(appUrl);
@@ -126,7 +128,7 @@ function isSameOriginRequest(request: FastifyRequest, appUrl: string): boolean {
   return site === 'same-origin' || site === 'none';
 }
 
-function hasJsonContentType(request: FastifyRequest): boolean {
+export function hasJsonContentType(request: FastifyRequest): boolean {
   const header = request.headers['content-type'];
   if (typeof header !== 'string') {
     return false;

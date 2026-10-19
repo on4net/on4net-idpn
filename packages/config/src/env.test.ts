@@ -68,6 +68,11 @@ describe('parseServerEnv', () => {
     expect(issues).toEqual([{ key: 'SESSION_SECRET', message: 'is required' }]);
   });
 
+  it('defaults the transactional mail sender and rejects a malformed address', () => {
+    expect(parseServerEnv(minimalEnv).MAIL_FROM).toBe('no-reply@on4net.dev');
+    expect(captureIssues({ ...minimalEnv, MAIL_FROM: 'not-an-email' })[0]?.key).toBe('MAIL_FROM');
+  });
+
   it('reports every missing required key in one error', () => {
     expect(() => parseServerEnv({})).toThrow(EnvValidationError);
     expect(

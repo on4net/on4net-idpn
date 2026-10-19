@@ -65,6 +65,7 @@ const sessions: AccountSession[] = [
 interface FakeClient {
   client: AccountApiClient;
   getProfile: ReturnType<typeof vi.fn>;
+  resendVerification: ReturnType<typeof vi.fn>;
   changePassword: ReturnType<typeof vi.fn>;
   listSessions: ReturnType<typeof vi.fn>;
   closeSession: ReturnType<typeof vi.fn>;
@@ -109,6 +110,7 @@ const disabledMfa = {
 
 function fakeClient(overrides: Partial<Record<keyof AccountApiClient, unknown>> = {}): FakeClient {
   const getProfile = vi.fn().mockResolvedValue(profile);
+  const resendVerification = vi.fn().mockResolvedValue({ status: 'accepted' });
   const changePassword = vi.fn().mockResolvedValue({
     ok: true,
     revokedSessions: 1,
@@ -133,6 +135,7 @@ function fakeClient(overrides: Partial<Record<keyof AccountApiClient, unknown>> 
 
   const client = {
     getProfile,
+    resendVerification,
     changePassword,
     listSessions,
     closeSession,
@@ -165,6 +168,57 @@ describe('Account MFE', () => {
     expect(screen.getByTestId('mfa-badge')).toHaveTextContent('غیرفعال');
     expect(screen.getByRole('button', { name: 'فعال‌سازی' })).toBeEnabled();
     expect(container.querySelector('[data-testid="account-module"]')).toHaveAttribute('dir', 'rtl');
+  });
+
+  it('shows an unverified email and resends the verification link', async () => {
+    const fake = fakeClient({
+      getProfile: vi.fn().mockResolvedValue({ ...profile, emailVerified: false }),
+    });
+    renderAccount(fake);
+
+    const button = await screen.findByRole('button', {
+      name: 'ارسال دوباره لینک تأیید',
+    });
+    expect(screen.getByText('تأییدنشده')).toBeVisible();
+
+    await userEvent.setup().click(button);
+
+    expect(fake.resendVerification).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText('لینک تأیید ارسال شد.')).toBeVisible();
+  });
+
+  it('refreshes the profile when the account was already verified', async () => {
+    const getProfile = vi
+      .fn()
+      .mockResolvedValueOnce({ ...profile, emailVerified: false })
+      .mockResolvedValueOnce(profile);
+    const fake = fakeClient({
+      getProfile,
+      resendVerification: vi.fn().mockResolvedValue({ status: 'already_verified' }),
+    });
+    renderAccount(fake);
+
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'ارسال دوباره لینک تأیید' }));
+
+    expect(await screen.findByText('ایمیل شما از قبل تأیید شده است.')).toBeVisible();
+    await waitFor(() => expect(getProfile).toHaveBeenCalledTimes(2));
+  });
+
+  it('shows an accessible error when the verification mail cannot be sent', async () => {
+    const fake = fakeClient({
+      getProfile: vi.fn().mockResolvedValue({ ...profile, emailVerified: false }),
+      resendVerification: vi
+        .fn()
+        .mockRejectedValue(new AccountApiError('server', 503, 'unavailable')),
+    });
+    renderAccount(fake);
+
+    await userEvent
+      .setup()
+      .click(await screen.findByRole('button', { name: 'ارسال دوباره لینک تأیید' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('ارسال لینک تأیید انجام نشد.');
   });
 
   it('renders English in LTR through the self-contained root', async () => {

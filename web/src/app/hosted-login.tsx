@@ -1,6 +1,13 @@
 import * as React from 'react';
 
 import { IdpnRoot } from '@/app/idpn-root';
+import {
+  ForgotPasswordPage,
+  SetPasswordPage,
+  VerifyEmailPage,
+  type AccountFlowResult,
+  type SetPasswordMode,
+} from '@/app/account-flows';
 import { LoginForm, type LoginFormValues } from '@/app/login-form';
 import { MfaForm, type MfaErrorCode, type MfaFormValues } from '@/app/mfa-form';
 import {
@@ -42,6 +49,14 @@ export interface HostedLoginPageProps {
   ) => Promise<LoginSubmitResult>;
   /** Second-factor call (`POST /api/v1/login/mfa/verify`); injectable for tests. */
   verify?: (values: MfaVerifyInput) => Promise<MfaVerifyResult>;
+  /** Account lifecycle calls, injectable for tests (tokens never leave component memory). */
+  forgotPassword?: (email: string) => Promise<AccountFlowResult>;
+  setPassword?: (input: {
+    token: string;
+    password: string;
+    mode: SetPasswordMode;
+  }) => Promise<AccountFlowResult>;
+  confirmEmail?: (token: string) => Promise<AccountFlowResult>;
   /** Called with a safe redirect target; defaults to `window.location.assign`. */
   navigate?: (target: string) => void;
 }
@@ -156,6 +171,99 @@ async function defaultVerify(values: MfaVerifyInput): Promise<MfaVerifyResult> {
 }
 
 /**
+ * Request a reset link. The server answers `202` for every address; the UI shows one
+ * neutral message and never probes whether an account exists.
+ */
+async function defaultForgotPassword(email: string): Promise<AccountFlowResult> {
+  let response: Response;
+  try {
+    response = await fetch('/api/v1/account/password/forgot', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ email }),
+    });
+  } catch {
+    return { ok: false, error: 'network' };
+  }
+  if (response.status === 429) {
+    return { ok: false, error: 'rate_limited' };
+  }
+  if (!response.ok) {
+    return { ok: false, error: response.status >= 500 ? 'network' : 'server' };
+  }
+  return { ok: true };
+}
+
+async function defaultSetPassword(input: {
+  token: string;
+  password: string;
+  mode: SetPasswordMode;
+}): Promise<AccountFlowResult> {
+  const path =
+    input.mode === 'invite' ? '/api/v1/account/invite/accept' : '/api/v1/account/password/reset';
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ token: input.token, password: input.password }),
+    });
+  } catch {
+    return { ok: false, error: 'network' };
+  }
+
+  if (response.status === 429) {
+    return { ok: false, error: 'rate_limited' };
+  }
+  if (response.status === 400) {
+    return { ok: false, error: 'invalid_token' };
+  }
+  if (response.status === 422) {
+    const problem = (await response.json().catch((): unknown => null)) as {
+      code?: unknown;
+      violations?: unknown;
+    } | null;
+    if (problem?.code === 'password_policy') {
+      return {
+        ok: false,
+        error: 'password_policy',
+        violations: Array.isArray(problem.violations)
+          ? problem.violations.filter((entry): entry is string => typeof entry === 'string')
+          : [],
+      };
+    }
+    return { ok: false, error: 'server' };
+  }
+  if (!response.ok) {
+    return { ok: false, error: response.status >= 500 ? 'network' : 'server' };
+  }
+  return { ok: true };
+}
+
+async function defaultConfirmEmail(token: string): Promise<AccountFlowResult> {
+  let response: Response;
+  try {
+    response = await fetch('/api/v1/account/email/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ token }),
+    });
+  } catch {
+    return { ok: false, error: 'network' };
+  }
+  if (response.status === 400) {
+    return { ok: false, error: 'invalid_token' };
+  }
+  if (!response.ok) {
+    return { ok: false, error: response.status >= 500 ? 'network' : 'server' };
+  }
+  return { ok: true };
+}
+
+/**
  * Hosted Auth UI page: reads `client_id`, `return_to`, `ui_locales` and `login_hint`, applies
  * the client theme and renders the localized login form. No token ever reaches this page —
  * only the HttpOnly `idpn_session` cookie set by the API on success.
@@ -165,6 +273,9 @@ export function HostedLoginPage({
   fetchConfig = defaultFetchConfig,
   submit = defaultSubmit,
   verify = defaultVerify,
+  forgotPassword = defaultForgotPassword,
+  setPassword = defaultSetPassword,
+  confirmEmail = defaultConfirmEmail,
   navigate,
 }: HostedLoginPageProps) {
   const params = React.useMemo(
@@ -181,6 +292,30 @@ export function HostedLoginPage({
   const loginContext = params.get('login_context') ?? undefined;
   /** Social callback failures arrive as an `error` query value (docs/auth-flows.md 9.5). */
   const socialError = params.get('error');
+  /** Account lifecycle flows: forgot, invite set-password, reset and email verification. */
+  const action = params.get('action');
+  const flowToken = params.get('token') ?? undefined;
+
+  /**
+   * Link back to the plain login form while keeping the client parameters. The token is
+   * never copied into this link (or anywhere else in the DOM).
+   */
+  const backHref = React.useMemo(() => {
+    const back = new URLSearchParams();
+    if (clientId !== undefined) {
+      back.set('client_id', clientId);
+    }
+    if (uiLocales !== undefined) {
+      back.set('ui_locales', uiLocales);
+    }
+    const serialized = back.toString();
+    return serialized === '' ? '?' : `?${serialized}`;
+  }, [clientId, uiLocales]);
+  const forgotHref = React.useMemo(() => {
+    const target = new URLSearchParams(backHref.startsWith('?') ? backHref.slice(1) : '');
+    target.set('action', 'forgot-password');
+    return `?${target.toString()}`;
+  }, [backHref]);
 
   const [config, setConfig] = React.useState<PublicConfigLike | null>(null);
   const [locale, setLocale] = React.useState<Locale>(() => resolveLocale(uiLocales));
@@ -286,6 +421,26 @@ export function HostedLoginPage({
     setMfaError(null);
   };
 
+  const flowView =
+    action === 'forgot-password' ? (
+      <ForgotPasswordPage locale={locale} backHref={backHref} onSubmit={forgotPassword} />
+    ) : action === 'set-password' || action === 'reset-password' ? (
+      <SetPasswordPage
+        locale={locale}
+        mode={action === 'set-password' ? 'invite' : 'reset'}
+        token={flowToken}
+        backHref={backHref}
+        onSubmit={setPassword}
+      />
+    ) : action === 'verify-email' ? (
+      <VerifyEmailPage
+        locale={locale}
+        token={flowToken}
+        backHref={backHref}
+        onConfirm={confirmEmail}
+      />
+    ) : null;
+
   return (
     <IdpnRoot
       locale={locale}
@@ -294,39 +449,41 @@ export function HostedLoginPage({
       data-client-id={clientId}
       aria-busy={submitting || mfaSubmitting}
     >
-      {challengeToken === null ? (
-        <LoginForm
-          locale={locale}
-          dir={dir}
-          submitting={submitting}
-          errorCode={errorCode}
-          defaultIdentifier={loginHint}
-          social={
-            showSocial ? (
-              <SocialLogin
-                locale={locale}
-                clientId={clientId ?? ''}
-                providers={socialProviders}
-                loginRequest={loginRequest}
-                returnTo={returnTo}
-                loginHint={loginHint}
-                errorCode={socialError}
-                navigate={navigate}
-              />
-            ) : undefined
-          }
-          onSubmit={handleSubmit}
-        />
-      ) : (
-        <MfaForm
-          locale={locale}
-          dir={dir}
-          submitting={mfaSubmitting}
-          errorCode={mfaError}
-          onBack={backToPassword}
-          onSubmit={handleVerify}
-        />
-      )}
+      {flowView ??
+        (challengeToken === null ? (
+          <LoginForm
+            locale={locale}
+            dir={dir}
+            submitting={submitting}
+            errorCode={errorCode}
+            defaultIdentifier={loginHint}
+            forgotHref={forgotHref}
+            social={
+              showSocial ? (
+                <SocialLogin
+                  locale={locale}
+                  clientId={clientId ?? ''}
+                  providers={socialProviders}
+                  loginRequest={loginRequest}
+                  returnTo={returnTo}
+                  loginHint={loginHint}
+                  errorCode={socialError}
+                  navigate={navigate}
+                />
+              ) : undefined
+            }
+            onSubmit={handleSubmit}
+          />
+        ) : (
+          <MfaForm
+            locale={locale}
+            dir={dir}
+            submitting={mfaSubmitting}
+            errorCode={mfaError}
+            onBack={backToPassword}
+            onSubmit={handleVerify}
+          />
+        ))}
       {config === null ? null : <span hidden data-testid="public-config-loaded" />}
     </IdpnRoot>
   );

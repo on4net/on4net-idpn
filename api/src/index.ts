@@ -2,6 +2,11 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { Redis } from 'ioredis';
 
 import { createPrismaAccountProfileRepository } from './account/prisma-account-repository.js';
+import { createAccountLifecycle } from './account/lifecycle.js';
+import { createPrismaLifecycleUserStore } from './account/prisma-lifecycle-repository.js';
+import { createPrismaAccountTokenStore } from './account/prisma-token-repository.js';
+import { createMailer } from './mail/index.js';
+import { createRedisRateLimiter } from './http/rate-limit.js';
 import { loadApiEnv } from './config/env.js';
 import { createPrismaAdminAudit } from './admin/prisma-audit.js';
 import { createPrismaPasswordStore } from './audit/prisma-audit.js';
@@ -91,6 +96,22 @@ const effectiveAccess = createPrismaEffectiveAccessSource(prisma);
 const adminSessionsRepository = createPrismaAdminSessionRepository(prisma);
 /** Password changes keep the caller's session but revoke every other session and token. */
 const passwordStore = createPrismaPasswordStore(prisma, { sessions });
+
+/**
+ * Account lifecycle mail (invite, verification, reset). Links point at the Hosted UI, and
+ * only hashed single-use tokens are persisted. Without `SMTP_URL` the API still answers the
+ * same, but no message is delivered.
+ */
+const mailer = createMailer(env);
+const accountTokens = createPrismaAccountTokenStore(prisma);
+const accountLifecycle = createAccountLifecycle({
+  users: createPrismaLifecycleUserStore(prisma),
+  tokens: accountTokens,
+  mailer,
+  links: { uiBaseUrl: env.HOSTED_UI_URL ?? env.APP_URL },
+});
+/** Shared fixed-window counters for the account endpoints (docs/security.md 3.2). */
+const accountRateLimiter = createRedisRateLimiter(redis);
 
 // Per-app social provider secrets are encrypted with AES-256-GCM. Production refuses to
 // start without a valid SOCIAL_SECRET_KEY; development may run without one, in which case
@@ -252,6 +273,8 @@ const app = buildServer({
     permissions: permissionReader,
     members: membersRepository,
     audit: createPrismaAdminAudit(prisma),
+    notifications: { sendInvite: (userId) => accountLifecycle.sendInvite(userId) },
+    rateLimit: accountRateLimiter,
   },
   audit: {
     adminClientId: env.ADMIN_CLIENT_ID,
@@ -282,6 +305,14 @@ const app = buildServer({
   adminKeys: {
     adminClientId: env.ADMIN_CLIENT_ID,
     permissions: permissionReader,
+    audit: createPrismaAdminAudit(prisma),
+  },
+  accountLifecycle: {
+    sessions,
+    lifecycle: accountLifecycle,
+    tokens: accountTokens,
+    passwords: passwordStore,
+    rateLimit: accountRateLimiter,
     audit: createPrismaAdminAudit(prisma),
   },
 });

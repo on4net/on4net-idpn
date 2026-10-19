@@ -115,6 +115,9 @@ export function Account({
   const [sessionsReload, setSessionsReload] = React.useState(0);
   const [closingId, setClosingId] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
+  const [verificationNotice, setVerificationNotice] = React.useState<string | null>(null);
+  const [verificationError, setVerificationError] = React.useState<string | null>(null);
+  const [resendingVerification, setResendingVerification] = React.useState(false);
 
   const [currentPassword, setCurrentPassword] = React.useState('');
   const [newPassword, setNewPassword] = React.useState('');
@@ -249,6 +252,30 @@ export function Account({
     }
   };
 
+  const resendVerification = async (): Promise<void> => {
+    setResendingVerification(true);
+    setVerificationNotice(null);
+    setVerificationError(null);
+    try {
+      const result = await api.resendVerification();
+      setVerificationNotice(
+        result.status === 'already_verified'
+          ? 'account.emailVerification.already'
+          : 'account.emailVerification.sent',
+      );
+      if (result.status === 'already_verified') {
+        setProfileReload((value) => value + 1);
+      }
+    } catch (caught) {
+      if (caught instanceof AccountApiError) {
+        onEvent?.({ type: 'auth:error', code: caught.code ?? caught.kind });
+      }
+      setVerificationError('account.emailVerification.error');
+    } finally {
+      setResendingVerification(false);
+    }
+  };
+
   const closeSession = async (sid: string): Promise<void> => {
     setClosingId(sid);
     setSessionsError(null);
@@ -343,7 +370,36 @@ export function Account({
               </div>
               <div>
                 <dt className="text-muted-foreground">{t('account.profile.emailVerified')}</dt>
-                <dd>{profile.emailVerified ? t('account.yes') : t('account.no')}</dd>
+                <dd>
+                  {profile.emailVerified ? (
+                    t('account.yes')
+                  ) : (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant="outline">{t('account.emailVerification.unverified')}</Badge>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={resendingVerification}
+                        onClick={() => void resendVerification()}
+                      >
+                        {resendingVerification
+                          ? t('account.emailVerification.resending')
+                          : t('account.emailVerification.resend')}
+                      </Button>
+                    </div>
+                  )}
+                  {verificationNotice === null ? null : (
+                    <p role="status" className="mt-1 text-xs text-muted-foreground">
+                      {t(verificationNotice)}
+                    </p>
+                  )}
+                  {verificationError === null ? null : (
+                    <p role="alert" className="mt-1 text-xs text-destructive">
+                      {t(verificationError)}
+                    </p>
+                  )}
+                </dd>
               </div>
               <div>
                 <dt className="text-muted-foreground">{t('account.profile.createdAt')}</dt>

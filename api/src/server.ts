@@ -3,6 +3,8 @@ import Fastify, { type FastifyInstance } from 'fastify';
 
 import type { AccountRoutesOptions } from './account/routes.js';
 import { registerAccountRoutes } from './account/routes.js';
+import type { AccountLifecycleRoutesOptions } from './account/lifecycle-routes.js';
+import { registerAccountLifecycleRoutes } from './account/lifecycle-routes.js';
 import { registerFormBodyParser } from './http/form-body.js';
 import type { AdminRoutesOptions } from './admin/routes.js';
 import { registerAdminRoutes } from './admin/routes.js';
@@ -85,6 +87,8 @@ export interface BuildServerOptions {
   adminKeys?: Omit<KeyRoutesOptions, 'issuer' | 'verifier' | 'keys'>;
   /** Mounts the same-origin account surface used by the embedded MFE (docs/account-api.md). */
   account?: Omit<AccountRoutesOptions, 'appUrl'>;
+  /** Mounts invite acceptance, email verification and password reset (docs/auth-flows.md 8). */
+  accountLifecycle?: Omit<AccountLifecycleRoutesOptions, 'appUrl'>;
 }
 
 /**
@@ -228,6 +232,10 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
 
   if (options.account !== undefined) {
     registerAccountRoutes(app, { ...options.account, appUrl: issuer });
+  }
+
+  if (options.accountLifecycle !== undefined) {
+    registerAccountLifecycleRoutes(app, { ...options.accountLifecycle, appUrl: issuer });
   }
 
   return app;

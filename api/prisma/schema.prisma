@@ -74,6 +74,13 @@ enum LoginContextStatus {
   disabled
 }
 
+/// Single-use, hashed account lifecycle tokens (invite, email verification, reset).
+enum AccountTokenPurpose {
+  invite
+  email_verification
+  password_reset
+}
+
 enum MembershipStatus {
   invited
   active
@@ -158,6 +165,7 @@ model User {
   memberships        ClientMembership[]  @relation("MembershipUser")
   invitations        ClientMembership[]  @relation("MembershipInviter")
   mfaFactors         MfaFactor[]
+  accountTokens      AccountToken[]
 
   @@unique([tenantId, username])
   @@unique([tenantId, email])
@@ -262,6 +270,23 @@ model MfaRecoveryCode {
 
   @@index([factorId, usedAt])
   @@map("mfa_recovery_codes")
+}
+
+/// Only the SHA-256 hash of an account token is stored; the token itself is emailed once.
+model AccountToken {
+  id         String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String              @map("user_id") @db.Uuid
+  purpose    AccountTokenPurpose
+  tokenHash  String              @unique @map("token_hash") @db.VarChar(128)
+  expiresAt  DateTime            @map("expires_at") @db.Timestamptz(6)
+  consumedAt DateTime?           @map("consumed_at") @db.Timestamptz(6)
+  createdAt  DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([userId, purpose, consumedAt])
+  @@index([expiresAt])
+  @@map("account_tokens")
 }
 
 model ClientSecret {

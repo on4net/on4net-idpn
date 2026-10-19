@@ -49,11 +49,12 @@ type ProblemSlug =
   | 'validation-error'
   | 'not-found'
   | 'conflict'
+  | 'rate-limited'
   | 'service-unavailable';
 
 export function sendProblem(
   reply: FastifyReply,
-  status: 400 | 401 | 403 | 404 | 409 | 422 | 503,
+  status: 400 | 401 | 403 | 404 | 409 | 422 | 429 | 503,
   slug: ProblemSlug,
   title: string,
   detail: string,

@@ -133,6 +133,8 @@ interface ProblemBody {
 
 export interface AccountApiClient {
   getProfile(options?: { signal?: AbortSignal }): Promise<AccountProfile>;
+  /** Sends (or re-sends) the email verification link for the signed-in account. */
+  resendVerification(): Promise<{ status: 'accepted' | 'already_verified' }>;
   changePassword(input: {
     currentPassword: string;
     newPassword: string;
@@ -223,6 +225,11 @@ export function createAccountApiClient(options: AccountApiClientOptions = {}): A
   return {
     getProfile: (callOptions = {}) =>
       call<AccountProfile>('/api/v1/account/profile', { method: 'GET' }, callOptions.signal),
+    resendVerification: () =>
+      call<{ status: 'accepted' | 'already_verified' }>('/api/v1/account/email/verification', {
+        method: 'POST',
+        body: JSON.stringify({}),
+      }),
     changePassword: (input) =>
       call<ChangePasswordResult>('/api/v1/account/password', {
         method: 'PUT',

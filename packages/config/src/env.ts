@@ -149,6 +149,8 @@ export const serverEnvSchema = z.object({
       .refine((value) => /^smtps?:\/\//.test(value), 'must be an smtp:// or smtps:// URL')
       .optional(),
   ),
+  /** Envelope sender for transactional mail (invite, verification, password reset). */
+  MAIL_FROM: z.preprocess(emptyToUndefined, z.string().email().default('no-reply@on4net.dev')),
   TRUSTED_PROXY_CIDRS: csv(z.string().min(1)).default([]),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 });

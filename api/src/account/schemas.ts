@@ -47,6 +47,28 @@ export const regenerateRecoveryCodesSchema = z
   })
   .strict();
 
+/** Account lifecycle bodies (docs/auth-flows.md 8.2-8.4). The token is opaque and single-use. */
+export const forgotPasswordSchema = z
+  .object({
+    email: z.string().trim().min(3).max(320).email(),
+  })
+  .strict();
+
+export const accountTokenSchema = z
+  .object({
+    token: z.string().trim().min(16).max(512),
+  })
+  .strict();
+
+export const setPasswordWithTokenSchema = z
+  .object({
+    token: z.string().trim().min(16).max(512),
+    password: z.string().min(1).max(256),
+  })
+  .strict();
+
+export const requestVerificationSchema = forgotPasswordSchema;
+
 export type EnrollTotpBody = z.infer<typeof enrollTotpSchema>;
 export type VerifyTotpEnrollmentBody = z.infer<typeof verifyTotpEnrollmentSchema>;
 export type DisableTotpBody = z.infer<typeof disableTotpSchema>;

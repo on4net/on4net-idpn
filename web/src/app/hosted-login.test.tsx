@@ -770,3 +770,222 @@ describe('HostedLoginPage default API calls', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(message);
   });
 });
+
+describe('HostedLoginPage account flows', () => {
+  const jsonResponse = (body: unknown, status = 200): Response =>
+    new Response(JSON.stringify(body), {
+      status,
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+  const stubFetch = (
+    handler: (url: string, init?: RequestInit) => Response | Promise<Response>,
+  ): void => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => handler(String(input), init)),
+    );
+  };
+
+  it('routes action=forgot-password to the neutral request form', async () => {
+    const forgotPassword = vi.fn().mockResolvedValue({ ok: true });
+    render(
+      <HostedLoginPage
+        search="?client_id=app-a&action=forgot-password"
+        fetchConfig={vi.fn().mockResolvedValue(null)}
+        forgotPassword={forgotPassword}
+      />,
+    );
+
+    expect(screen.getByRole('heading', { name: 'بازیابی رمز عبور' })).toBeVisible();
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText('ایمیل یا نام کاربری'), 'sara@example.com');
+    await user.click(screen.getByRole('button', { name: 'ارسال لینک' }));
+
+    expect(forgotPassword).toHaveBeenCalledWith('sara@example.com');
+    expect(await screen.findByTestId('forgot-sent')).toHaveTextContent(
+      'اگر این ایمیل در سیستم موجود باشد',
+    );
+  });
+
+  it('routes action=reset-password to the token form without rendering the token', async () => {
+    const setPassword = vi.fn().mockResolvedValue({ ok: true });
+    const token = 'reset-token-in-query';
+    const { container } = render(
+      <HostedLoginPage
+        search={`?action=reset-password&token=${token}&ui_locales=en-US`}
+        fetchConfig={vi.fn().mockResolvedValue(null)}
+        setPassword={setPassword}
+      />,
+    );
+
+    expect(screen.getByRole('heading', { name: 'Choose a new password' })).toBeVisible();
+    expect(container.innerHTML).not.toContain(token);
+
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText('New password'), 'a-brand-new-passphrase');
+    await user.type(screen.getByLabelText('Confirm password'), 'a-brand-new-passphrase');
+    await user.click(screen.getByRole('button', { name: 'Save password' }));
+
+    expect(setPassword).toHaveBeenCalledWith({
+      token,
+      password: 'a-brand-new-passphrase',
+      mode: 'reset',
+    });
+    expect(await screen.findByTestId('password-done')).toBeVisible();
+  });
+
+  it('routes action=verify-email to a one-shot confirmation', async () => {
+    const confirmEmail = vi.fn().mockResolvedValue({ ok: true });
+    render(
+      <HostedLoginPage
+        search="?action=verify-email&token=verify-token"
+        fetchConfig={vi.fn().mockResolvedValue(null)}
+        confirmEmail={confirmEmail}
+      />,
+    );
+
+    expect(await screen.findByTestId('verify-done')).toBeVisible();
+    expect(confirmEmail).toHaveBeenCalledWith('verify-token');
+  });
+
+  it('keeps client parameters in the forgot-password link', () => {
+    render(
+      <HostedLoginPage
+        search="?client_id=app-a&ui_locales=fa-IR&login_hint=sara%40example.com"
+        fetchConfig={vi.fn().mockResolvedValue(null)}
+      />,
+    );
+
+    const link = screen.getByRole('link', { name: 'رمز عبور را فراموش کرده‌اید؟' });
+    const href = link.getAttribute('href') ?? '';
+    const params = new URLSearchParams(href.replace(/^\?/, ''));
+    expect(params.get('action')).toBe('forgot-password');
+    expect(params.get('client_id')).toBe('app-a');
+    expect(params.get('ui_locales')).toBe('fa-IR');
+  });
+
+  it.each([
+    [202, null, 'اگر این ایمیل در سیستم موجود باشد'],
+    [429, null, 'تلاش‌های شما بیش از حد بود'],
+    [500, null, 'ارتباط با سرور برقرار نشد'],
+  ] as const)(
+    'maps the default forgot endpoint (%i) to a safe state',
+    async (status, _body, text) => {
+      stubFetch((url) => {
+        if (url.includes('/public-config')) {
+          return jsonResponse({}, 404);
+        }
+        if (url.endsWith('/api/v1/account/password/forgot')) {
+          return jsonResponse({ status: 'accepted' }, status);
+        }
+        return jsonResponse({}, 404);
+      });
+      render(<HostedLoginPage search="?action=forgot-password&ui_locales=fa-IR" />);
+
+      const user = userEvent.setup();
+      await user.type(screen.getByLabelText('ایمیل یا نام کاربری'), 'sara@example.com');
+      await user.click(screen.getByRole('button', { name: 'ارسال لینک' }));
+
+      if (status === 202) {
+        expect(await screen.findByTestId('forgot-sent')).toHaveTextContent(text);
+      } else {
+        expect(await screen.findByRole('alert')).toHaveTextContent(text);
+      }
+    },
+  );
+
+  it('maps a network failure of the forgot endpoint to a safe state', async () => {
+    stubFetch((url) => {
+      if (url.includes('/public-config')) {
+        return jsonResponse({}, 404);
+      }
+      throw new Error('offline');
+    });
+    render(<HostedLoginPage search="?action=forgot-password&ui_locales=fa-IR" />);
+
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText('ایمیل یا نام کاربری'), 'sara@example.com');
+    await user.click(screen.getByRole('button', { name: 'ارسال لینک' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('ارتباط با سرور برقرار نشد');
+  });
+
+  it.each([
+    [400, {}, 'این لینک معتبر نیست یا منقضی شده است'],
+    [429, {}, 'تلاش‌های شما بیش از حد بود'],
+    [422, { code: 'password_policy', violations: ['common_password'] }, 'این رمز رایج است'],
+    [422, { code: 'other' }, 'خطای غیرمنتظره رخ داد'],
+    [500, {}, 'ارتباط با سرور برقرار نشد'],
+  ] as const)(
+    'maps the default reset endpoint (%i) to a safe state',
+    async (status, body, text) => {
+      stubFetch((url) => {
+        if (url.includes('/public-config')) {
+          return jsonResponse({}, 404);
+        }
+        if (url.endsWith('/api/v1/account/password/reset')) {
+          return jsonResponse(body, status);
+        }
+        return jsonResponse({}, 404);
+      });
+      render(
+        <HostedLoginPage search="?action=reset-password&token=abc-token-value&ui_locales=fa-IR" />,
+      );
+
+      const user = userEvent.setup();
+      await user.type(screen.getByLabelText('رمز عبور جدید'), 'a-brand-new-passphrase');
+      await user.type(screen.getByLabelText('تکرار رمز عبور'), 'a-brand-new-passphrase');
+      await user.click(screen.getByRole('button', { name: 'ذخیره رمز عبور' }));
+
+      expect(await screen.findByTestId('password-flow-error')).toHaveTextContent(text);
+    },
+  );
+
+  it('confirms a reset through the default endpoint', async () => {
+    stubFetch((url) => {
+      if (url.includes('/public-config')) {
+        return jsonResponse({}, 404);
+      }
+      return jsonResponse({ ok: true });
+    });
+    render(
+      <HostedLoginPage search="?action=reset-password&token=abc-token-value&ui_locales=fa-IR" />,
+    );
+
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText('رمز عبور جدید'), 'a-brand-new-passphrase');
+    await user.type(screen.getByLabelText('تکرار رمز عبور'), 'a-brand-new-passphrase');
+    await user.click(screen.getByRole('button', { name: 'ذخیره رمز عبور' }));
+
+    expect(await screen.findByTestId('password-done')).toBeVisible();
+  });
+
+  it.each([
+    [200, 'verify-done'],
+    [400, 'verify-invalid'],
+    [500, 'verify-error'],
+  ] as const)('maps the default verify endpoint (%i)', async (status, testId) => {
+    stubFetch((url) => {
+      if (url.includes('/public-config')) {
+        return jsonResponse({}, 404);
+      }
+      return jsonResponse({ ok: status === 200 }, status);
+    });
+    render(<HostedLoginPage search="?action=verify-email&token=verify-token&ui_locales=fa-IR" />);
+
+    expect(await screen.findByTestId(testId)).toBeVisible();
+  });
+
+  it('maps a thrown verification request to the error state', async () => {
+    stubFetch((url) => {
+      if (url.includes('/public-config')) {
+        return jsonResponse({}, 404);
+      }
+      throw new Error('offline');
+    });
+    render(<HostedLoginPage search="?action=verify-email&token=verify-token&ui_locales=fa-IR" />);
+
+    expect(await screen.findByTestId('verify-error')).toBeVisible();
+  });
+});
