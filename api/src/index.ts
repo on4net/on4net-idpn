@@ -9,6 +9,13 @@ import { createPrismaRbacRepository } from './admin/rbac/prisma-rbac-repository.
 import { createPrismaMemberRepository } from './admin/members/prisma-member-repository.js';
 import { createPrismaAuditEventRepository } from './admin/audit/prisma-audit-repository.js';
 import { createPrismaEffectiveAccessSource } from './oidc/effective-access.js';
+import {
+  BackchannelLogoutDispatcher,
+  FetchBackchannelLogoutSender,
+  RedisBackchannelLogoutQueue,
+} from './oidc/backchannel-logout.js';
+import { LogoutTokenSigner, RedisLogoutTokenJtiRegistry } from './oidc/logout-token.js';
+import { createPrismaLogoutRepository } from './oidc/prisma-logout-repository.js';
 import { createPrismaAdminUserRepository } from './admin/prisma-user-repository.js';
 import { PrismaClient } from './generated/prisma/client.js';
 import { FileSigningKeyRepository } from './oidc/file-key-repository.js';
@@ -48,6 +55,25 @@ const rbacRepository = createPrismaRbacRepository(prisma);
 const membersRepository = createPrismaMemberRepository(prisma, { rbac: rbacRepository });
 const effectiveAccess = createPrismaEffectiveAccessSource(prisma);
 
+/**
+ * Back-channel logout is best effort: retries with backoff, then the durable Redis queue
+ * that the retry worker drains. A client failure must never affect the user's logout.
+ */
+const backchannelLogout = new BackchannelLogoutDispatcher({
+  tokens: new LogoutTokenSigner({
+    issuer: env.APP_URL,
+    keys,
+    registry: new RedisLogoutTokenJtiRegistry(redis),
+  }),
+  sender: new FetchBackchannelLogoutSender(),
+  queue: new RedisBackchannelLogoutQueue(redis),
+  onError: (error, context) => {
+    // Never log token material, only the client and the phase that failed.
+    const reason = error instanceof Error ? error.message : 'unknown error';
+    console.error(`back-channel logout ${context.phase} failed for ${context.clientId}: ${reason}`);
+  },
+});
+
 /** A user may receive `idp.client-admin` only with at least one scoped admin permission. */
 const isClientAdminEligible = async (userId: string, clientId: string): Promise<boolean> =>
   ((await permissionReader.clientPermissionsForUser?.(userId, clientId)) ?? []).length > 0;
@@ -80,6 +106,14 @@ const app = buildServer({
       idleTtlSeconds: env.SESSION_IDLE_TTL_SECONDS,
       absoluteTtlSeconds: env.SESSION_ABSOLUTE_TTL_SECONDS,
     },
+  },
+  logout: {
+    clients: clientsRepository,
+    sessions,
+    revocations: createPrismaLogoutRepository(prisma),
+    backchannel: backchannelLogout,
+    audit: { record: (event) => loginRepository.record(event) },
+    cookie: { secure: env.APP_URL.startsWith('https://') },
   },
   publicConfig: {
     repository: createPrismaPublicConfigRepository(prisma),

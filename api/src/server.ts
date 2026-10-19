@@ -14,6 +14,8 @@ import type { MemberRoutesOptions } from './admin/members/routes.js';
 import { registerMemberAdminRoutes } from './admin/members/routes.js';
 import { MemorySigningKeyRepository, SigningKeyManager } from './oidc/keys.js';
 import { registerAuthorizeRoute } from './oidc/authorize-route.js';
+import type { LogoutRouteOptions } from './oidc/logout-route.js';
+import { registerLogoutRoute } from './oidc/logout-route.js';
 import { registerOidcRoutes } from './oidc/routes.js';
 import { registerRevokeIntrospectRoutes } from './oidc/revoke-introspect.js';
 import { registerPublicConfigRoute } from './public-config/routes.js';
@@ -39,6 +41,8 @@ export interface BuildServerOptions {
     access?: Parameters<typeof registerUserInfoRoute>[1]['access'];
   };
   login?: Omit<LoginRouteOptions, 'appUrl'>;
+  /** Mounts GET/POST /oauth2/logout (RP-initiated + back-channel). */
+  logout?: Omit<LogoutRouteOptions, 'issuer' | 'keys'>;
   /** Mounts GET /oauth2/authorize; requires a client repository and the code store. */
   authorize?: {
     clients: Parameters<typeof registerAuthorizeRoute>[1]['clients'];
@@ -134,6 +138,10 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
 
   if (options.login !== undefined) {
     registerLoginRoute(app, { ...options.login, appUrl: issuer });
+  }
+
+  if (options.logout !== undefined) {
+    registerLogoutRoute(app, { ...options.logout, issuer, keys });
   }
 
   if (options.admin !== undefined) {

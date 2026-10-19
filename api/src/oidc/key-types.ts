@@ -42,4 +42,6 @@ export interface SignedTokenOptions {
 export interface VerifyOptions {
   issuer: string;
   audience?: string | string[];
+  /** Injection point for deterministic tests; defaults to the wall clock. */
+  currentDate?: Date;
 }

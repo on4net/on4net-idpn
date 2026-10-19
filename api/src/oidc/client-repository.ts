@@ -4,6 +4,10 @@ export interface OAuthClient {
   status: 'active' | 'disabled';
   type: 'web' | 'spa' | 'mobile' | 'm2m';
   redirectUris: string[];
+  /** Exact post-logout redirect URIs; wildcards are never valid (docs/auth-flows.md 6.2). */
+  postLogoutRedirectUris?: string[];
+  /** Client endpoint that receives a signed Logout Token (docs/auth-flows.md 6.3). */
+  backchannelLogoutUri?: string | null;
   scopes: string[];
   requirePkce: boolean;
   registrationPolicy: 'invite_only' | 'self_service' | 'disabled';

@@ -26,6 +26,8 @@ export function createPrismaClientRepository(
       status: row.status,
       type: row.type,
       redirectUris: row.redirectUris,
+      postLogoutRedirectUris: row.postLogoutRedirectUris,
+      backchannelLogoutUri: row.backchannelLogoutUri,
       scopes: row.scopes,
       requirePkce: row.requirePkce,
       registrationPolicy: row.registrationPolicy,

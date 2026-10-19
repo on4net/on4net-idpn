@@ -127,6 +127,7 @@ export class SigningKeyManager {
       audience: options.audience,
       algorithms: [SIGNING_ALG],
       typ: 'JWT',
+      ...(options.currentDate === undefined ? {} : { currentDate: options.currentDate }),
     });
     return result.payload;
   }
