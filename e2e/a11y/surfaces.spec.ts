@@ -71,6 +71,8 @@ test.describe('hosted auth UI', () => {
 
     await expect(page.getByTestId('idpn-root')).toHaveAttribute('dir', 'rtl');
     await expect(page.getByTestId('idpn-root')).toHaveAttribute('lang', 'fa-IR');
+    await expect(page.locator('html')).toHaveAttribute('lang', 'fa-IR');
+    await expect(page.locator('html')).toHaveAttribute('dir', 'rtl');
     await expect(page.getByRole('heading', { name: 'ورود به حساب' })).toBeVisible();
     await expectScopedFont(page, 'Vazirmatn');
     await expectNoHorizontalOverflow(page);
@@ -83,6 +85,8 @@ test.describe('hosted auth UI', () => {
 
     await expect(page.getByTestId('idpn-root')).toHaveAttribute('dir', 'ltr');
     await expect(page.getByTestId('idpn-root')).toHaveAttribute('lang', 'en-US');
+    await expect(page.locator('html')).toHaveAttribute('lang', 'en-US');
+    await expect(page.locator('html')).toHaveAttribute('dir', 'ltr');
     await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
     await expectScopedFont(page, 'Inter');
     await expectNoHorizontalOverflow(page);
@@ -120,6 +124,7 @@ test.describe('hosted auth UI', () => {
     await installUiFixtures(page);
     await page.goto(hosted('fa-IR'));
     await expect(page.getByRole('heading', { name: 'ورود به حساب' })).toBeVisible();
+    await page.getByLabel('ایمیل یا نام کاربری').fill('sara@example.com');
 
     await page.getByRole('combobox', { name: 'زبان' }).click();
     await page.getByRole('option', { name: 'English' }).click();
@@ -127,8 +132,12 @@ test.describe('hosted auth UI', () => {
     const root = page.getByTestId('idpn-root');
     await expect(root).toHaveAttribute('lang', 'en-US');
     await expect(root).toHaveAttribute('dir', 'ltr');
+    await expect(page.locator('html')).toHaveAttribute('lang', 'en-US');
+    await expect(page.locator('html')).toHaveAttribute('dir', 'ltr');
     await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
     await expectScopedFont(page, 'Inter');
+    // The in-progress form state survives the locale switch without a reload.
+    await expect(page.getByLabel('Email or username')).toHaveValue('sara@example.com');
 
     const url = new URL(page.url());
     expect(url.searchParams.get('ui_locales')).toBe('en-US');
@@ -157,6 +166,10 @@ test.describe('hosted auth UI', () => {
 
     await submitPasswordStep(page, 'fa-IR');
     await expect(page.getByRole('heading', { name: 'ورود دومرحله‌ای' })).toBeVisible();
+    await expect(page.getByTestId('idpn-root')).toHaveAttribute('dir', 'rtl');
+    await expect(page.getByTestId('idpn-root')).toHaveAttribute('lang', 'fa-IR');
+    // Codes stay LTR inside the RTL layout so digits and dashes keep their order.
+    await expect(page.getByLabel('کد ۶ رقمی')).toHaveAttribute('dir', 'ltr');
     await expect(page.getByLabel('کد ۶ رقمی')).toBeFocused();
     await expectNoBlockingViolations(page);
   });
@@ -168,6 +181,9 @@ test.describe('hosted auth UI', () => {
 
     await submitPasswordStep(page, 'en-US');
     await expect(page.getByRole('heading', { name: 'Two-step verification' })).toBeVisible();
+    await expect(page.getByTestId('idpn-root')).toHaveAttribute('dir', 'ltr');
+    await expect(page.getByTestId('idpn-root')).toHaveAttribute('lang', 'en-US');
+    await expect(page.getByLabel('6-digit code')).toHaveAttribute('dir', 'ltr');
     await expectNoBlockingViolations(page);
   });
 

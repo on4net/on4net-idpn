@@ -131,7 +131,7 @@ export function matchLocale(
 export interface LocaleSources {
   /**
    * Explicit host configuration (SDK `locale` prop / per-app locale). It is an explicit
-   * choice, so it is evaluated before browser preferences.
+   * choice, evaluated after the request-level `ui_locales` and before browser preferences.
    */
   configLocale?: string | null;
   /** `ui_locales` from `/authorize`; space- or comma-separated. */
@@ -175,8 +175,8 @@ function enabledLocales(sources: LocaleSources): string[] {
 /**
  * Resolves the UI locale using the documented order (docs/localization.md 3):
  *
- * 1. explicit host configuration (`configLocale`);
- * 2. `ui_locales`, first supported entry wins;
+ * 1. `ui_locales`, first supported entry wins;
+ * 2. explicit host configuration (`configLocale`, SDK/MFE prop);
  * 3. `Accept-Language`, highest quality supported entry;
  * 4. the locale saved in the user profile;
  * 5. the client default;
@@ -189,8 +189,8 @@ export function resolveLocale(sources: LocaleSources = {}): Locale {
   const enabled = enabledLocales(sources);
 
   const tiers: (string | null | undefined)[] = [
-    sources.configLocale,
     ...localeCandidates(sources.uiLocales),
+    sources.configLocale,
     ...parseAcceptLanguage(sources.acceptLanguage),
     sources.profileLocale,
     sources.clientDefault,

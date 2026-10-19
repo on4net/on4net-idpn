@@ -622,3 +622,83 @@ describe('public bundle, cache and isolation', () => {
       .expect(404);
   });
 });
+
+describe('localization authorization negatives', () => {
+  it('requires a token on every translation endpoint', async () => {
+    const endpoints = [
+      ['get', `/api/v1/clients/${APP_A}/locales`],
+      ['put', `/api/v1/clients/${APP_A}/locales`],
+      ['get', `/api/v1/clients/${APP_A}/translations`],
+      ['get', `/api/v1/clients/${APP_A}/translations/fa-IR`],
+      ['put', `/api/v1/clients/${APP_A}/translations/fa-IR`],
+      ['delete', `/api/v1/clients/${APP_A}/translations/fa-IR`],
+    ] as const;
+
+    for (const [method, path] of endpoints) {
+      await request(app.server)[method](path).expect(401);
+    }
+  });
+
+  it('lets a delegated admin write its own client but never another client', async () => {
+    await prisma.client.update({ where: { id: appBId }, data: { status: 'active' } });
+    const token = await delegatedToken(delegatedAUserId, APP_A);
+
+    const written = await request(app.server)
+      .put(`/api/v1/clients/${APP_A}/translations/fa-IR`)
+      .set('Authorization', token)
+      .send({ messages: { 'login.title': 'ورود نماینده' } })
+      .expect(200);
+    expect(written.body.messages['login.title']).toBe('ورود نماینده');
+
+    const bundle = await request(app.server)
+      .get(`/api/v1/clients/${APP_A}/translations/bundle?locale=fa-IR`)
+      .expect(200);
+    expect(bundle.body.messages['login.title']).toBe('ورود نماینده');
+
+    const crossClientList = await request(app.server)
+      .get(`/api/v1/clients/${APP_B}/translations`)
+      .set('Authorization', token)
+      .expect(403);
+    expect(crossClientList.body.type).toContain('/forbidden');
+
+    await request(app.server)
+      .get(`/api/v1/clients/${APP_B}/translations/fa-IR`)
+      .set('Authorization', token)
+      .expect(403);
+
+    await request(app.server)
+      .delete(`/api/v1/clients/${APP_B}/translations/fa-IR`)
+      .set('Authorization', token)
+      .expect(403);
+
+    await request(app.server)
+      .put(`/api/v1/clients/${APP_B}/locales`)
+      .set('Authorization', token)
+      .send({ default: 'fa-IR', supported: ['fa-IR'] })
+      .expect(403);
+  });
+
+  it('keeps delegated reads scoped even when the token names another client', async () => {
+    await prisma.client.update({ where: { id: appBId }, data: { status: 'active' } });
+    const tokenB = await delegatedToken(delegatedBUserId, APP_B);
+
+    await request(app.server)
+      .get(`/api/v1/clients/${APP_A}/translations`)
+      .set('Authorization', tokenB)
+      .expect(403);
+    await request(app.server)
+      .get(`/api/v1/clients/${APP_A}/translations/fa-IR`)
+      .set('Authorization', tokenB)
+      .expect(403);
+    await request(app.server)
+      .delete(`/api/v1/clients/${APP_A}/translations/fa-IR`)
+      .set('Authorization', tokenB)
+      .expect(403);
+
+    // The same principal still has full access to its own client.
+    await request(app.server)
+      .get(`/api/v1/clients/${APP_B}/translations`)
+      .set('Authorization', tokenB)
+      .expect(200);
+  });
+});

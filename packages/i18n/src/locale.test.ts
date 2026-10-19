@@ -17,11 +17,22 @@ import {
 const both = ['fa-IR', 'en-US'] as const;
 
 describe('locale precedence', () => {
-  it('uses explicit host configuration before every other source', () => {
+  it('uses ui_locales before explicit host configuration and every other source', () => {
     expect(
       resolveLocale({
         configLocale: 'en-US',
         uiLocales: 'fa-IR',
+        acceptLanguage: 'fa-IR',
+        clientDefault: 'fa-IR',
+        supported: both,
+      }),
+    ).toBe('fa-IR');
+  });
+
+  it('uses explicit host configuration when no ui_locales was requested', () => {
+    expect(
+      resolveLocale({
+        configLocale: 'en-US',
         acceptLanguage: 'fa-IR',
         clientDefault: 'fa-IR',
         supported: both,

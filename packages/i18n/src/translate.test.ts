@@ -40,9 +40,26 @@ describe('ICU plural and select', () => {
 });
 
 describe('missing-key fallback chain', () => {
-  it('falls back to the default locale bundle', () => {
+  it('falls back to the base bundle of the active locale', () => {
     expect(translate('en-US', 'members.title', {}, { messages: { 'en-US': {} } })).toBe(
-      'مدیریت کاربران',
+      'Member management',
+    );
+    expect(
+      translate(
+        'en-US',
+        'members.title',
+        {},
+        {
+          messages: { 'en-US': { 'login.title': 'Customer portal' } },
+        },
+      ),
+    ).toBe('Member management');
+  });
+
+  it('falls back to the default locale bundle when the active locale has none', () => {
+    expect(translate('de-DE', 'members.title')).toBe('مدیریت کاربران');
+    expect(translate('de-DE', 'members.title', {}, { defaultLocale: 'en-US' })).toBe(
+      'Member management',
     );
   });
 

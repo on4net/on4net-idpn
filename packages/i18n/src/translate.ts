@@ -145,10 +145,19 @@ export function formatMessage(template: string, values: MessageValues, locale: s
 }
 
 function templateOf(locale: string, key: string, options: TranslateOptions): string | undefined {
-  const current: MessageBundle | undefined = options.messages?.[locale] ?? bundleOf(locale);
+  // Per-client override -> base bundle of the active locale -> default-locale bundle ->
+  // key fallback (docs/localization.md 4). Checking the base bundle between the override
+  // and the default locale matters when `messages` carries only the overridden keys.
+  const currentOverride = options.messages?.[locale]?.[key];
+  if (currentOverride !== undefined) {
+    return currentOverride;
+  }
+  const currentBase = bundleOf(locale)?.[key];
+  if (currentBase !== undefined) {
+    return currentBase;
+  }
   const fallbackLocale = options.defaultLocale ?? 'fa-IR';
-  const fallback: MessageBundle = options.messages?.[fallbackLocale] ?? MESSAGES[fallbackLocale];
-  return current?.[key] ?? fallback[key];
+  return options.messages?.[fallbackLocale]?.[key] ?? MESSAGES[fallbackLocale]?.[key];
 }
 
 /**

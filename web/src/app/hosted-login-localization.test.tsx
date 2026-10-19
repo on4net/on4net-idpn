@@ -25,9 +25,12 @@ const translations = (overrides: Record<string, string>, locale: 'fa-IR' | 'en-U
   });
 
 async function waitForForm(): Promise<void> {
-  await waitFor(() =>
-    expect(screen.queryByTestId('hosted-login-skeleton')).not.toBeInTheDocument(),
-  );
+  await waitFor(() => {
+    expect(screen.queryByTestId('hosted-login-skeleton')).not.toBeInTheDocument();
+    // The bundle request starts after the config lands; do not assert against a loading
+    // frame (that race made the override assertions order-dependent).
+    expect(screen.getByTestId('idpn-root').getAttribute('data-bundle-state')).not.toBe('loading');
+  });
 }
 
 beforeEach(() => {
@@ -247,6 +250,10 @@ describe('Hosted login language switch', () => {
     expect(root).toHaveAttribute('lang', 'en-US');
     expect(root).toHaveAttribute('dir', 'ltr');
     expect(root.style.getPropertyValue('--idpn-font-sans')).toContain("'Inter'");
+    await waitFor(() => {
+      expect(document.documentElement).toHaveAttribute('lang', 'en-US');
+      expect(document.documentElement).toHaveAttribute('dir', 'ltr');
+    });
     // The in-progress input is preserved across the locale change.
     expect(screen.getByLabelText('Email or username')).toHaveValue('sara@example.com');
 
