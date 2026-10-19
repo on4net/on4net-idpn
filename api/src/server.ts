@@ -29,6 +29,8 @@ import { registerRevokeIntrospectRoutes } from './oidc/revoke-introspect.js';
 import { registerPublicConfigRoute } from './public-config/routes.js';
 import type { LoginRouteOptions } from './login/routes.js';
 import { registerLoginRoute } from './login/routes.js';
+import type { SocialLoginRouteOptions } from './social/routes.js';
+import { registerSocialLoginRoutes } from './social/routes.js';
 import type { TokenRouteOptions } from './oidc/token-route.js';
 import { registerTokenRoute } from './oidc/token-route.js';
 import { registerUserInfoRoute } from './oidc/userinfo-route.js';
@@ -59,7 +61,11 @@ export interface BuildServerOptions {
     isClientAdminEligible?: (userId: string, clientId: string) => Promise<boolean>;
     /** Consent gate; defaults to granted for first-party clients. */
     isConsentGranted?: Parameters<typeof registerAuthorizeRoute>[1]['isConsentGranted'];
+    /** Issues the opaque `login_request` used by the per-client social start endpoint. */
+    loginRequests?: Parameters<typeof registerAuthorizeRoute>[1]['loginRequests'];
   };
+  /** Mounts the per-client social start/callback endpoints (docs/api.md 2.8). */
+  social?: Omit<SocialLoginRouteOptions, 'issuer'>;
   /** Mounts the global Admin API user endpoints (docs/api.md 3). */
   admin?: Omit<AdminRoutesOptions, 'issuer' | 'verifier'>;
   /** Mounts the client administration endpoints (docs/api.md 3.3). */
@@ -126,6 +132,9 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
         ...(options.authorize.isConsentGranted === undefined
           ? {}
           : { isConsentGranted: options.authorize.isConsentGranted }),
+        ...(options.authorize.loginRequests === undefined
+          ? {}
+          : { loginRequests: options.authorize.loginRequests }),
       });
     }
   }
@@ -154,6 +163,10 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
 
   if (options.login !== undefined) {
     registerLoginRoute(app, { ...options.login, appUrl: issuer });
+  }
+
+  if (options.social !== undefined) {
+    registerSocialLoginRoutes(app, { ...options.social, issuer });
   }
 
   if (options.logout !== undefined) {

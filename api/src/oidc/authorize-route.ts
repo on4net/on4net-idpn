@@ -19,6 +19,14 @@ export interface SessionReader {
   read(sid: string): Promise<IdpSession | null>;
 }
 
+/**
+ * Issues the opaque `login_request` handle that binds the Hosted UI (and the social start
+ * endpoint) to this validated authorize request (`docs/api.md` 2.8).
+ */
+export interface AuthorizeLoginRequestIssuer {
+  create(input: { clientId: string; authorizeUrl: string }): Promise<string>;
+}
+
 export interface AuthorizeRouteOptions {
   issuer: string;
   clients: ClientRepository;
@@ -35,6 +43,8 @@ export interface AuthorizeRouteOptions {
   /** Hosted login URL for interactive requests (Hosted UI arrives in a later card). */
   loginUrl?: string;
   consentUrl?: string;
+  /** When present, the login redirect carries a single-use `login_request` handle. */
+  loginRequests?: AuthorizeLoginRequestIssuer;
   now?: () => Date;
 }
 
@@ -74,10 +84,14 @@ export function buildLoginRedirect(
   loginUrl: string,
   authorize: ValidatedAuthorizeRequest,
   requestUrl: string,
+  loginRequest?: string,
 ): string {
   const target = new URL(loginUrl, 'http://placeholder.invalid');
   target.searchParams.set('client_id', authorize.client.clientId);
   target.searchParams.set('return_to', requestUrl);
+  if (loginRequest !== undefined) {
+    target.searchParams.set('login_request', loginRequest);
+  }
   if (authorize.uiLocales !== undefined) {
     target.searchParams.set('ui_locales', authorize.uiLocales);
   }
@@ -132,7 +146,16 @@ export function registerAuthorizeRoute(app: FastifyInstance, options: AuthorizeR
           buildErrorRedirect(authorize.redirectUri, oauthError('login_required'), authorize.state),
         );
       }
-      return redirect(reply, buildLoginRedirect(loginUrl, authorize, returnTo));
+      // The social flow must never trust browser parameters, so the validated request is kept
+      // server-side under an opaque handle.
+      const loginRequest =
+        options.loginRequests === undefined
+          ? undefined
+          : await options.loginRequests.create({
+              clientId: authorize.client.clientId,
+              authorizeUrl: new URL(returnTo, options.issuer).toString(),
+            });
+      return redirect(reply, buildLoginRedirect(loginUrl, authorize, returnTo, loginRequest));
     }
 
     if (

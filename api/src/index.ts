@@ -13,6 +13,10 @@ import { createPrismaAuditEventRepository } from './admin/audit/prisma-audit-rep
 import { createPrismaAdminSessionRepository } from './admin/sessions/prisma-session-repository.js';
 import { createPrismaSocialProviderRepository } from './admin/social-providers/prisma-social-provider-repository.js';
 import { createSecretBox, loadSocialSecretKey } from './crypto/secret-box.js';
+import { createPrismaSocialLoginRepository } from './social/prisma-social-login-repository.js';
+import { RedisSocialTransactionStore } from './social/transaction-store.js';
+import { FacebookSocialAdapter } from './social/facebook.js';
+import { GoogleSocialAdapter } from './social/google.js';
 import { createPrismaEffectiveAccessSource } from './oidc/effective-access.js';
 import {
   BackchannelLogoutDispatcher,
@@ -92,6 +96,24 @@ const socialSecretKey = loadSocialSecretKey(env);
 const socialSecretBox = socialSecretKey === null ? null : createSecretBox(socialSecretKey);
 
 /**
+ * Per-app social login (`docs/auth-flows.md` 9): single-use transactions live in Redis so the
+ * callback can be served by any API instance, and each callback only ever decrypts the
+ * credential row of the client in its path.
+ */
+const socialTransactions = new RedisSocialTransactionStore(redis);
+const socialLoginRepository = createPrismaSocialLoginRepository(prisma, {
+  rbac: rbacRepository,
+});
+const socialAdapters = {
+  google: new GoogleSocialAdapter(),
+  facebook: new FacebookSocialAdapter(),
+};
+const authorizeLoginRequests = {
+  create: (input: { clientId: string; authorizeUrl: string }) =>
+    socialTransactions.createAuthorizeLoginRequest(input),
+};
+
+/**
  * Back-channel logout is best effort: retries with backoff, then the durable Redis queue
  * that the retry worker drains. A client failure must never affect the user's logout.
  */
@@ -131,6 +153,26 @@ const app = buildServer({
     clients: clientsRepository,
     loginUrl: `${(env.HOSTED_UI_URL ?? env.APP_URL).replace(/\/+$/, '')}/`,
     isClientAdminEligible,
+    loginRequests: authorizeLoginRequests,
+  },
+  social: {
+    ...(env.SOCIAL_CALLBACK_BASE_URL === undefined
+      ? {}
+      : { callbackBaseUrl: env.SOCIAL_CALLBACK_BASE_URL }),
+    loginUrl: `${(env.HOSTED_UI_URL ?? env.APP_URL).replace(/\/+$/, '')}/`,
+    repository: socialLoginRepository,
+    transactions: socialTransactions,
+    ...(socialSecretBox === null ? {} : { secretBox: socialSecretBox }),
+    adapters: socialAdapters,
+    sessions,
+    persistSession: (input) => loginRepository.persistSession(input),
+    // Resolves the public client id to its UUID, because `audit_events.client_id` is a FK.
+    audit: createPrismaAdminAudit(prisma),
+    cookie: {
+      secure: env.APP_URL.startsWith('https://'),
+      idleTtlSeconds: env.SESSION_IDLE_TTL_SECONDS,
+      absoluteTtlSeconds: env.SESSION_ABSOLUTE_TTL_SECONDS,
+    },
   },
   login: {
     users: loginRepository,
