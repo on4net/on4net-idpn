@@ -276,14 +276,29 @@ export function sanitizeIdpnTheme(input: unknown): IdpnTheme {
   return theme;
 }
 
+/** Locale-driven default stack (docs/localization.md 2, docs/design-system.md 8). */
+function defaultFontForLocale(locale: string | undefined): IdpnThemeFont | undefined {
+  if (locale === undefined) {
+    return undefined;
+  }
+  const language = locale.trim().toLowerCase().split('-')[0] ?? '';
+  return language === 'fa' || language === 'ar' || language === 'he' || language === 'ur'
+    ? 'vazirmatn'
+    : 'inter';
+}
+
 /**
  * Maps a sanitized theme to `--idpn-*` custom properties. The function sanitizes again so
  * an untrusted object can be passed safely. Semantic shadcn variables (`--primary`, …) are
  * assigned from these properties in `web/src/styles/globals.css`, scoped to `.idpn-root`.
+ *
+ * The active stack follows the resolved locale (`fa-IR` -> Vazirmatn, `en-US` -> Inter)
+ * unless the client explicitly overrides the stack for that direction. Only allowlisted
+ * constant stacks are ever emitted, never a font URL.
  */
 export function idpnThemeToCssVariables(
   input: unknown,
-  options: { dir?: 'rtl' | 'ltr' } = {},
+  options: { dir?: 'rtl' | 'ltr'; locale?: string } = {},
 ): Record<string, string> {
   const theme = sanitizeIdpnTheme(input);
   const variables: Record<string, string> = {};
@@ -301,9 +316,14 @@ export function idpnThemeToCssVariables(
 
   const rtl = theme.fontFamily?.rtl ?? IDPN_DEFAULT_FONTS.rtl;
   const ltr = theme.fontFamily?.ltr ?? IDPN_DEFAULT_FONTS.ltr;
+  const direction = options.dir === 'ltr' ? 'ltr' : 'rtl';
+  const active =
+    theme.fontFamily?.[direction] ??
+    defaultFontForLocale(options.locale) ??
+    IDPN_DEFAULT_FONTS[direction];
   variables['--idpn-font-rtl'] = IDPN_THEME_FONT_STACKS[rtl];
   variables['--idpn-font-ltr'] = IDPN_THEME_FONT_STACKS[ltr];
-  variables['--idpn-font-sans'] = IDPN_THEME_FONT_STACKS[options.dir === 'ltr' ? ltr : rtl];
+  variables['--idpn-font-sans'] = IDPN_THEME_FONT_STACKS[active];
 
   if (theme.dark !== undefined) {
     for (const key of IDPN_THEME_COLOR_KEYS) {

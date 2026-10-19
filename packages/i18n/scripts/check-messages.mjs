@@ -19,6 +19,7 @@ export const ALLOWED_NAMESPACES = [
   'common',
   'consent',
   'errors',
+  'language',
   'login',
   'logout',
   'members',

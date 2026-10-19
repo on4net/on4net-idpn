@@ -5,7 +5,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
-import { translate, type Locale } from '@/i18n';
+import type { Locale } from '@/i18n';
+import { useTranslate } from '@/i18n/translation-context';
 
 export type MfaMethod = 'totp' | 'recovery';
 
@@ -62,7 +63,7 @@ export function MfaForm({
   onPasskey,
   onSubmit,
 }: MfaFormProps) {
-  const t = (key: string): string => translate(locale, key);
+  const t = useTranslate(locale);
   const [method, setMethod] = React.useState<MfaMethod>('totp');
   const [code, setCode] = React.useState('');
   const [fieldError, setFieldError] = React.useState<string | null>(null);

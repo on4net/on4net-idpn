@@ -5,7 +5,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
-import { translate, type Locale } from '@/i18n';
+import type { Locale } from '@/i18n';
+import { useTranslate } from '@/i18n/translation-context';
 
 export type AccountFlowError =
   'network' | 'rate_limited' | 'invalid_token' | 'password_policy' | 'server';
@@ -59,7 +60,7 @@ export function ForgotPasswordPage({
   backHref = '?',
   onSubmit,
 }: ForgotPasswordPageProps): React.ReactElement {
-  const t = (key: string): string => translate(locale, key);
+  const t = useTranslate(locale);
   const [email, setEmail] = React.useState('');
   const [submitting, setSubmitting] = React.useState(false);
   const [sent, setSent] = React.useState(false);
@@ -156,7 +157,7 @@ export function SetPasswordPage({
     mode: SetPasswordMode;
   }): Promise<AccountFlowResult>;
 }): React.ReactElement {
-  const t = (key: string): string => translate(locale, key);
+  const t = useTranslate(locale);
   const [password, setPassword] = React.useState('');
   const [confirmation, setConfirmation] = React.useState('');
   const [submitting, setSubmitting] = React.useState(false);
@@ -315,7 +316,7 @@ export function VerifyEmailPage({
   backHref?: string;
   onConfirm(token: string): Promise<AccountFlowResult>;
 }): React.ReactElement {
-  const t = (key: string): string => translate(locale, key);
+  const t = useTranslate(locale);
   const started = React.useRef(false);
   const [status, setStatus] = React.useState<'checking' | 'done' | 'invalid' | 'error'>(
     token === undefined || token === '' ? 'invalid' : 'checking',

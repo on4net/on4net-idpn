@@ -72,6 +72,9 @@ export interface IdpnRootProps {
   dark?: boolean;
   children: React.ReactNode;
   'data-client-id'?: string;
+  /** Observability hooks for the Hosted shell: config/bundle resolution state. */
+  'data-config-state'?: 'loading' | 'ready' | 'fallback' | 'error';
+  'data-bundle-state'?: 'idle' | 'loading' | 'ready' | 'error';
   'aria-busy'?: boolean;
 }
 
@@ -98,10 +101,10 @@ export function IdpnRoot({ locale, dir, theme, dark = false, children, ...rest }
       display: 'grid',
       placeItems: 'center',
       padding: '2rem',
-      ...idpnThemeToCssVariables(theme, { dir }),
+      ...idpnThemeToCssVariables(theme, { dir, locale }),
     };
     return tokens as React.CSSProperties;
-  }, [theme, dir]);
+  }, [theme, dir, locale]);
 
   return (
     <Direction.Provider dir={dir}>
@@ -112,6 +115,8 @@ export function IdpnRoot({ locale, dir, theme, dark = false, children, ...rest }
         data-testid="idpn-root"
         data-idpn-theme=""
         data-client-id={rest['data-client-id']}
+        data-config-state={rest['data-config-state']}
+        data-bundle-state={rest['data-bundle-state']}
         aria-busy={rest['aria-busy']}
         style={style}
       >

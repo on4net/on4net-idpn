@@ -1,8 +1,11 @@
 import * as React from 'react';
 
 import { sanitizeIdpnTheme, type IdpnTheme } from '@idpn/contracts/theme';
+import { IDPN_MFE_EVENT_NAME, type IdpnEvent } from '@idpn/mfe-sdk';
 
 import { IdpnRoot } from '@/app/idpn-root';
+import { HostedLoginSkeleton } from '@/app/hosted-login-skeleton';
+import { LanguageSwitcher } from '@/app/language-switcher';
 import {
   ForgotPasswordPage,
   SetPasswordPage,
@@ -20,6 +23,13 @@ import {
   type SocialProviderSummary,
 } from '@/app/social-login';
 import { resolveDirection, resolveLocale, type Locale } from '@/i18n';
+import {
+  fetchClientBundle,
+  sanitizeClientBundle,
+  supportedClientLocales,
+  type ClientBundleInput,
+} from '@/i18n/client-bundle';
+import { TranslationProvider, type TranslationOverrides } from '@/i18n/translation-context';
 
 interface PublicConfigLike {
   locale?: string;
@@ -28,6 +38,8 @@ interface PublicConfigLike {
     supported?: string[];
     dir?: Record<string, 'rtl' | 'ltr'>;
   };
+  /** Public location of the per-client bundle (docs/api.md 2.7). */
+  translationsUrl?: string;
   /** Untrusted JSON from the public-config endpoint; sanitized before it reaches the root. */
   theme?: unknown;
   loginContexts?: { key: string; methods: string[] }[];
@@ -76,9 +88,13 @@ export interface HostedLoginPageProps {
   confirmEmail?: (token: string) => Promise<AccountFlowResult>;
   /** Called with a safe redirect target; defaults to `window.location.assign`. */
   navigate?: (target: string) => void;
+  /** Bundle call, injectable for tests; returns the untrusted JSON body. */
+  fetchBundle?: (input: ClientBundleInput) => Promise<unknown>;
 }
 
 const DEFAULT_THEME: IdpnTheme = {};
+type ConfigState = 'loading' | 'ready' | 'error';
+type BundleState = 'idle' | 'loading' | 'ready' | 'error';
 
 /** `Accept-Language` of the browser; empty during SSR and in non-browser environments. */
 function browserAcceptLanguage(): string {
@@ -115,6 +131,11 @@ async function defaultFetchConfig(clientId: string): Promise<PublicConfigLike | 
     return null;
   }
   return (await response.json()) as PublicConfigLike;
+}
+
+/** Default bundle call; the body is validated by `sanitizeClientBundle` before rendering. */
+async function defaultFetchBundle(input: ClientBundleInput): Promise<unknown> {
+  return fetchClientBundle(input);
 }
 
 async function defaultSubmit(
@@ -421,6 +442,7 @@ export function HostedLoginPage({
   setPassword = defaultSetPassword,
   confirmEmail = defaultConfirmEmail,
   navigate,
+  fetchBundle = defaultFetchBundle,
 }: HostedLoginPageProps) {
   const params = React.useMemo(
     () =>
@@ -440,29 +462,20 @@ export function HostedLoginPage({
   const action = params.get('action');
   const flowToken = params.get('token') ?? undefined;
 
-  /**
-   * Link back to the plain login form while keeping the client parameters. The token is
-   * never copied into this link (or anywhere else in the DOM).
-   */
-  const backHref = React.useMemo(() => {
-    const back = new URLSearchParams();
-    if (clientId !== undefined) {
-      back.set('client_id', clientId);
-    }
-    if (uiLocales !== undefined) {
-      back.set('ui_locales', uiLocales);
-    }
-    const serialized = back.toString();
-    return serialized === '' ? '?' : `?${serialized}`;
-  }, [clientId, uiLocales]);
-  const forgotHref = React.useMemo(() => {
-    const target = new URLSearchParams(backHref.startsWith('?') ? backHref.slice(1) : '');
-    target.set('action', 'forgot-password');
-    return `?${target.toString()}`;
-  }, [backHref]);
-
   const [config, setConfig] = React.useState<PublicConfigLike | null>(null);
-  const [locale, setLocale] = React.useState<Locale>(() => resolveLocale({ uiLocales }));
+  const [configState, setConfigState] = React.useState<ConfigState>(
+    clientId === undefined ? 'ready' : 'loading',
+  );
+  const [bundleState, setBundleState] = React.useState<BundleState>('idle');
+  /** Validated bundles per locale; module memory only, never localStorage/sessionStorage. */
+  const [translations, setTranslations] = React.useState<TranslationOverrides>({});
+  const [bootstrapped, setBootstrapped] = React.useState(false);
+  const [locale, setLocale] = React.useState<Locale>(() =>
+    // Explicit `ui_locales` is safe before the config arrives. The browser preference is
+    // applied only after the client's enabled list is known (the form is still behind the
+    // skeleton at that point), so an unenabled locale can never be painted.
+    resolveLocale({ uiLocales }),
+  );
   const [theme, setTheme] = React.useState<IdpnTheme>(DEFAULT_THEME);
   const [submitting, setSubmitting] = React.useState(false);
   const [errorCode, setErrorCode] = React.useState<
@@ -477,16 +490,35 @@ export function HostedLoginPage({
 
   React.useEffect(() => {
     if (clientId === undefined) {
+      setConfigState('ready');
       return;
     }
     const preference = acceptLanguage ?? browserAcceptLanguage();
     let cancelled = false;
+    setConfigState('loading');
+    setBundleState('idle');
+    // Never reuse another client's bundle if `client_id` changes in place.
+    setTranslations({});
     void fetchConfig(clientId)
       .then((loaded) => {
-        if (cancelled || loaded === null) {
+        if (cancelled) {
+          return;
+        }
+        if (loaded === null) {
+          // Missing/disabled client: keep an explicit ui_locales choice when it is a
+          // shipped base locale, otherwise fall back to the platform default.
+          setConfig(null);
+          setTheme({});
+          setConfigState('error');
+          // Without a config the client's enabled locales are unknown: honour a valid
+          // explicit ui_locales, then use the platform default (never the browser list,
+          // which could select a locale this client does not enable).
+          setLocale(resolveLocale({ uiLocales }));
           return;
         }
         setConfig(loaded);
+        setTheme(sanitizeIdpnTheme(loaded.theme));
+        setConfigState('ready');
         setLocale(
           resolveLocale({
             uiLocales,
@@ -495,29 +527,147 @@ export function HostedLoginPage({
             supported: loaded.locales?.supported,
           }),
         );
-        setTheme(sanitizeIdpnTheme(loaded.theme));
       })
       .catch(() => {
-        // A missing public config must not block login; defaults are used.
+        // A missing public config must not block login; base locale + bundle are used.
+        if (cancelled) {
+          return;
+        }
+        setConfig(null);
+        setTheme({});
+        setConfigState('error');
+        setLocale(resolveLocale({ uiLocales }));
       });
     return () => {
       cancelled = true;
     };
   }, [clientId, fetchConfig, uiLocales, acceptLanguage]);
 
+  const translationsUrl = config?.translationsUrl;
+
+  /**
+   * Lazy per-locale bundle load. The server bundle already merges base + overrides; the
+   * browser re-validates it and always keeps the shared base as the final fallback, so a
+   * failed or malformed bundle can never block the login form.
+   */
+  React.useEffect(() => {
+    if (configState !== 'ready' || clientId === undefined || translationsUrl === undefined) {
+      setBundleState('idle');
+      return;
+    }
+    const controller = typeof AbortController === 'undefined' ? undefined : new AbortController();
+    let cancelled = false;
+    setBundleState('loading');
+    void fetchBundle({
+      clientId,
+      locale,
+      translationsUrl,
+      ...(controller === undefined ? {} : { signal: controller.signal }),
+    })
+      .then((raw) => {
+        if (cancelled) {
+          return;
+        }
+        const bundle = sanitizeClientBundle(raw, locale);
+        if (bundle === null) {
+          setBundleState('error');
+          return;
+        }
+        setTranslations((current) => ({ ...current, [locale]: bundle }));
+        setBundleState('ready');
+      })
+      .catch((error: unknown) => {
+        if (cancelled || (error as { name?: string } | null)?.name === 'AbortError') {
+          return;
+        }
+        setBundleState('error');
+      });
+    return () => {
+      cancelled = true;
+      controller?.abort();
+    };
+  }, [configState, clientId, locale, translationsUrl, fetchBundle]);
+
+  React.useEffect(() => {
+    if (configState !== 'loading' && bundleState !== 'loading') {
+      setBootstrapped(true);
+    }
+  }, [configState, bundleState]);
+
+  const enabledLocales = React.useMemo(() => supportedClientLocales(config), [config]);
+  const requiresBundle =
+    configState === 'ready' && clientId !== undefined && translationsUrl !== undefined;
+  const bundleResolved =
+    !requiresBundle || translations[locale] !== undefined || bundleState === 'error';
+  /** First paint gate: config + the first bundle must settle before the form is shown. */
+  const showSkeleton =
+    configState === 'loading' || (requiresBundle && !bundleResolved && !bootstrapped);
+
+  /**
+   * Link back to the plain login form while keeping the client parameters. The token is
+   * never copied into this link, and the active locale is pinned so a language switch
+   * survives the forgot-password round trip.
+   */
+  const backHref = React.useMemo(() => {
+    const back = new URLSearchParams();
+    if (clientId !== undefined) {
+      back.set('client_id', clientId);
+    }
+    back.set('ui_locales', locale);
+    return `?${back.toString()}`;
+  }, [clientId, locale]);
+  const forgotHref = React.useMemo(() => {
+    const target = new URLSearchParams(backHref.startsWith('?') ? backHref.slice(1) : '');
+    target.set('action', 'forgot-password');
+    return `?${target.toString()}`;
+  }, [backHref]);
+
   const dir = resolveDirection(locale, config?.locales?.dir?.[locale]);
 
   /**
    * The Hosted UI owns the document, so the document language/direction follow the
-   * resolved locale. Embedded MFE roots only set attributes on their own root.
+   * resolved locale. Embedded MFE roots only set attributes on their own root. While the
+   * config is loading the document keeps its initial attributes, so no wrong-direction
+   * form can paint before the resolved values are known.
    */
   React.useEffect(() => {
-    if (typeof document === 'undefined') {
+    if (typeof document === 'undefined' || configState === 'loading') {
       return;
     }
     document.documentElement.lang = locale;
     document.documentElement.dir = dir;
-  }, [locale, dir]);
+  }, [locale, dir, configState]);
+
+  /**
+   * User-driven language change. The authorize request is preserved: only `ui_locales`
+   * is rewritten in place (no reload), so `return_to`, `login_request` and the rest of
+   * the OIDC query stay intact. Unsupported locales are rejected before any state change.
+   */
+  const changeLocale = (next: Locale): void => {
+    if (next === locale || !enabledLocales.includes(next)) {
+      return;
+    }
+    setLocale(next);
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      url.searchParams.set('ui_locales', next);
+      window.history.replaceState(
+        window.history.state,
+        '',
+        `${url.pathname}${url.search}${url.hash}`,
+      );
+    }
+    if (typeof document !== 'undefined') {
+      const detail: IdpnEvent = {
+        type: 'locale:changed',
+        locale: next,
+        dir: resolveDirection(next, config?.locales?.dir?.[next]),
+      };
+      document.dispatchEvent(
+        new CustomEvent<IdpnEvent>(IDPN_MFE_EVENT_NAME, { detail, bubbles: true }),
+      );
+    }
+  };
 
   const socialProviders = selectSocialProviders(
     config?.socialProviders,
@@ -633,53 +783,65 @@ export function HostedLoginPage({
       />
     ) : null;
 
+  const content =
+    flowView ??
+    (challengeToken === null ? (
+      <LoginForm
+        locale={locale}
+        dir={dir}
+        submitting={submitting}
+        errorCode={errorCode}
+        defaultIdentifier={loginHint}
+        forgotHref={forgotHref}
+        social={
+          showSocial ? (
+            <SocialLogin
+              locale={locale}
+              clientId={clientId ?? ''}
+              providers={socialProviders}
+              loginRequest={loginRequest}
+              returnTo={returnTo}
+              loginHint={loginHint}
+              errorCode={socialError}
+              navigate={navigate}
+            />
+          ) : undefined
+        }
+        onSubmit={handleSubmit}
+      />
+    ) : (
+      <MfaForm
+        locale={locale}
+        dir={dir}
+        submitting={mfaSubmitting}
+        errorCode={mfaError}
+        passkeyAvailable={mfaMethods.includes('webauthn')}
+        passkeySubmitting={passkeySubmitting}
+        onPasskey={handlePasskey}
+        onBack={backToPassword}
+        onSubmit={handleVerify}
+      />
+    ));
+
   return (
     <IdpnRoot
       locale={locale}
       dir={dir}
       theme={theme}
       data-client-id={clientId}
-      aria-busy={submitting || mfaSubmitting || passkeySubmitting}
+      data-config-state={configState}
+      data-bundle-state={bundleState}
+      aria-busy={showSkeleton || submitting || mfaSubmitting || passkeySubmitting}
     >
-      {flowView ??
-        (challengeToken === null ? (
-          <LoginForm
-            locale={locale}
-            dir={dir}
-            submitting={submitting}
-            errorCode={errorCode}
-            defaultIdentifier={loginHint}
-            forgotHref={forgotHref}
-            social={
-              showSocial ? (
-                <SocialLogin
-                  locale={locale}
-                  clientId={clientId ?? ''}
-                  providers={socialProviders}
-                  loginRequest={loginRequest}
-                  returnTo={returnTo}
-                  loginHint={loginHint}
-                  errorCode={socialError}
-                  navigate={navigate}
-                />
-              ) : undefined
-            }
-            onSubmit={handleSubmit}
-          />
-        ) : (
-          <MfaForm
-            locale={locale}
-            dir={dir}
-            submitting={mfaSubmitting}
-            errorCode={mfaError}
-            passkeyAvailable={mfaMethods.includes('webauthn')}
-            passkeySubmitting={passkeySubmitting}
-            onPasskey={handlePasskey}
-            onBack={backToPassword}
-            onSubmit={handleVerify}
-          />
-        ))}
-      {config === null ? null : <span hidden data-testid="public-config-loaded" />}
+      <TranslationProvider locale={locale} messages={translations}>
+        <div className="w-full max-w-sm">
+          {configState === 'ready' ? (
+            <LanguageSwitcher locale={locale} locales={enabledLocales} onChange={changeLocale} />
+          ) : null}
+          {showSkeleton ? <HostedLoginSkeleton locale={locale} /> : content}
+        </div>
+        {config === null ? null : <span hidden data-testid="public-config-loaded" />}
+      </TranslationProvider>
     </IdpnRoot>
   );
 }

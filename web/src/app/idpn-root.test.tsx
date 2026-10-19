@@ -61,6 +61,18 @@ describe('IdpnRoot theme application', () => {
     expect(root).toHaveAttribute('lang', 'en-US');
   });
 
+  it('chooses the font stack from the locale, not only from the direction', () => {
+    render(
+      <IdpnRoot locale="fa-IR" dir="ltr">
+        <span>محتوا</span>
+      </IdpnRoot>,
+    );
+
+    const root = screen.getByTestId('idpn-root');
+    expect(root).toHaveAttribute('dir', 'ltr');
+    expect(root.style.getPropertyValue('--idpn-font-sans')).toContain("'Vazirmatn'");
+  });
+
   it('honours a per-direction font override from the client theme', () => {
     render(
       <IdpnRoot locale="en-US" dir="ltr" theme={{ fontFamily: { rtl: 'inter', ltr: 'vazirmatn' } }}>

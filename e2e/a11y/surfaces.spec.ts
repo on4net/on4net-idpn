@@ -35,6 +35,25 @@ async function useDarkTokens(page: Page): Promise<void> {
   await expect(page.locator('.idpn-root.dark').first()).toBeVisible();
 }
 
+async function expectNoHorizontalOverflow(page: Page): Promise<void> {
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  expect(overflow).toBeLessThanOrEqual(1);
+}
+
+/** The resolved stack is applied inside `.idpn-root` only, never on `:root`. */
+async function expectScopedFont(page: Page, family: 'Vazirmatn' | 'Inter'): Promise<void> {
+  const rootFont = await page
+    .getByTestId('idpn-root')
+    .evaluate((element) => getComputedStyle(element).fontFamily);
+  const documentFont = await page.evaluate(
+    () => getComputedStyle(document.documentElement).fontFamily,
+  );
+  expect(rootFont).toContain(family);
+  expect(documentFont).not.toContain(family);
+}
+
 async function submitPasswordStep(page: Page, locale: 'fa-IR' | 'en-US'): Promise<void> {
   const identifier = locale === 'fa-IR' ? 'ایمیل یا نام کاربری' : 'Email or username';
   const password = locale === 'fa-IR' ? 'رمز عبور' : 'Password';
@@ -51,16 +70,72 @@ test.describe('hosted auth UI', () => {
     await page.goto(hosted('fa-IR'));
 
     await expect(page.getByTestId('idpn-root')).toHaveAttribute('dir', 'rtl');
+    await expect(page.getByTestId('idpn-root')).toHaveAttribute('lang', 'fa-IR');
     await expect(page.getByRole('heading', { name: 'ورود به حساب' })).toBeVisible();
+    await expectScopedFont(page, 'Vazirmatn');
+    await expectNoHorizontalOverflow(page);
     await expectNoBlockingViolations(page);
   });
 
   test('login in English LTR has no blocking violations', async ({ page }) => {
-    await installUiFixtures(page);
+    await installUiFixtures(page, { locale: 'en-US' });
     await page.goto(hosted('en-US'));
 
     await expect(page.getByTestId('idpn-root')).toHaveAttribute('dir', 'ltr');
+    await expect(page.getByTestId('idpn-root')).toHaveAttribute('lang', 'en-US');
     await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
+    await expectScopedFont(page, 'Inter');
+    await expectNoHorizontalOverflow(page);
+    await expectNoBlockingViolations(page);
+  });
+
+  test('applies per-client translated overrides over the base bundle', async ({ page }) => {
+    await installUiFixtures(page, {
+      translations: {
+        'login.title': 'ورود به پنل مشتریان',
+        'login.submit': 'ورود به پنل',
+      },
+    });
+    await page.goto(hosted('fa-IR'));
+
+    await expect(page.getByTestId('idpn-root')).toHaveAttribute('dir', 'rtl');
+    await expect(page.getByRole('heading', { name: 'ورود به پنل مشتریان' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'ورود به پنل', exact: true })).toBeVisible();
+    // A key omitted from the client bundle still comes from the shared base bundle.
+    await expect(page.getByLabel('رمز عبور')).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+    await expectNoBlockingViolations(page);
+  });
+
+  test('language switch keeps the authorize request and applies direction and font', async ({
+    page,
+  }) => {
+    const remoteFonts: string[] = [];
+    page.on('request', (request) => {
+      if (/fonts\.(googleapis|gstatic)\.com/.test(request.url())) {
+        remoteFonts.push(request.url());
+      }
+    });
+
+    await installUiFixtures(page);
+    await page.goto(hosted('fa-IR'));
+    await expect(page.getByRole('heading', { name: 'ورود به حساب' })).toBeVisible();
+
+    await page.getByRole('combobox', { name: 'زبان' }).click();
+    await page.getByRole('option', { name: 'English' }).click();
+
+    const root = page.getByTestId('idpn-root');
+    await expect(root).toHaveAttribute('lang', 'en-US');
+    await expect(root).toHaveAttribute('dir', 'ltr');
+    await expect(page.getByRole('heading', { name: 'Sign in' })).toBeVisible();
+    await expectScopedFont(page, 'Inter');
+
+    const url = new URL(page.url());
+    expect(url.searchParams.get('ui_locales')).toBe('en-US');
+    expect(url.searchParams.get('return_to')).toBe('/oauth2/authorize?client_id=admin-panel');
+    expect(await page.evaluate(() => localStorage.length + sessionStorage.length)).toBe(0);
+    expect(remoteFonts).toEqual([]);
+    await expectNoHorizontalOverflow(page);
     await expectNoBlockingViolations(page);
   });
 

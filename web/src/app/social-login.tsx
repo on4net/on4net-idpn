@@ -3,7 +3,8 @@ import * as React from 'react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
-import { translate, type Locale } from '@/i18n';
+import type { Locale } from '@/i18n';
+import { useTranslate } from '@/i18n/translation-context';
 
 /**
  * Per-app social login buttons on the Hosted login page (`docs/auth-flows.md` 9).
@@ -161,8 +162,7 @@ export function SocialLogin({
   const headingId = React.useId();
   const noteId = React.useId();
   const [pending, setPending] = React.useState<SocialProviderId | null>(null);
-  const t = (key: string, values: Record<string, string | number> = {}): string =>
-    translate(locale, key, values);
+  const t = useTranslate(locale);
 
   const errorKey = socialErrorMessageKey(errorCode);
   const errorAlert =

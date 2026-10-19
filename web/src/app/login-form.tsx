@@ -7,7 +7,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
-import { translate, type Locale } from '@/i18n';
+import type { Locale } from '@/i18n';
+import { useTranslate } from '@/i18n/translation-context';
 
 export interface LoginFormValues {
   identifier: string;
@@ -38,7 +39,7 @@ export function LoginForm({
   social,
   onSubmit,
 }: LoginFormProps) {
-  const t = (key: string): string => translate(locale, key);
+  const t = useTranslate(locale);
 
   const schema = z.object({
     identifier: z.string().trim().min(1, t('login.errorRequired')),

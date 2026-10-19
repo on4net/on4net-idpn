@@ -8,6 +8,15 @@ import { HostedLoginPage, normalizeLoginHint, safeRedirectTarget } from './hoste
 import { LoginForm } from './login-form';
 import { directionOf, MESSAGES, resolveLocale, translate } from '@/i18n';
 
+/** Waits for the first-paint skeleton to settle, mirroring the real Hosted shell. */
+async function renderHosted(element: React.ReactElement) {
+  const result = render(element);
+  await waitFor(() =>
+    expect(screen.queryByTestId('hosted-login-skeleton')).not.toBeInTheDocument(),
+  );
+  return result;
+}
+
 function renderForm(overrides: Partial<React.ComponentProps<typeof LoginForm>> = {}) {
   return render(
     <IdpnRoot locale="fa-IR" dir="rtl">
@@ -162,7 +171,7 @@ describe('HostedLoginPage', () => {
     const user = userEvent.setup();
     const submit = vi.fn().mockResolvedValue({ ok: true });
 
-    render(
+    await renderHosted(
       <HostedLoginPage
         search="?client_id=app-a&login_hint=sara%40example.com"
         fetchConfig={vi.fn().mockResolvedValue(null)}
@@ -185,8 +194,8 @@ describe('HostedLoginPage', () => {
     );
   });
 
-  it('keeps the identifier editable and empty when login_hint is blank', () => {
-    render(
+  it('keeps the identifier editable and empty when login_hint is blank', async () => {
+    await renderHosted(
       <HostedLoginPage
         search="?client_id=app-a&login_hint=%20%20"
         fetchConfig={vi.fn().mockResolvedValue(null)}
@@ -203,7 +212,7 @@ describe('HostedLoginPage', () => {
       theme: { primary: '#123456', radius: '4px' },
     });
 
-    render(
+    await renderHosted(
       <HostedLoginPage search="?client_id=app-a&ui_locales=en-US" fetchConfig={fetchConfig} />,
     );
 
@@ -223,7 +232,7 @@ describe('HostedLoginPage', () => {
       locales: { default: 'fa-IR', supported: ['fa-IR', 'en-US'] },
     });
 
-    render(
+    await renderHosted(
       <HostedLoginPage
         search="?client_id=app-a"
         acceptLanguage="de-DE, en-US;q=0.9, fa-IR;q=0.4"
@@ -249,7 +258,7 @@ describe('HostedLoginPage', () => {
       },
     });
 
-    render(<HostedLoginPage search="?client_id=app-a" fetchConfig={fetchConfig} />);
+    await renderHosted(<HostedLoginPage search="?client_id=app-a" fetchConfig={fetchConfig} />);
 
     expect(await screen.findByTestId('public-config-loaded')).toBeInTheDocument();
     expect(screen.getByTestId('idpn-root')).toHaveAttribute('dir', 'ltr');
@@ -267,7 +276,7 @@ describe('HostedLoginPage', () => {
       },
     });
 
-    render(<HostedLoginPage search="?client_id=app-a" fetchConfig={fetchConfig} />);
+    await renderHosted(<HostedLoginPage search="?client_id=app-a" fetchConfig={fetchConfig} />);
 
     expect(await screen.findByTestId('public-config-loaded')).toBeInTheDocument();
     const root = screen.getByTestId('idpn-root');
@@ -280,7 +289,7 @@ describe('HostedLoginPage', () => {
   it('falls back to defaults when the public config is unavailable', async () => {
     const fetchConfig = vi.fn().mockRejectedValue(new Error('offline'));
 
-    render(<HostedLoginPage search="?client_id=app-a" fetchConfig={fetchConfig} />);
+    await renderHosted(<HostedLoginPage search="?client_id=app-a" fetchConfig={fetchConfig} />);
 
     const root = screen.getByTestId('idpn-root');
     expect(root).toHaveAttribute('dir', 'rtl');
@@ -290,7 +299,7 @@ describe('HostedLoginPage', () => {
   it('falls back to defaults when the client is not public', async () => {
     const fetchConfig = vi.fn().mockResolvedValue(null);
 
-    render(<HostedLoginPage search="?client_id=unknown" fetchConfig={fetchConfig} />);
+    await renderHosted(<HostedLoginPage search="?client_id=unknown" fetchConfig={fetchConfig} />);
 
     expect(screen.getByRole('heading', { name: 'ورود به حساب' })).toBeInTheDocument();
     expect(screen.queryByTestId('public-config-loaded')).not.toBeInTheDocument();
@@ -302,7 +311,7 @@ describe('HostedLoginPage', () => {
       socialProviders: [],
     });
 
-    render(<HostedLoginPage search="?client_id=app-a" fetchConfig={fetchConfig} />);
+    await renderHosted(<HostedLoginPage search="?client_id=app-a" fetchConfig={fetchConfig} />);
 
     expect(await screen.findByTestId('public-config-loaded')).toBeInTheDocument();
     expect(
@@ -321,7 +330,7 @@ describe('HostedLoginPage', () => {
       ],
     });
 
-    render(<HostedLoginPage search="?client_id=app-a" fetchConfig={fetchConfig} />);
+    await renderHosted(<HostedLoginPage search="?client_id=app-a" fetchConfig={fetchConfig} />);
 
     expect(await screen.findByRole('button', { name: 'ادامه با Google' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'ادامه با Facebook' })).toBeInTheDocument();
@@ -335,7 +344,7 @@ describe('HostedLoginPage', () => {
       socialProviders: [{ provider: 'google', label: 'Google' }],
     });
 
-    render(<HostedLoginPage search="?client_id=app-a" fetchConfig={fetchConfig} />);
+    await renderHosted(<HostedLoginPage search="?client_id=app-a" fetchConfig={fetchConfig} />);
 
     expect(await screen.findByRole('button', { name: 'ادامه با Google' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Facebook/ })).not.toBeInTheDocument();
@@ -349,7 +358,7 @@ describe('HostedLoginPage', () => {
       socialProviders: [{ provider: 'google', label: 'Google' }],
     });
 
-    render(
+    await renderHosted(
       <HostedLoginPage
         search="?client_id=app-a&return_to=%2Foauth2%2Fauthorize%3Fclient_id%3Dapp-a&login_hint=sara%40example.com&login_request=request-123"
         fetchConfig={fetchConfig}
@@ -379,7 +388,7 @@ describe('HostedLoginPage', () => {
       ],
     });
 
-    render(
+    await renderHosted(
       <HostedLoginPage search="?client_id=app-a&login_context=team" fetchConfig={fetchConfig} />,
     );
 
@@ -395,7 +404,7 @@ describe('HostedLoginPage', () => {
       socialProviders: [{ provider: 'google', label: 'Google' }],
     });
 
-    render(
+    await renderHosted(
       <HostedLoginPage
         search="?client_id=app-a&error=social_state_invalid"
         fetchConfig={fetchConfig}
@@ -417,8 +426,8 @@ describe('HostedLoginPage', () => {
     );
   });
 
-  it('never renders an unknown error value from the query string', () => {
-    render(
+  it('never renders an unknown error value from the query string', async () => {
+    await renderHosted(
       <HostedLoginPage
         search="?client_id=app-a&error=%3Cscript%3Ealert(1)%3C%2Fscript%3E"
         fetchConfig={vi.fn().mockResolvedValue(null)}
@@ -432,7 +441,7 @@ describe('HostedLoginPage', () => {
     const user = userEvent.setup();
     const submit = vi.fn().mockResolvedValue({ ok: true });
 
-    render(
+    await renderHosted(
       <HostedLoginPage
         search="?client_id=app-a&redirect_uri=https%3A%2F%2Fapp-a.example.com%2Fcb"
         fetchConfig={vi.fn().mockResolvedValue(null)}
@@ -455,7 +464,7 @@ describe('HostedLoginPage', () => {
     const navigate = vi.fn();
     const submit = vi.fn().mockResolvedValue({ ok: true, redirectTo: '/oauth2/authorize?x=1' });
 
-    render(
+    await renderHosted(
       <HostedLoginPage
         search="?client_id=app-a&return_to=%2Foauth2%2Fauthorize"
         fetchConfig={vi.fn().mockResolvedValue(null)}
@@ -482,7 +491,7 @@ describe('HostedLoginPage', () => {
     const navigate = vi.fn();
     const submit = vi.fn().mockResolvedValue({ ok: true });
 
-    render(
+    await renderHosted(
       <HostedLoginPage
         search="?client_id=app-a&return_to=javascript%3Aalert(document.domain)"
         fetchConfig={vi.fn().mockResolvedValue(null)}
@@ -518,7 +527,7 @@ describe('HostedLoginPage', () => {
     const navigate = vi.fn();
     const submit = vi.fn().mockResolvedValue({ ok: false, reason: 'invalid_credentials' });
 
-    render(
+    await renderHosted(
       <HostedLoginPage
         search="?"
         fetchConfig={vi.fn().mockResolvedValue(null)}
@@ -561,7 +570,7 @@ describe('HostedLoginPage', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    render(<HostedLoginPage search="?client_id=app-a" navigate={vi.fn()} />);
+    await renderHosted(<HostedLoginPage search="?client_id=app-a" navigate={vi.fn()} />);
 
     expect(await screen.findByTestId('public-config-loaded')).toBeInTheDocument();
     expect(screen.getByTestId('idpn-root').style.getPropertyValue('--idpn-primary')).toBe(
@@ -589,7 +598,7 @@ describe('HostedLoginPage', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    render(<HostedLoginPage search="?client_id=app-a" navigate={vi.fn()} />);
+    await renderHosted(<HostedLoginPage search="?client_id=app-a" navigate={vi.fn()} />);
     await user.type(screen.getByLabelText('ایمیل یا نام کاربری'), 'sara');
     await user.type(screen.getByLabelText('رمز عبور'), 'a-very-long-password');
     await user.click(screen.getByRole('button', { name: 'ورود' }));
@@ -614,11 +623,11 @@ describe('HostedLoginPage MFA step', () => {
     await user.click(screen.getByRole('button', { name: 'ورود' }));
   };
 
-  const renderWith = (
+  const renderWith = async (
     verify: ComponentProps<typeof HostedLoginPage>['verify'],
     navigate = vi.fn(),
   ) =>
-    render(
+    renderHosted(
       <HostedLoginPage
         search="?client_id=app-a&return_to=%2Foauth2%2Fauthorize%3Fclient_id%3Dapp-a"
         fetchConfig={vi.fn().mockResolvedValue(null)}
@@ -634,7 +643,7 @@ describe('HostedLoginPage MFA step', () => {
       .fn()
       .mockResolvedValue({ ok: true, redirectTo: '/oauth2/authorize?client_id=app-a' });
     const navigate = vi.fn();
-    renderWith(verify, navigate);
+    await renderWith(verify, navigate);
 
     await submitWithPassword(user);
 
@@ -667,7 +676,7 @@ describe('HostedLoginPage MFA step', () => {
       register: vi.fn(),
       authenticate: vi.fn(),
     };
-    render(
+    await renderHosted(
       <HostedLoginPage
         search="?client_id=app-a&return_to=%2Foauth2%2Fauthorize%3Fclient_id%3Dapp-a"
         fetchConfig={vi.fn().mockResolvedValue(null)}
@@ -694,7 +703,7 @@ describe('HostedLoginPage MFA step', () => {
 
   it('does not offer a passkey button when the account has no passkey', async () => {
     const user = userEvent.setup();
-    renderWith(vi.fn());
+    await renderWith(vi.fn());
     await submitWithPassword(user);
     await screen.findByRole('heading', { name: 'ورود دومرحله‌ای' });
     expect(screen.queryByTestId('mfa-passkey')).toBeNull();
@@ -704,7 +713,7 @@ describe('HostedLoginPage MFA step', () => {
   it('switches to a recovery code and normalizes formatting', async () => {
     const user = userEvent.setup();
     const verify = vi.fn().mockResolvedValue({ ok: true });
-    renderWith(verify);
+    await renderWith(verify);
 
     await submitWithPassword(user);
     await user.click(await screen.findByRole('button', { name: 'استفاده از کد بازیابی' }));
@@ -722,7 +731,7 @@ describe('HostedLoginPage MFA step', () => {
   it('validates the code before calling the API', async () => {
     const user = userEvent.setup();
     const verify = vi.fn();
-    renderWith(verify);
+    await renderWith(verify);
 
     await submitWithPassword(user);
     await user.click(await screen.findByRole('button', { name: 'تأیید و ورود' }));
@@ -740,7 +749,7 @@ describe('HostedLoginPage MFA step', () => {
       .fn()
       .mockResolvedValueOnce({ ok: false, reason: 'invalid_code' })
       .mockResolvedValueOnce({ ok: false, reason: 'rate_limited' });
-    renderWith(verify);
+    await renderWith(verify);
 
     await submitWithPassword(user);
     const input = await screen.findByLabelText('کد ۶ رقمی');
@@ -758,7 +767,7 @@ describe('HostedLoginPage MFA step', () => {
 
   it('explains an expired challenge without pretending the code was wrong', async () => {
     const user = userEvent.setup();
-    renderWith(vi.fn().mockResolvedValue({ ok: false, reason: 'expired' }));
+    await renderWith(vi.fn().mockResolvedValue({ ok: false, reason: 'expired' }));
 
     await submitWithPassword(user);
     await user.type(await screen.findByLabelText('کد ۶ رقمی'), '123456');
@@ -771,7 +780,7 @@ describe('HostedLoginPage MFA step', () => {
 
   it('returns to the password step and drops the challenge token', async () => {
     const user = userEvent.setup();
-    renderWith(vi.fn());
+    await renderWith(vi.fn());
 
     await submitWithPassword(user);
     await user.click(await screen.findByRole('button', { name: 'بازگشت به ورود' }));
@@ -782,7 +791,7 @@ describe('HostedLoginPage MFA step', () => {
 
   it('tells the user when the policy requires enrollment', async () => {
     const user = userEvent.setup();
-    render(
+    await renderHosted(
       <HostedLoginPage
         search="?client_id=app-required"
         fetchConfig={vi.fn().mockResolvedValue(null)}
@@ -832,7 +841,7 @@ describe('HostedLoginPage default API calls', () => {
         ? jsonResponse({}, 404)
         : jsonResponse({ ok: false, mfa: 'challenge', challengeToken: 'token-from-api' }),
     );
-    render(<HostedLoginPage search="?client_id=app-a" navigate={vi.fn()} />);
+    await renderHosted(<HostedLoginPage search="?client_id=app-a" navigate={vi.fn()} />);
 
     await signIn(user);
 
@@ -846,7 +855,7 @@ describe('HostedLoginPage default API calls', () => {
         ? jsonResponse({}, 404)
         : jsonResponse({ error: 'mfa_enrollment_required' }, 403),
     );
-    render(<HostedLoginPage search="?client_id=app-a" navigate={vi.fn()} />);
+    await renderHosted(<HostedLoginPage search="?client_id=app-a" navigate={vi.fn()} />);
 
     await signIn(user);
 
@@ -862,7 +871,7 @@ describe('HostedLoginPage default API calls', () => {
         ? jsonResponse({}, 404)
         : jsonResponse({ error: 'forbidden' }, 403),
     );
-    render(<HostedLoginPage search="?client_id=app-a" navigate={vi.fn()} />);
+    await renderHosted(<HostedLoginPage search="?client_id=app-a" navigate={vi.fn()} />);
 
     await signIn(user);
 
@@ -883,7 +892,7 @@ describe('HostedLoginPage default API calls', () => {
       }
       return jsonResponse({ ok: false, mfa: 'challenge', challengeToken: 'token-from-api' });
     });
-    render(<HostedLoginPage search="?client_id=app-a" navigate={navigate} />);
+    await renderHosted(<HostedLoginPage search="?client_id=app-a" navigate={navigate} />);
 
     await signIn(user);
     await user.type(await screen.findByLabelText('کد ۶ رقمی'), '123456');
@@ -912,7 +921,7 @@ describe('HostedLoginPage default API calls', () => {
       }
       return jsonResponse({ ok: false, mfa: 'challenge', challengeToken: 'token-from-api' });
     });
-    render(<HostedLoginPage search="?client_id=app-a" navigate={vi.fn()} />);
+    await renderHosted(<HostedLoginPage search="?client_id=app-a" navigate={vi.fn()} />);
 
     await signIn(user);
     await user.type(await screen.findByLabelText('کد ۶ رقمی'), '123456');
@@ -940,7 +949,7 @@ describe('HostedLoginPage account flows', () => {
 
   it('routes action=forgot-password to the neutral request form', async () => {
     const forgotPassword = vi.fn().mockResolvedValue({ ok: true });
-    render(
+    await renderHosted(
       <HostedLoginPage
         search="?client_id=app-a&action=forgot-password"
         fetchConfig={vi.fn().mockResolvedValue(null)}
@@ -962,7 +971,7 @@ describe('HostedLoginPage account flows', () => {
   it('routes action=reset-password to the token form without rendering the token', async () => {
     const setPassword = vi.fn().mockResolvedValue({ ok: true });
     const token = 'reset-token-in-query';
-    const { container } = render(
+    const { container } = await renderHosted(
       <HostedLoginPage
         search={`?action=reset-password&token=${token}&ui_locales=en-US`}
         fetchConfig={vi.fn().mockResolvedValue(null)}
@@ -988,7 +997,7 @@ describe('HostedLoginPage account flows', () => {
 
   it('routes action=verify-email to a one-shot confirmation', async () => {
     const confirmEmail = vi.fn().mockResolvedValue({ ok: true });
-    render(
+    await renderHosted(
       <HostedLoginPage
         search="?action=verify-email&token=verify-token"
         fetchConfig={vi.fn().mockResolvedValue(null)}
@@ -1000,8 +1009,8 @@ describe('HostedLoginPage account flows', () => {
     expect(confirmEmail).toHaveBeenCalledWith('verify-token');
   });
 
-  it('keeps client parameters in the forgot-password link', () => {
-    render(
+  it('keeps client parameters in the forgot-password link', async () => {
+    await renderHosted(
       <HostedLoginPage
         search="?client_id=app-a&ui_locales=fa-IR&login_hint=sara%40example.com"
         fetchConfig={vi.fn().mockResolvedValue(null)}
@@ -1032,7 +1041,7 @@ describe('HostedLoginPage account flows', () => {
         }
         return jsonResponse({}, 404);
       });
-      render(<HostedLoginPage search="?action=forgot-password&ui_locales=fa-IR" />);
+      await renderHosted(<HostedLoginPage search="?action=forgot-password&ui_locales=fa-IR" />);
 
       const user = userEvent.setup();
       await user.type(screen.getByLabelText('ایمیل یا نام کاربری'), 'sara@example.com');
@@ -1053,7 +1062,7 @@ describe('HostedLoginPage account flows', () => {
       }
       throw new Error('offline');
     });
-    render(<HostedLoginPage search="?action=forgot-password&ui_locales=fa-IR" />);
+    await renderHosted(<HostedLoginPage search="?action=forgot-password&ui_locales=fa-IR" />);
 
     const user = userEvent.setup();
     await user.type(screen.getByLabelText('ایمیل یا نام کاربری'), 'sara@example.com');
@@ -1080,7 +1089,7 @@ describe('HostedLoginPage account flows', () => {
         }
         return jsonResponse({}, 404);
       });
-      render(
+      await renderHosted(
         <HostedLoginPage search="?action=reset-password&token=abc-token-value&ui_locales=fa-IR" />,
       );
 
@@ -1100,7 +1109,7 @@ describe('HostedLoginPage account flows', () => {
       }
       return jsonResponse({ ok: true });
     });
-    render(
+    await renderHosted(
       <HostedLoginPage search="?action=reset-password&token=abc-token-value&ui_locales=fa-IR" />,
     );
 
@@ -1123,7 +1132,9 @@ describe('HostedLoginPage account flows', () => {
       }
       return jsonResponse({ ok: status === 200 }, status);
     });
-    render(<HostedLoginPage search="?action=verify-email&token=verify-token&ui_locales=fa-IR" />);
+    await renderHosted(
+      <HostedLoginPage search="?action=verify-email&token=verify-token&ui_locales=fa-IR" />,
+    );
 
     expect(await screen.findByTestId(testId)).toBeVisible();
   });
@@ -1135,7 +1146,9 @@ describe('HostedLoginPage account flows', () => {
       }
       throw new Error('offline');
     });
-    render(<HostedLoginPage search="?action=verify-email&token=verify-token&ui_locales=fa-IR" />);
+    await renderHosted(
+      <HostedLoginPage search="?action=verify-email&token=verify-token&ui_locales=fa-IR" />,
+    );
 
     expect(await screen.findByTestId('verify-error')).toBeVisible();
   });

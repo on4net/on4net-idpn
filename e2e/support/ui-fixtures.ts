@@ -15,6 +15,8 @@ export interface UiFixtureOptions {
   /** Password-step outcome. `mfa` renders the second-factor screen. */
   login?: LoginBehaviour;
   locale?: 'fa-IR' | 'en-US';
+  /** Per-client overrides returned by `…/translations/bundle` (base keys only). */
+  translations?: Record<string, string>;
 }
 
 const NOW = '2026-10-19T09:00:00.000Z';
@@ -66,6 +68,7 @@ const json = (body: unknown) => ({
 export async function installUiFixtures(page: Page, options: UiFixtureOptions = {}): Promise<void> {
   const login = options.login ?? 'success';
   const locale = options.locale ?? 'fa-IR';
+  const translations = options.translations ?? {};
 
   await page.route('**/api/v1/**', async (route) => {
     const request = route.request();
@@ -81,9 +84,23 @@ export async function installUiFixtures(page: Page, options: UiFixtureOptions = 
             supported: ['fa-IR', 'en-US'],
             dir: { 'fa-IR': 'rtl', 'en-US': 'ltr' },
           },
+          translationsUrl: '/api/v1/clients/admin-panel/translations/bundle',
           theme: { primary: '#0057b8', radius: '8px' },
           loginContexts: [{ key: 'default', methods: ['password'] }],
           socialProviders: [],
+        }),
+      );
+      return;
+    }
+
+    if (path.endsWith('/translations/bundle')) {
+      const requested = url.searchParams.get('locale') ?? locale;
+      await route.fulfill(
+        json({
+          locale: requested,
+          dir: requested === 'en-US' ? 'ltr' : 'rtl',
+          version: NOW,
+          messages: translations,
         }),
       );
       return;
