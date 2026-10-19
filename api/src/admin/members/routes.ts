@@ -160,7 +160,7 @@ export function registerMemberAdminRoutes(
       metadata: {
         userId: principal.userId,
         loginContext: contextKey,
-        reason: scope === null ? 'no-context-membership' : 'cross-context',
+        reason: scope === null || scope.length === 0 ? 'no-context-membership' : 'cross-context',
       },
     });
     void sendProblem(
@@ -173,11 +173,62 @@ export function registerMemberAdminRoutes(
     return null;
   };
 
+  /**
+   * The client-wide membership surface belongs to app-level administrators. A delegated
+   * caller whose scope is limited to specific login contexts must use the context endpoints
+   * instead: otherwise it could invite a user with a role from another context or assign
+   * roles its own context cannot grant, which would defeat `allowed_roles`
+   * (docs/login-contexts.md 8 and 9). Global admins and app admins with a client-wide
+   * membership (`adminContextScope === 'all'`) keep access.
+   */
+  const guardClientWide = async (
+    request: FastifyRequest,
+    reply: FastifyReply,
+    requirement: AdminRequirement,
+  ): Promise<{ userId: string; mode: 'global' | 'delegated' } | null> => {
+    const principal = await guard(request, reply, requirement);
+    if (principal === null || principal.mode === 'global') {
+      return principal;
+    }
+    const clientId = requirement.clientId;
+    if (clientId === undefined) {
+      return principal;
+    }
+    const contextScope = await options.members.adminContextScope(clientId, principal.userId);
+    if (contextScope === null || contextScope === 'all') {
+      return principal;
+    }
+    await options.audit.record({
+      actorType: 'admin',
+      actorId: principal.userId,
+      action: 'member.scope.denied',
+      targetType: 'client',
+      targetId: null,
+      clientId,
+      ip: request.ip ?? null,
+      userAgent: request.headers['user-agent'] ?? null,
+      result: 'failure',
+      metadata: {
+        userId: principal.userId,
+        reason: 'context-only-admin',
+        loginContexts: contextScope,
+      },
+    });
+    void sendProblem(
+      reply,
+      403,
+      'forbidden',
+      'Forbidden',
+      'the administrator is limited to login contexts',
+    );
+    return null;
+  };
+
   app.get<{ Params: { clientId: string } }>(
     '/api/v1/clients/:clientId/members',
     async (request, reply) => {
       const clientId = request.params.clientId;
-      if ((await guard(request, reply, { permission: MEMBER_READ, clientId })) === null) {
+      if ((await guardClientWide(request, reply, { permission: MEMBER_READ, clientId })) === null) {
         return reply;
       }
       const parsed = listMembersQuerySchema.safeParse(request.query);
@@ -208,7 +259,10 @@ export function registerMemberAdminRoutes(
     '/api/v1/clients/:clientId/members/invite',
     async (request, reply) => {
       const clientId = request.params.clientId;
-      const principal = await guard(request, reply, { permission: MEMBER_INVITE, clientId });
+      const principal = await guardClientWide(request, reply, {
+        permission: MEMBER_INVITE,
+        clientId,
+      });
       if (principal === null) {
         return reply;
       }
@@ -259,7 +313,10 @@ export function registerMemberAdminRoutes(
     '/api/v1/clients/:clientId/members/:userId/invite/resend',
     async (request, reply) => {
       const { clientId, userId } = request.params;
-      const principal = await guard(request, reply, { permission: MEMBER_INVITE, clientId });
+      const principal = await guardClientWide(request, reply, {
+        permission: MEMBER_INVITE,
+        clientId,
+      });
       if (principal === null) {
         return reply;
       }
@@ -341,7 +398,7 @@ export function registerMemberAdminRoutes(
     '/api/v1/clients/:clientId/members/:userId',
     async (request, reply) => {
       const { clientId, userId } = request.params;
-      if ((await guard(request, reply, { permission: MEMBER_READ, clientId })) === null) {
+      if ((await guardClientWide(request, reply, { permission: MEMBER_READ, clientId })) === null) {
         return reply;
       }
       const member = await options.members.find(clientId, userId);
@@ -356,7 +413,10 @@ export function registerMemberAdminRoutes(
     '/api/v1/clients/:clientId/members/:userId',
     async (request, reply) => {
       const { clientId, userId } = request.params;
-      const principal = await guard(request, reply, { permission: MEMBER_WRITE, clientId });
+      const principal = await guardClientWide(request, reply, {
+        permission: MEMBER_WRITE,
+        clientId,
+      });
       if (principal === null) {
         return reply;
       }
@@ -400,7 +460,10 @@ export function registerMemberAdminRoutes(
     '/api/v1/clients/:clientId/members/:userId',
     async (request, reply) => {
       const { clientId, userId } = request.params;
-      const principal = await guard(request, reply, { permission: MEMBER_WRITE, clientId });
+      const principal = await guardClientWide(request, reply, {
+        permission: MEMBER_WRITE,
+        clientId,
+      });
       if (principal === null) {
         return reply;
       }
@@ -420,7 +483,7 @@ export function registerMemberAdminRoutes(
     '/api/v1/clients/:clientId/members/:userId/roles',
     async (request, reply) => {
       const { clientId, userId } = request.params;
-      const principal = await guard(request, reply, {
+      const principal = await guardClientWide(request, reply, {
         permission: ROLE_ASSIGN,
         clientId,
         stepUp: true,
@@ -459,7 +522,9 @@ export function registerMemberAdminRoutes(
     '/api/v1/clients/:clientId/members/:userId/sessions',
     async (request, reply) => {
       const { clientId, userId } = request.params;
-      if ((await guard(request, reply, { permission: SESSION_READ, clientId })) === null) {
+      if (
+        (await guardClientWide(request, reply, { permission: SESSION_READ, clientId })) === null
+      ) {
         return reply;
       }
       const member = await options.members.find(clientId, userId);

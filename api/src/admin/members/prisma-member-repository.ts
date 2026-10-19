@@ -753,8 +753,12 @@ export function createPrismaMemberRepository(
           .map((key) => key.slice(prefix.length)),
       );
       if (adminContexts.size > 0) {
-        const narrowed = [...memberContexts].filter((key) => adminContexts.has(key)).sort();
-        return narrowed.length === 0 ? null : narrowed;
+        // A context-admin role is context-bound even when the admin currently holds no
+        // active membership: the empty array means "no context at all", which denies both
+        // the context endpoints and the client-wide surface. Returning `null` here would
+        // look like an app-wide caller without a membership and would re-open the
+        // client-wide surface after a suspension.
+        return [...memberContexts].filter((key) => adminContexts.has(key)).sort();
       }
 
       // No context-admin role: the caller's app-level role decides, and a client-wide

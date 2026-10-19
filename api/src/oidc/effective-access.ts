@@ -56,7 +56,13 @@ export function createPrismaEffectiveAccessSource(
     async resolve({ userId, clientId, loginContext }) {
       const client = await prisma.client.findUnique({
         where: { clientId },
-        select: { id: true, scopes: true },
+        select: {
+          id: true,
+          scopes: true,
+          // Whether the token is for a context-scoped client decides whether the unbound
+          // (legacy) path is allowed without a client-wide membership below.
+          loginContexts: { where: { status: 'active' }, select: { id: true }, take: 1 },
+        },
       });
       if (client === null) {
         return EMPTY;
@@ -113,7 +119,16 @@ export function createPrismaEffectiveAccessSource(
       // context the user gets nothing, even if role assignments exist.
       const suspended = membership?.status === 'suspended';
       const contextMembershipMissing = context !== null && membership?.status !== 'active';
-      const denied = suspended || contextMembershipMissing;
+      // For a client that defines active contexts, the unbound path is the client-wide
+      // (legacy) membership: if that row is missing or not active there is nothing to
+      // resolve. Otherwise omitting `login_context` would return the unnarrowed role set
+      // and bypass a context membership that is suspended or was never granted.
+      const unboundWithoutMembership =
+        loginContext === undefined &&
+        context === null &&
+        client.loginContexts.length > 0 &&
+        membership?.status !== 'active';
+      const denied = suspended || contextMembershipMissing || unboundWithoutMembership;
 
       const roles = denied
         ? []

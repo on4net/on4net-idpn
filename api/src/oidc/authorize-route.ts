@@ -243,6 +243,26 @@ export function registerAuthorizeRoute(app: FastifyInstance, options: AuthorizeR
           ),
         );
       }
+      // A client with active login contexts manages access per context. An unbound request
+      // is not context-bound (`docs/login-contexts.md` 4.1), so the only thing it can rely
+      // on is the client-wide membership (`login_context_id IS NULL`). Without an active one
+      // there is no membership to apply: failing closed here stops a user who only holds a
+      // context membership (possibly suspended) from receiving an unnarrowed token by
+      // simply omitting the parameter.
+      if (
+        authorize.loginContext === undefined &&
+        (authorize.client.loginContexts?.length ?? 0) > 0 &&
+        membership !== 'active'
+      ) {
+        return redirect(
+          reply,
+          buildErrorRedirect(
+            authorize.redirectUri,
+            oauthError('access_denied', 'an active client membership is required'),
+            authorize.state,
+          ),
+        );
+      }
     }
 
     // The MFA policy is enforced here, server-side, because the login endpoint's clientId is

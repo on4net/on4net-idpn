@@ -546,6 +546,10 @@ beforeAll(async () => {
   await createMembership(appARow.id, targetA.id, { status: 'invited' });
   await createMembership(appBRow.id, targetB.id, { status: 'invited' });
   await createMembership(appBRow.id, globalTarget.id, { status: 'invited' });
+  // An unbound request (no `login_context`) is the client-wide membership; app-a defines a
+  // login context, so these users need that row to receive an app-a token.
+  await createMembership(appARow.id, bulkUser.id);
+  await createMembership(appARow.id, scopeUser.id);
 
   const assign = (userId: string, roleId: string, expiresAt: Date | null = null) =>
     prisma.assignment.create({
