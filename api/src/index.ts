@@ -6,6 +6,7 @@ import { createPrismaAdminAudit } from './admin/prisma-audit.js';
 import { createPrismaAdminClientRepository } from './admin/clients/prisma-client-repository.js';
 import { createPrismaPermissionReader } from './admin/prisma-permission-reader.js';
 import { createPrismaRbacRepository } from './admin/rbac/prisma-rbac-repository.js';
+import { createPrismaMemberRepository } from './admin/members/prisma-member-repository.js';
 import { createPrismaAdminUserRepository } from './admin/prisma-user-repository.js';
 import { PrismaClient } from './generated/prisma/client.js';
 import { FileSigningKeyRepository } from './oidc/file-key-repository.js';
@@ -41,6 +42,8 @@ const clientsRepository = createPrismaClientRepository(prisma);
 const usersRepository = createPrismaUserRepository(prisma);
 const loginRepository = createPrismaLoginRepository(prisma);
 const permissionReader = createPrismaPermissionReader(prisma);
+const rbacRepository = createPrismaRbacRepository(prisma);
+const membersRepository = createPrismaMemberRepository(prisma, { rbac: rbacRepository });
 
 /** A user may receive `idp.client-admin` only with at least one scoped admin permission. */
 const isClientAdminEligible = async (userId: string, clientId: string): Promise<boolean> =>
@@ -98,7 +101,13 @@ const app = buildServer({
   rbac: {
     adminClientId: env.ADMIN_CLIENT_ID,
     permissions: permissionReader,
-    rbac: createPrismaRbacRepository(prisma),
+    rbac: rbacRepository,
+    audit: createPrismaAdminAudit(prisma),
+  },
+  adminMembers: {
+    adminClientId: env.ADMIN_CLIENT_ID,
+    permissions: permissionReader,
+    members: membersRepository,
     audit: createPrismaAdminAudit(prisma),
   },
 });

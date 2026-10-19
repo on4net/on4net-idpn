@@ -8,6 +8,8 @@ import type { ClientRoutesOptions } from './admin/clients/routes.js';
 import { registerClientAdminRoutes } from './admin/clients/routes.js';
 import type { RbacRoutesOptions } from './admin/rbac/routes.js';
 import { registerRbacAdminRoutes } from './admin/rbac/routes.js';
+import type { MemberRoutesOptions } from './admin/members/routes.js';
+import { registerMemberAdminRoutes } from './admin/members/routes.js';
 import { MemorySigningKeyRepository, SigningKeyManager } from './oidc/keys.js';
 import { registerAuthorizeRoute } from './oidc/authorize-route.js';
 import { registerOidcRoutes } from './oidc/routes.js';
@@ -45,6 +47,8 @@ export interface BuildServerOptions {
   adminClients?: Omit<ClientRoutesOptions, 'issuer' | 'verifier'>;
   /** Mounts the permission catalog and role endpoints (docs/api.md 3.4). */
   rbac?: Omit<RbacRoutesOptions, 'issuer' | 'verifier'>;
+  /** Mounts the client membership endpoints (docs/api.md 3.3.1). */
+  adminMembers?: Omit<MemberRoutesOptions, 'issuer' | 'verifier'>;
 }
 
 /**
@@ -124,6 +128,10 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
 
   if (options.rbac !== undefined) {
     registerRbacAdminRoutes(app, { ...options.rbac, issuer, verifier: keys });
+  }
+
+  if (options.adminMembers !== undefined) {
+    registerMemberAdminRoutes(app, { ...options.adminMembers, issuer, verifier: keys });
   }
 
   return app;
