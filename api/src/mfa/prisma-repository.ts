@@ -15,6 +15,13 @@ type FactorRow = {
   type: 'totp' | 'webauthn';
   name: string;
   secretEncrypted: Uint8Array | null;
+  credentialId: Uint8Array | null;
+  publicKey: Uint8Array | null;
+  signCount: bigint;
+  transports: string[];
+  aaguid: string | null;
+  deviceType: string | null;
+  backedUp: boolean;
   confirmedAt: Date | null;
   lastUsedAt: Date | null;
   lastUsedStep: bigint | null;
@@ -27,6 +34,13 @@ const toRecord = (row: FactorRow): MfaFactorRecord => ({
   type: row.type,
   name: row.name,
   secretEncrypted: row.secretEncrypted === null ? null : Buffer.from(row.secretEncrypted),
+  credentialId: row.credentialId === null ? null : Buffer.from(row.credentialId),
+  publicKey: row.publicKey === null ? null : Buffer.from(row.publicKey),
+  signCount: row.signCount,
+  transports: [...row.transports],
+  aaguid: row.aaguid,
+  deviceType: row.deviceType,
+  backedUp: row.backedUp,
   confirmedAt: row.confirmedAt,
   lastUsedAt: row.lastUsedAt,
   lastUsedStep: row.lastUsedStep,
@@ -39,6 +53,13 @@ const FACTOR_SELECT = {
   type: true,
   name: true,
   secretEncrypted: true,
+  credentialId: true,
+  publicKey: true,
+  signCount: true,
+  transports: true,
+  aaguid: true,
+  deviceType: true,
+  backedUp: true,
   confirmedAt: true,
   lastUsedAt: true,
   lastUsedStep: true,
@@ -108,6 +129,35 @@ export function createPrismaMfaRepository(
       return row === null ? null : toRecord(row);
     },
 
+    async listConfirmedWebauthn(userId) {
+      const rows = await prisma.mfaFactor.findMany({
+        where: { userId, type: 'webauthn', confirmedAt: { not: null } },
+        select: FACTOR_SELECT,
+        orderBy: { createdAt: 'asc' },
+      });
+      return rows.map(toRecord);
+    },
+
+    async findWebauthn(userId, factorId) {
+      const row = await prisma.mfaFactor.findFirst({
+        where: { id: factorId, userId, type: 'webauthn' },
+        select: FACTOR_SELECT,
+      });
+      return row === null ? null : toRecord(row);
+    },
+
+    async findWebauthnByCredentialId(userId, credentialId) {
+      const row = await prisma.mfaFactor.findFirst({
+        where: {
+          userId,
+          type: 'webauthn',
+          credentialId: new Uint8Array(credentialId),
+        },
+        select: FACTOR_SELECT,
+      });
+      return row === null ? null : toRecord(row);
+    },
+
     async createTotpFactor(userId, name, secretEncrypted) {
       try {
         const factor = await prisma.$transaction(async (tx) => {
@@ -150,6 +200,35 @@ export function createPrismaMfaRepository(
       return result.count === 1;
     },
 
+    async createWebauthnCredential(userId, credential, at) {
+      try {
+        const factor = await prisma.mfaFactor.create({
+          data: {
+            userId,
+            type: 'webauthn',
+            name: credential.name,
+            credentialId: new Uint8Array(credential.credentialId),
+            publicKey: new Uint8Array(credential.publicKey),
+            signCount: credential.signCount,
+            transports: [...credential.transports],
+            aaguid: credential.aaguid,
+            deviceType: credential.deviceType,
+            backedUp: credential.backedUp,
+            confirmedAt: at,
+          },
+          select: FACTOR_SELECT,
+        });
+        return { ok: true, factor: toRecord(factor) };
+      } catch (error) {
+        // The global partial unique index on credential_id also covers a concurrent
+        // enrollment; any other failure must not be reported as a duplicate.
+        if ((error as { code?: string }).code === 'P2002') {
+          return { ok: false, reason: 'duplicate_credential' };
+        }
+        throw error;
+      }
+    },
+
     async markTotpUsed(factorId, step, at) {
       const result = await prisma.mfaFactor.updateMany({
         where: {
@@ -157,6 +236,29 @@ export function createPrismaMfaRepository(
           OR: [{ lastUsedStep: null }, { lastUsedStep: { lt: step } }],
         },
         data: { lastUsedStep: step, lastUsedAt: at },
+      });
+      return result.count === 1;
+    },
+
+    async updateWebauthnCounter(factorId, userId, expectedCounter, newCounter, at) {
+      // Compare-and-set: a second assertion carrying the same counter loses even when two
+      // requests pass the earlier read concurrently.
+      const result = await prisma.mfaFactor.updateMany({
+        where: {
+          id: factorId,
+          userId,
+          type: 'webauthn',
+          signCount: expectedCounter,
+        },
+        data: { signCount: newCounter, lastUsedAt: at },
+      });
+      return result.count === 1;
+    },
+
+    async renameFactor(factorId, userId, name) {
+      const result = await prisma.mfaFactor.updateMany({
+        where: { id: factorId, userId, type: 'webauthn' },
+        data: { name },
       });
       return result.count === 1;
     },
@@ -254,6 +356,31 @@ export function createPrismaMfaRepository(
         select: { mfaPolicy: true },
       });
       return context?.mfaPolicy ?? client.mfaPolicy;
+    },
+
+    async resolveStepUpRequired({ clientId, loginContext }): Promise<boolean> {
+      if (clientId === undefined || clientId === '') {
+        return false;
+      }
+      const client = await prisma.client.findUnique({
+        where: { clientId },
+        select: { id: true, defaultLoginContextKey: true, status: true },
+      });
+      if (client === null || client.status !== 'active') {
+        return false;
+      }
+      const key =
+        loginContext !== undefined && loginContext !== ''
+          ? loginContext
+          : (client.defaultLoginContextKey ?? undefined);
+      if (key === undefined) {
+        return false;
+      }
+      const context = await prisma.clientLoginContext.findFirst({
+        where: { clientId: client.id, key, status: 'active' },
+        select: { stepUpRequired: true },
+      });
+      return context?.stepUpRequired ?? false;
     },
 
     async isAdmin(userId, clientId) {

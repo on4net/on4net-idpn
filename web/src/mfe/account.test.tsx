@@ -9,6 +9,7 @@ import {
   type AccountSession,
 } from './account-api-client';
 import { Account, AccountRoot } from './account';
+import type { PasskeyDriver } from './passkey-client';
 
 const profile: AccountProfile = {
   id: 'u1',
@@ -74,6 +75,12 @@ interface FakeClient {
   verifyTotpEnrollment: ReturnType<typeof vi.fn>;
   disableTotp: ReturnType<typeof vi.fn>;
   regenerateRecoveryCodes: ReturnType<typeof vi.fn>;
+  beginPasskeyRegistration: ReturnType<typeof vi.fn>;
+  finishPasskeyRegistration: ReturnType<typeof vi.fn>;
+  beginPasskeyAuthentication: ReturnType<typeof vi.fn>;
+  finishPasskeyAuthentication: ReturnType<typeof vi.fn>;
+  renamePasskey: ReturnType<typeof vi.fn>;
+  deletePasskey: ReturnType<typeof vi.fn>;
 }
 
 const recoveryCodes = Array.from({ length: 10 }, (_, index) => `ABCDE-FGHJ${index}`);
@@ -99,6 +106,7 @@ const enabledMfa = {
   },
   recoveryCodesRemaining: 8,
   available: true,
+  webauthn: [],
 };
 
 const disabledMfa = {
@@ -106,6 +114,19 @@ const disabledMfa = {
   totp: null,
   recoveryCodesRemaining: 0,
   available: true,
+  webauthn: [],
+};
+
+const passkeyFactor = {
+  id: 'passkey-1',
+  type: 'webauthn' as const,
+  name: 'My laptop',
+  confirmed: true,
+  createdAt: '2026-10-19T09:30:00.000Z',
+  lastUsedAt: '2026-10-19T10:00:00.000Z',
+  transports: ['internal'],
+  deviceType: 'multiDevice',
+  backedUp: true,
 };
 
 function fakeClient(overrides: Partial<Record<keyof AccountApiClient, unknown>> = {}): FakeClient {
@@ -132,6 +153,25 @@ function fakeClient(overrides: Partial<Record<keyof AccountApiClient, unknown>> 
   const verifyTotpEnrollment = vi.fn().mockResolvedValue({ ok: true, recoveryCodes });
   const disableTotp = vi.fn().mockResolvedValue({ ok: true });
   const regenerateRecoveryCodes = vi.fn().mockResolvedValue({ recoveryCodes });
+  const beginPasskeyRegistration = vi.fn().mockResolvedValue({
+    challengeId: 'passkey-challenge-1',
+    options: { challenge: 'challenge-value' },
+  });
+  const finishPasskeyRegistration = vi.fn().mockResolvedValue({
+    ok: true,
+    factor: { id: 'passkey-1', type: 'webauthn', name: 'My laptop', confirmed: true },
+  });
+  const beginPasskeyAuthentication = vi.fn().mockResolvedValue({
+    challengeId: 'passkey-authentication-1',
+    options: { challenge: 'challenge-value' },
+  });
+  const finishPasskeyAuthentication = vi.fn().mockResolvedValue({
+    ok: true,
+    acr: 'urn:on4net:acr:mfa',
+    amr: ['pwd', 'webauthn', 'hwk'],
+  });
+  const renamePasskey = vi.fn().mockResolvedValue({ ok: true });
+  const deletePasskey = vi.fn().mockResolvedValue({ ok: true });
 
   const client = {
     getProfile,
@@ -144,14 +184,47 @@ function fakeClient(overrides: Partial<Record<keyof AccountApiClient, unknown>> 
     verifyTotpEnrollment,
     disableTotp,
     regenerateRecoveryCodes,
+    beginPasskeyRegistration,
+    finishPasskeyRegistration,
+    beginPasskeyAuthentication,
+    finishPasskeyAuthentication,
+    renamePasskey,
+    deletePasskey,
     ...overrides,
   } as unknown as AccountApiClient;
 
   return { client, ...(client as unknown as Omit<FakeClient, 'client'>) };
 }
 
-const renderAccount = (fake: FakeClient, locale = 'fa-IR') =>
-  render(<Account apiClient={fake.client} locale={locale} onEvent={undefined} />);
+/** Fake WebAuthn driver: proves the UI never needs a real authenticator in jsdom. */
+const passkeyDriver = (supported = true) =>
+  ({
+    supported: vi.fn().mockReturnValue(supported),
+    register: vi.fn().mockResolvedValue({
+      id: 'credential-1',
+      rawId: 'credential-1',
+      type: 'public-key',
+      response: { clientDataJSON: 'client-data' },
+      clientExtensionResults: {},
+    }),
+    authenticate: vi.fn().mockResolvedValue({
+      id: 'credential-1',
+      rawId: 'credential-1',
+      type: 'public-key',
+      response: { clientDataJSON: 'client-data' },
+      clientExtensionResults: {},
+    }),
+  }) as unknown as PasskeyDriver;
+
+const renderAccount = (fake: FakeClient, locale = 'fa-IR', driver?: PasskeyDriver) =>
+  render(
+    <Account
+      apiClient={fake.client}
+      locale={locale}
+      onEvent={undefined}
+      {...(driver === undefined ? {} : { passkeys: driver })}
+    />,
+  );
 
 describe('Account MFE', () => {
   it('renders the Persian profile, sessions and the MFA section', async () => {
@@ -629,5 +702,96 @@ describe('Account MFA section', () => {
     expect(await screen.findByTestId('mfa-notice')).toHaveTextContent(
       'کدهای بازیابی جدید ساخته شد.',
     );
+  });
+
+  it('shows the passkey empty state and enrols a passkey through the browser driver', async () => {
+    const enrolledStatus = {
+      ...disabledMfa,
+      factors: [passkeyFactor],
+      webauthn: [passkeyFactor],
+    };
+    const fake = fakeClient({
+      getMfaStatus: vi.fn().mockResolvedValueOnce(disabledMfa).mockResolvedValue(enrolledStatus),
+    });
+    const driver = passkeyDriver();
+    renderAccount(fake, 'fa-IR', driver);
+    await screen.findByText('سارا محمدی');
+
+    expect(screen.getByTestId('passkey-empty')).toHaveTextContent('هنوز Passkey ثبت نشده است.');
+    await userEvent.setup().type(screen.getByLabelText('نام دستگاه'), 'My laptop');
+    await userEvent.setup().click(screen.getByTestId('passkey-enroll'));
+
+    await waitFor(() => expect(fake.beginPasskeyRegistration).toHaveBeenCalledTimes(1));
+    expect(driver.register).toHaveBeenCalledWith({ challenge: 'challenge-value' });
+    expect(fake.finishPasskeyRegistration).toHaveBeenCalledWith({
+      challengeId: 'passkey-challenge-1',
+      response: expect.objectContaining({ id: 'credential-1' }),
+      name: 'My laptop',
+    });
+    expect(await screen.findByTestId('passkey-list')).toHaveTextContent('My laptop');
+    expect(screen.getByTestId('mfa-badge')).toHaveTextContent('فعال');
+  });
+
+  it('lists, renames and deletes a passkey with accessible labels', async () => {
+    const status = { ...disabledMfa, factors: [passkeyFactor], webauthn: [passkeyFactor] };
+    const fake = fakeClient({ getMfaStatus: vi.fn().mockResolvedValue(status) });
+    renderAccount(fake, 'fa-IR', passkeyDriver());
+    await screen.findByText('سارا محمدی');
+    const user = userEvent.setup();
+
+    expect(screen.getByTestId('passkey-list')).toHaveTextContent('Passkey همگام‌شده');
+    await user.click(screen.getByRole('button', { name: 'تغییر نام My laptop' }));
+    const rename = screen.getByLabelText('نام دستگاه', {
+      selector: 'input#passkey-rename-passkey-1',
+    });
+    await user.clear(rename);
+    await user.type(rename, 'Office key');
+    await user.click(screen.getByRole('button', { name: 'ذخیره' }));
+
+    expect(fake.renamePasskey).toHaveBeenCalledWith({
+      factorId: 'passkey-1',
+      name: 'Office key',
+    });
+    expect(await screen.findByTestId('mfa-notice')).toHaveTextContent('نام Passkey تغییر کرد.');
+
+    await user.click(screen.getByRole('button', { name: 'حذف Passkey My laptop' }));
+    expect(fake.deletePasskey).toHaveBeenCalledWith('passkey-1');
+    expect(await screen.findByText('Passkey حذف شد.')).toBeVisible();
+  });
+
+  it('explains an already-registered passkey and an unsupported browser', async () => {
+    const duplicate = fakeClient({
+      finishPasskeyRegistration: vi.fn().mockRejectedValue(
+        new AccountApiError('conflict', 409, 'duplicate', {
+          code: 'webauthn_credential_exists',
+        }),
+      ),
+    });
+    const { unmount } = renderAccount(duplicate, 'fa-IR', passkeyDriver());
+    await screen.findByText('سارا محمدی');
+    await userEvent.setup().click(screen.getByTestId('passkey-enroll'));
+    expect(await screen.findByTestId('mfa-error')).toHaveTextContent(
+      'این Passkey قبلاً برای حسابی ثبت شده است.',
+    );
+    unmount();
+
+    const unsupported = fakeClient();
+    renderAccount(unsupported, 'fa-IR', passkeyDriver(false));
+    await screen.findByText('سارا محمدی');
+    await userEvent.setup().click(screen.getByTestId('passkey-enroll'));
+    expect(await screen.findByTestId('mfa-error')).toHaveTextContent(
+      'این مرورگر از Passkey پشتیبانی نمی‌کند.',
+    );
+    expect(unsupported.beginPasskeyRegistration).not.toHaveBeenCalled();
+  });
+
+  it('renders the passkey section in English LTR', async () => {
+    const fake = fakeClient();
+    render(<AccountRoot apiClient={fake.client} locale="en-US" />);
+
+    await screen.findByText('sara@example.com');
+    expect(screen.getByRole('heading', { name: 'Passkeys' })).toBeVisible();
+    expect(screen.getByTestId('passkey-empty')).toHaveTextContent('No passkey has been added yet.');
+    expect(screen.getByTestId('idpn-root')).toHaveAttribute('dir', 'ltr');
   });
 });

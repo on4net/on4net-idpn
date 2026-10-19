@@ -10,6 +10,7 @@ import {
 } from '@/app/account-flows';
 import { LoginForm, type LoginFormValues } from '@/app/login-form';
 import { MfaForm, type MfaErrorCode, type MfaFormValues } from '@/app/mfa-form';
+import { browserPasskeyDriver, passkeysSupported, type PasskeyDriver } from '@/mfe/passkey-client';
 import {
   SocialLogin,
   selectSocialProviders,
@@ -30,7 +31,7 @@ interface PublicConfigLike {
 export type LoginSubmitResult =
   | { ok: true; redirectTo?: string }
   | { ok: false; reason: 'invalid_credentials' | 'network' }
-  | { ok: false; reason: 'mfa_required'; challengeToken: string }
+  | { ok: false; reason: 'mfa_required'; challengeToken: string; methods?: string[] }
   | { ok: false; reason: 'mfa_enrollment_required' };
 
 export interface MfaVerifyInput extends MfaFormValues {
@@ -49,6 +50,13 @@ export interface HostedLoginPageProps {
   ) => Promise<LoginSubmitResult>;
   /** Second-factor call (`POST /api/v1/login/mfa/verify`); injectable for tests. */
   verify?: (values: MfaVerifyInput) => Promise<MfaVerifyResult>;
+  /** Passkey second-factor call; the default uses the browser WebAuthn API. */
+  verifyPasskey?: (input: {
+    challengeToken: string;
+    driver: PasskeyDriver;
+  }) => Promise<MfaVerifyResult>;
+  /** WebAuthn browser implementation; injectable so tests never need an authenticator. */
+  passkeys?: PasskeyDriver;
   /** Account lifecycle calls, injectable for tests (tokens never leave component memory). */
   forgotPassword?: (email: string) => Promise<AccountFlowResult>;
   setPassword?: (input: {
@@ -122,10 +130,18 @@ async function defaultSubmit(
   const payload = (await response.json()) as {
     mfa?: unknown;
     challengeToken?: unknown;
+    methods?: unknown;
     redirectTo?: unknown;
   };
   if (payload.mfa === 'challenge' && typeof payload.challengeToken === 'string') {
-    return { ok: false, reason: 'mfa_required', challengeToken: payload.challengeToken };
+    return {
+      ok: false,
+      reason: 'mfa_required',
+      challengeToken: payload.challengeToken,
+      methods: Array.isArray(payload.methods)
+        ? payload.methods.filter((entry): entry is string => typeof entry === 'string')
+        : [],
+    };
   }
   return typeof payload.redirectTo === 'string'
     ? { ok: true, redirectTo: payload.redirectTo }
@@ -165,6 +181,86 @@ async function defaultVerify(values: MfaVerifyInput): Promise<MfaVerifyResult> {
   }
 
   const payload = (await response.json()) as { redirectTo?: unknown };
+  return typeof payload.redirectTo === 'string'
+    ? { ok: true, redirectTo: payload.redirectTo }
+    : { ok: true };
+}
+
+/**
+ * Passkey second factor. The browser prompt is the only place the authenticator is touched;
+ * the server issues a single-use ceremony bound to the pending MFA challenge and verifies
+ * the signed assertion. Nothing from the response is persisted in the page.
+ */
+async function defaultVerifyPasskey(input: {
+  challengeToken: string;
+  driver: PasskeyDriver;
+}): Promise<MfaVerifyResult> {
+  if (!passkeysSupported(input.driver)) {
+    return { ok: false, reason: 'passkey_unsupported' };
+  }
+  let optionsResponse: Response;
+  try {
+    optionsResponse = await fetch('/api/v1/login/mfa/webauthn/options', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ challengeToken: input.challengeToken }),
+    });
+  } catch {
+    return { ok: false, reason: 'network' };
+  }
+  if (optionsResponse.status === 401) {
+    return { ok: false, reason: 'expired' };
+  }
+  if (!optionsResponse.ok) {
+    return { ok: false, reason: 'passkey_failed' };
+  }
+  const ceremony = (await optionsResponse.json().catch((): null => null)) as {
+    challengeId?: unknown;
+    options?: unknown;
+  } | null;
+  if (typeof ceremony?.challengeId !== 'string' || ceremony.options === undefined) {
+    return { ok: false, reason: 'passkey_failed' };
+  }
+  let response: unknown;
+  try {
+    response = await input.driver.authenticate(
+      ceremony.options as Parameters<PasskeyDriver['authenticate']>[0],
+    );
+  } catch {
+    return { ok: false, reason: 'passkey_failed' };
+  }
+
+  let verifyResponse: Response;
+  try {
+    verifyResponse = await fetch('/api/v1/login/mfa/webauthn/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({
+        challengeToken: input.challengeToken,
+        challengeId: ceremony.challengeId,
+        response,
+      }),
+    });
+  } catch {
+    return { ok: false, reason: 'network' };
+  }
+  if (verifyResponse.status === 429) {
+    return { ok: false, reason: 'rate_limited' };
+  }
+  if (verifyResponse.status === 401 || verifyResponse.status === 400) {
+    const problem = (await verifyResponse.json().catch((): unknown => null)) as {
+      error?: unknown;
+    } | null;
+    return problem?.error === 'mfa_challenge_invalid'
+      ? { ok: false, reason: 'expired' }
+      : { ok: false, reason: 'passkey_failed' };
+  }
+  if (!verifyResponse.ok) {
+    return { ok: false, reason: 'network' };
+  }
+  const payload = (await verifyResponse.json()) as { redirectTo?: unknown };
   return typeof payload.redirectTo === 'string'
     ? { ok: true, redirectTo: payload.redirectTo }
     : { ok: true };
@@ -273,6 +369,8 @@ export function HostedLoginPage({
   fetchConfig = defaultFetchConfig,
   submit = defaultSubmit,
   verify = defaultVerify,
+  verifyPasskey = defaultVerifyPasskey,
+  passkeys = browserPasskeyDriver,
   forgotPassword = defaultForgotPassword,
   setPassword = defaultSetPassword,
   confirmEmail = defaultConfirmEmail,
@@ -326,7 +424,9 @@ export function HostedLoginPage({
   >(null);
   /** Set once the password step returned an MFA challenge (single-use token). */
   const [challengeToken, setChallengeToken] = React.useState<string | null>(null);
+  const [mfaMethods, setMfaMethods] = React.useState<string[]>([]);
   const [mfaSubmitting, setMfaSubmitting] = React.useState(false);
+  const [passkeySubmitting, setPasskeySubmitting] = React.useState(false);
   const [mfaError, setMfaError] = React.useState<MfaErrorCode | null>(null);
 
   React.useEffect(() => {
@@ -385,6 +485,7 @@ export function HostedLoginPage({
         if (result.reason === 'mfa_required') {
           // No session and no cookie yet: the second factor completes the login.
           setMfaError(null);
+          setMfaMethods(result.methods ?? []);
           setChallengeToken(result.challengeToken);
           return;
         }
@@ -418,7 +519,26 @@ export function HostedLoginPage({
   const backToPassword = (): void => {
     // The challenge stays valid server-side until its TTL, but the browser drops the token.
     setChallengeToken(null);
+    setMfaMethods([]);
     setMfaError(null);
+  };
+
+  const handlePasskey = async (): Promise<void> => {
+    if (challengeToken === null) {
+      return;
+    }
+    setPasskeySubmitting(true);
+    setMfaError(null);
+    try {
+      const result = await verifyPasskey({ challengeToken, driver: passkeys });
+      if (!result.ok) {
+        setMfaError(result.reason);
+        return;
+      }
+      navigateTo(result.redirectTo ?? returnTo ?? '/');
+    } finally {
+      setPasskeySubmitting(false);
+    }
   };
 
   const flowView =
@@ -447,7 +567,7 @@ export function HostedLoginPage({
       dir={dir}
       theme={theme}
       data-client-id={clientId}
-      aria-busy={submitting || mfaSubmitting}
+      aria-busy={submitting || mfaSubmitting || passkeySubmitting}
     >
       {flowView ??
         (challengeToken === null ? (
@@ -480,6 +600,9 @@ export function HostedLoginPage({
             dir={dir}
             submitting={mfaSubmitting}
             errorCode={mfaError}
+            passkeyAvailable={mfaMethods.includes('webauthn')}
+            passkeySubmitting={passkeySubmitting}
+            onPasskey={handlePasskey}
             onBack={backToPassword}
             onSubmit={handleVerify}
           />

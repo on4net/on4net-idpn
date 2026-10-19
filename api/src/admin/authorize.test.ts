@@ -279,6 +279,29 @@ describe('delegated admin mode', () => {
     expect(result.ok).toBe(true);
   });
 
+  it('accepts a passkey step-up token whose amr includes webauthn/hwk', async () => {
+    const passkeyToken = {
+      ...delegatedToken,
+      acr: 'urn:on4net:acr:mfa',
+      amr: ['pwd', 'webauthn', 'hwk'],
+    };
+    const result = await authorizeAdminRequest(
+      request(tokenWith(passkeyToken)),
+      guard({
+        verifier: verifier(passkeyToken),
+        permissions: permissions([], ['idp:client-role:write']),
+        now: () => new Date(1_760_000_100 * 1000),
+      }),
+      {
+        ...requirement,
+        delegatedPermission: 'idp:client-role:write',
+        stepUp: true,
+        requireMfa: true,
+      },
+    );
+    expect(result.ok).toBe(true);
+  });
+
   it('rejects a fresh password-only token when MFA is required for step-up', async () => {
     const options = guard({
       verifier: verifier(delegatedToken),

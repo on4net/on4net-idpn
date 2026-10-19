@@ -43,6 +43,9 @@ import { createPrismaPublicConfigRepository } from './public-config/prisma-repos
 import { createPrismaLoginRepository } from './login/prisma-repository.js';
 import { createPrismaMfaRepository } from './mfa/prisma-repository.js';
 import { RedisMfaChallengeStore } from './mfa/challenge-store.js';
+import { RedisWebauthnChallengeStore } from './mfa/webauthn-challenge-store.js';
+import { SimpleWebauthnLibrary } from './mfa/webauthn-library.js';
+import { resolveWebauthnConfig } from './mfa/webauthn.js';
 import { verifyPassword } from './auth/password.js';
 import { buildServer } from './server.js';
 import { createPrismaSessionRevocationHook } from './session/prisma-revocation.js';
@@ -135,6 +138,22 @@ const mfaDependencies = {
 };
 
 /**
+ * WebAuthn/passkey ceremonies. The RP ID and origin allowlist come from validated
+ * configuration (`APP_URL` + `WEBAUTHN_ALLOWED_ORIGINS`); an invalid allowlist fails startup.
+ * Passkeys are a second factor and a step-up proof, never a passwordless first factor.
+ */
+const webauthnDependencies = {
+  config: resolveWebauthnConfig({
+    appUrl: env.APP_URL,
+    allowedOrigins: env.WEBAUTHN_ALLOWED_ORIGINS,
+    rpName: new URL(env.APP_URL).host,
+  }),
+  challenges: new RedisWebauthnChallengeStore(redis),
+  repository: mfaRepository,
+  library: new SimpleWebauthnLibrary(),
+};
+
+/**
  * Per-app social login (`docs/auth-flows.md` 9): single-use transactions live in Redis so the
  * callback can be served by any API instance, and each callback only ever decrypts the
  * credential row of the client in its path.
@@ -219,6 +238,7 @@ const app = buildServer({
     persistSession: (input) => loginRepository.persistSession(input),
     audit: { record: (event) => loginRepository.record(event) },
     mfa: mfaDependencies,
+    webauthn: webauthnDependencies,
     cookie: {
       secure: env.APP_URL.startsWith('https://'),
       idleTtlSeconds: env.SESSION_IDLE_TTL_SECONDS,
@@ -292,6 +312,7 @@ const app = buildServer({
   account: {
     sessions,
     repository: adminSessionsRepository,
+    persistSession: (input) => loginRepository.persistSession(input),
     profiles: createPrismaAccountProfileRepository(prisma),
     passwords: passwordStore,
     audit: createPrismaAdminAudit(prisma),
@@ -301,6 +322,7 @@ const app = buildServer({
       issuer: new URL(env.APP_URL).host,
       verify: verifyPassword,
     },
+    webauthn: webauthnDependencies,
   },
   adminKeys: {
     adminClientId: env.ADMIN_CLIENT_ID,

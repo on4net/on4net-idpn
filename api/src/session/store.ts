@@ -119,6 +119,33 @@ export class RedisSessionStore implements ClientSessionRevoker {
     });
   }
 
+  /**
+   * Rotates the session id and records a fresh multi-factor authentication (step-up).
+   * The previous `sid` is revoked as `rotated`, so a token minted from it cannot be replayed
+   * and the new `auth_time`/`acr`/`amr` reflect the second factor (`docs/auth-flows.md` 7.4).
+   */
+  async stepUp(
+    sid: string,
+    input: { amr: string[]; acr: string; authTime: Date },
+  ): Promise<IdpSession | null> {
+    const current = await this.read(sid);
+    if (current === null) {
+      return null;
+    }
+    await this.revoke(sid, 'rotated');
+    return this.create({
+      userId: current.userId,
+      ...definedOptional('tenantId', current.tenantId),
+      ...definedOptional('clientId', current.clientId),
+      ...definedOptional('loginContext', current.loginContext),
+      ...definedOptional('ip', current.ip),
+      ...definedOptional('userAgent', current.userAgent),
+      amr: input.amr,
+      acr: input.acr,
+      authTime: input.authTime,
+    });
+  }
+
   async revoke(sid: string, reason: RevokeReason): Promise<boolean> {
     const session = await this.load(sid);
     if (session === null) {

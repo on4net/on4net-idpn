@@ -11,14 +11,17 @@ import { type Locale } from '@/i18n';
 import {
   AccountApiError,
   type AccountApiClient,
+  type AccountMfaFactor,
   type AccountMfaStatus,
   type TotpEnrollment,
 } from './account-api-client';
+import { browserPasskeyDriver, passkeysSupported, type PasskeyDriver } from './passkey-client';
 
 const CODE_ID = 'mfa-enrollment-code';
 const REGENERATE_PASSWORD_ID = 'mfa-regenerate-password';
 const DISABLE_PASSWORD_ID = 'mfa-disable-password';
 const DISABLE_CODE_ID = 'mfa-disable-code';
+const PASSKEY_NAME_ID = 'mfa-passkey-name';
 
 export interface MfaSectionEvent {
   type: 'auth:error';
@@ -32,6 +35,8 @@ export interface MfaSectionProps {
   t: (key: string, values?: Record<string, string | number>) => string;
   /** Non-sensitive module event; never contains a code, secret or token. */
   onEvent?: ((event: MfaSectionEvent) => void) | undefined;
+  /** Browser WebAuthn API; tests inject a fake driver instead of a real authenticator. */
+  passkeys?: PasskeyDriver;
 }
 
 type Busy = 'enroll' | 'verify' | 'disable' | 'regenerate' | null;
@@ -41,6 +46,10 @@ const reasonOf = (caught: unknown): string => {
     if (caught.code === 'invalid_mfa_code') return 'account.mfa.errorInvalidCode';
     if (caught.code === 'invalid_current_password') return 'account.mfa.errorInvalidPassword';
     if (caught.code === 'totp_already_enrolled') return 'account.mfa.errorAlreadyEnrolled';
+    if (caught.code === 'webauthn_credential_exists') return 'account.passkey.errorExists';
+    if (caught.code === 'webauthn_unavailable') return 'account.mfa.errorUnavailable';
+    if (caught.code === 'webauthn_origin_not_allowed') return 'account.passkey.failed';
+    if (caught.code?.startsWith('webauthn_') === true) return 'account.passkey.failed';
     if (caught.code === 'mfa_unavailable') return 'account.mfa.errorUnavailable';
     if (caught.kind === 'network') return 'account.errorNetwork';
     if (caught.kind === 'unauthorized') return 'account.errorUnauthorized';
@@ -55,7 +64,8 @@ const reasonOf = (caught: unknown): string => {
  * and disables the factor after a password or code proof. The secret and codes live only in
  * component state: they are never stored, logged or emitted through `onEvent`.
  */
-export function MfaSection({ api, locale, t, onEvent }: MfaSectionProps) {
+export function MfaSection({ api, locale, t, onEvent, passkeys }: MfaSectionProps) {
+  const driver = passkeys ?? browserPasskeyDriver;
   const dateFormatter = React.useMemo(
     () => new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }),
     [locale],
@@ -76,6 +86,10 @@ export function MfaSection({ api, locale, t, onEvent }: MfaSectionProps) {
   const [disableCode, setDisableCode] = React.useState('');
   const [formError, setFormError] = React.useState<string | null>(null);
   const [notice, setNotice] = React.useState<string | null>(null);
+  const [passkeyName, setPasskeyName] = React.useState('');
+  const [passkeyBusy, setPasskeyBusy] = React.useState<string | null>(null);
+  const [renamingId, setRenamingId] = React.useState<string | null>(null);
+  const [renameValue, setRenameValue] = React.useState('');
 
   React.useEffect(() => {
     const controller = new AbortController();
@@ -207,8 +221,77 @@ export function MfaSection({ api, locale, t, onEvent }: MfaSectionProps) {
     }
   };
 
+  const enrollPasskey = async (event: React.FormEvent<HTMLFormElement>): Promise<void> => {
+    event.preventDefault();
+    setFormError(null);
+    setNotice(null);
+    if (!passkeysSupported(driver)) {
+      setFormError(t('account.passkey.unsupported'));
+      return;
+    }
+    setPasskeyBusy('enroll');
+    try {
+      const ceremony = await api.beginPasskeyRegistration();
+      const response = await driver.register(ceremony.options);
+      await api.finishPasskeyRegistration({
+        challengeId: ceremony.challengeId,
+        response,
+        ...(passkeyName.trim() === '' ? {} : { name: passkeyName.trim() }),
+      });
+      setPasskeyName('');
+      setNotice(t('account.passkey.enrolled'));
+      setReload((value) => value + 1);
+    } catch (caught) {
+      report(caught);
+    } finally {
+      setPasskeyBusy(null);
+    }
+  };
+
+  const removePasskey = async (factor: AccountMfaFactor): Promise<void> => {
+    setFormError(null);
+    setNotice(null);
+    setPasskeyBusy(`delete:${factor.id}`);
+    try {
+      await api.deletePasskey(factor.id);
+      setNotice(t('account.passkey.deleted'));
+      setReload((value) => value + 1);
+    } catch (caught) {
+      report(caught);
+    } finally {
+      setPasskeyBusy(null);
+    }
+  };
+
+  const renamePasskey = async (event: React.FormEvent<HTMLFormElement>): Promise<void> => {
+    event.preventDefault();
+    if (renamingId === null) {
+      return;
+    }
+    const name = renameValue.trim();
+    if (name === '') {
+      setFormError(t('account.passkey.nameRequired'));
+      return;
+    }
+    setFormError(null);
+    setPasskeyBusy(`rename:${renamingId}`);
+    try {
+      await api.renamePasskey({ factorId: renamingId, name });
+      setRenamingId(null);
+      setRenameValue('');
+      setNotice(t('account.passkey.renamed'));
+      setReload((value) => value + 1);
+    } catch (caught) {
+      report(caught);
+    } finally {
+      setPasskeyBusy(null);
+    }
+  };
+
   const totp = status?.totp ?? null;
-  const confirmed = totp?.confirmed === true;
+  const totpConfirmed = totp?.confirmed === true;
+  const passkeyList = status?.webauthn ?? [];
+  const confirmed = totpConfirmed || passkeyList.length > 0;
 
   return (
     <Card data-testid="mfa-section">
@@ -286,7 +369,7 @@ export function MfaSection({ api, locale, t, onEvent }: MfaSectionProps) {
           </Alert>
         )}
 
-        {status !== null && !confirmed && enrollment === null ? (
+        {status !== null && !totpConfirmed && enrollment === null ? (
           <div className="grid gap-2">
             <Button
               type="button"
@@ -366,7 +449,7 @@ export function MfaSection({ api, locale, t, onEvent }: MfaSectionProps) {
           </div>
         )}
 
-        {confirmed ? (
+        {totpConfirmed ? (
           <div className="grid gap-4">
             <p className="text-sm text-muted-foreground">
               {t('account.mfa.recoveryRemaining', {
@@ -435,6 +518,144 @@ export function MfaSection({ api, locale, t, onEvent }: MfaSectionProps) {
             </form>
           </div>
         ) : null}
+
+        <section
+          className="mt-6 grid gap-3 border-t border-border pt-4"
+          aria-labelledby="account-passkeys-title"
+          data-testid="passkey-section"
+        >
+          <div>
+            <h3 id="account-passkeys-title" className="text-sm font-semibold">
+              {t('account.passkey.title')}
+            </h3>
+            <p className="text-xs text-muted-foreground">{t('account.passkey.description')}</p>
+          </div>
+
+          {passkeyList.length === 0 ? (
+            <p className="text-sm text-muted-foreground" data-testid="passkey-empty">
+              {t('account.passkey.empty')}
+            </p>
+          ) : (
+            <ul className="grid gap-2" data-testid="passkey-list">
+              {passkeyList.map((factor) => (
+                <li
+                  key={factor.id}
+                  className="grid gap-2 rounded-md border border-border p-3"
+                  data-testid={`passkey-${factor.id}`}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-medium">{factor.name}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {t('account.passkey.deviceType')}:{' '}
+                      {factor.backedUp === true
+                        ? t('account.passkey.backedUp')
+                        : (factor.deviceType ?? t('account.passkey.singleDevice'))}
+                    </span>
+                  </div>
+                  <dl className="grid gap-1 text-xs text-muted-foreground">
+                    <div className="flex gap-2">
+                      <dt>{t('account.passkey.createdAt')}:</dt>
+                      <dd>{dateFormatter.format(new Date(factor.createdAt))}</dd>
+                    </div>
+                    <div className="flex gap-2">
+                      <dt>{t('account.mfa.lastUsed')}:</dt>
+                      <dd>
+                        {factor.lastUsedAt === null
+                          ? t('account.mfa.never')
+                          : dateFormatter.format(new Date(factor.lastUsedAt))}
+                      </dd>
+                    </div>
+                  </dl>
+
+                  {renamingId === factor.id ? (
+                    <form
+                      className="flex flex-wrap items-end gap-2"
+                      onSubmit={(event) => void renamePasskey(event)}
+                    >
+                      <div className="grid gap-1">
+                        <Label htmlFor={`passkey-rename-${factor.id}`}>
+                          {t('account.passkey.nameLabel')}
+                        </Label>
+                        <Input
+                          id={`passkey-rename-${factor.id}`}
+                          value={renameValue}
+                          maxLength={64}
+                          onChange={(event) => setRenameValue(event.target.value)}
+                        />
+                      </div>
+                      <Button type="submit" size="sm" disabled={passkeyBusy !== null}>
+                        {t('account.passkey.save')}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        disabled={passkeyBusy !== null}
+                        onClick={() => {
+                          setRenamingId(null);
+                          setRenameValue('');
+                        }}
+                      >
+                        {t('account.mfa.cancel')}
+                      </Button>
+                    </form>
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={passkeyBusy !== null}
+                        aria-label={`${t('account.passkey.rename')} ${factor.name}`}
+                        onClick={() => {
+                          setRenamingId(factor.id);
+                          setRenameValue(factor.name);
+                          setFormError(null);
+                        }}
+                      >
+                        {t('account.passkey.rename')}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="destructive"
+                        disabled={passkeyBusy !== null}
+                        aria-label={`${t('account.passkey.delete')} ${factor.name}`}
+                        onClick={() => void removePasskey(factor)}
+                      >
+                        {passkeyBusy === `delete:${factor.id}`
+                          ? t('account.passkey.deleting')
+                          : t('account.passkey.delete')}
+                      </Button>
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+
+          <form className="grid gap-2" onSubmit={(event) => void enrollPasskey(event)}>
+            <Label htmlFor={PASSKEY_NAME_ID}>{t('account.passkey.nameLabel')}</Label>
+            <Input
+              id={PASSKEY_NAME_ID}
+              name="passkeyName"
+              value={passkeyName}
+              maxLength={64}
+              placeholder={t('account.passkey.namePlaceholder')}
+              onChange={(event) => setPasskeyName(event.target.value)}
+            />
+            <Button
+              type="submit"
+              variant="outline"
+              disabled={passkeyBusy !== null}
+              data-testid="passkey-enroll"
+            >
+              {passkeyBusy === 'enroll'
+                ? t('account.passkey.enrolling')
+                : t('account.passkey.enroll')}
+            </Button>
+          </form>
+        </section>
       </CardContent>
     </Card>
   );

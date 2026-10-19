@@ -23,6 +23,7 @@
     "@idpn/contracts": "workspace:^",
     "@prisma/adapter-pg": "7.10.1",
     "@prisma/client": "7.10.1",
+    "@simplewebauthn/server": "14.0.3",
     "argon2": "^0.45.1",
     "fastify": "5.12.7",
     "jose": "^6.2.12",

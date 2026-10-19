@@ -36,6 +36,7 @@ describe('parseServerEnv', () => {
       PORT: 3000,
       LOG_LEVEL: 'info',
       MFE_ALLOWED_ORIGINS: [],
+      WEBAUTHN_ALLOWED_ORIGINS: [],
       TRUSTED_PROXY_CIDRS: [],
       SESSION_MAX_CONCURRENT: 5,
     });

@@ -17,10 +17,23 @@ import {
   disableTotpSchema,
   enrollTotpSchema,
   regenerateRecoveryCodesSchema,
+  renameMfaFactorSchema,
   verifyTotpEnrollmentSchema,
+  verifyWebauthnAuthenticationSchema,
+  verifyWebauthnRegistrationSchema,
 } from './schemas.js';
 import { hashPassword, type Argon2Params } from '../auth/password.js';
-import { readSessionId } from '../session/cookie.js';
+import { MFA_ACR } from '../mfa/mfa-types.js';
+import {
+  beginAuthentication,
+  beginRegistration,
+  deleteCredential,
+  finishAuthentication,
+  finishRegistration,
+  renameCredential,
+  type WebauthnServiceDependencies,
+} from '../mfa/webauthn.js';
+import { readSessionId, serializeSessionCookie } from '../session/cookie.js';
 import type { IdpSession, RevokeReason } from '../session/types.js';
 import { changePassword, type PasswordStore } from '../users/change-password.js';
 
@@ -31,14 +44,35 @@ export interface AccountRoutesOptions {
   sessions: {
     read(sid: string): Promise<IdpSession | null>;
     revoke(sid: string, reason: RevokeReason): Promise<boolean>;
+    /** Rotates the session id and records a fresh MFA authentication (step-up). */
+    stepUp?(
+      sid: string,
+      input: { amr: string[]; acr: string; authTime: Date },
+    ): Promise<IdpSession | null>;
   };
   /** PostgreSQL session mirror, shared with the Admin API (docs/api.md 3.1). */
   repository: AdminSessionRepository;
+  /** Mirrors a rotated session after step-up so tokens can reference it (FK). */
+  persistSession?(input: {
+    sid: string;
+    userId: string;
+    tenantId: string;
+    clientId?: string;
+    ip?: string;
+    userAgent?: string;
+    amr: string[];
+    acr: string;
+    createdAt: Date;
+    idleExpiresAt: Date;
+    absoluteExpiresAt: Date;
+  }): Promise<void>;
   profiles: AccountProfileRepository;
   passwords: PasswordStore;
   audit: AdminAudit;
   /** MFA surface (docs/auth-flows.md 7). Omitted only when the deployment has no key. */
   mfa?: AccountMfaDependencies;
+  /** WebAuthn/passkey ceremonies (docs/security.md 3.3). */
+  webauthn?: WebauthnServiceDependencies;
   hash?: (password: string, params: Argon2Params) => Promise<string>;
   now?: () => Date;
 }
@@ -374,11 +408,23 @@ export function registerAccountRoutes(app: FastifyInstance, options: AccountRout
   );
 
   /** MFA mutations are cookie-authenticated, so they need the same CSRF guard as password. */
-  const guardMfaMutation = (request: FastifyRequest, reply: FastifyReply): boolean => {
-    if (!isSameOriginRequest(request, options.appUrl) || !hasJsonContentType(request)) {
-      sendProblem(reply, 403, 'forbidden', 'Forbidden', 'same-origin JSON request required', {
-        code: 'cross_origin_request',
-      });
+  const guardMfaMutation = (
+    request: FastifyRequest,
+    reply: FastifyReply,
+    requireJson = true,
+  ): boolean => {
+    if (
+      !isSameOriginRequest(request, options.appUrl) ||
+      (requireJson && !hasJsonContentType(request))
+    ) {
+      sendProblem(
+        reply,
+        403,
+        'forbidden',
+        'Forbidden',
+        requireJson ? 'same-origin JSON request required' : 'same-origin request required',
+        { code: 'cross_origin_request' },
+      );
       return false;
     }
     return true;
@@ -608,4 +654,364 @@ export function registerAccountRoutes(app: FastifyInstance, options: AccountRout
       { code: 'invalid_current_password' },
     );
   });
+
+  const webauthnUnavailable = (reply: FastifyReply): FastifyReply =>
+    sendProblem(
+      reply,
+      503,
+      'service-unavailable',
+      'Passkeys unavailable',
+      'this deployment cannot verify WebAuthn ceremonies',
+      { code: 'webauthn_unavailable' },
+    );
+
+  /**
+   * Maps a ceremony failure to a problem response. The reason is exposed as a stable `code`
+   * for translation; it never contains challenge, credential or signature material.
+   */
+  const webauthnFailure = (
+    reply: FastifyReply,
+    stage: 'enrollment' | 'authentication',
+    reason: string,
+  ): FastifyReply => {
+    if (reason === 'challenge_invalid') {
+      return sendProblem(
+        reply,
+        401,
+        'invalid-token',
+        'Ceremony expired',
+        'the WebAuthn ceremony is unknown, expired or already used',
+        { code: 'webauthn_challenge_invalid' },
+      );
+    }
+    if (reason === 'duplicate_credential') {
+      return sendProblem(
+        reply,
+        409,
+        'conflict',
+        'Credential already registered',
+        'this authenticator is already registered to an account',
+        { code: 'webauthn_credential_exists' },
+      );
+    }
+    if (reason === 'origin_not_allowed' || reason === 'cross_origin') {
+      return sendProblem(
+        reply,
+        403,
+        'forbidden',
+        'Origin rejected',
+        'the WebAuthn ceremony did not originate from an allowed origin',
+        { code: 'webauthn_origin_not_allowed' },
+      );
+    }
+    return sendProblem(
+      reply,
+      400,
+      'invalid-mfa-code',
+      'Verification failed',
+      stage === 'enrollment'
+        ? 'the passkey registration could not be verified'
+        : 'the passkey assertion could not be verified',
+      { code: `webauthn_${reason}` },
+    );
+  };
+
+  const auditWebauthnFailure = async (
+    request: FastifyRequest,
+    userId: string,
+    stage: 'enrollment' | 'authentication',
+    reason: string,
+  ): Promise<void> => {
+    await options.audit.record({
+      actorType: 'user',
+      actorId: userId,
+      action: 'user.mfa.failed',
+      targetType: 'user',
+      targetId: userId,
+      ip: request.ip ?? null,
+      userAgent: request.headers['user-agent'] ?? null,
+      result: 'failure',
+      metadata: { type: 'webauthn', stage, reason },
+    });
+  };
+
+  const tenantOf = (session: IdpSession): string => session.tenantId ?? '';
+
+  app.post('/api/v1/account/mfa/webauthn/options', async (request, reply) => {
+    if (!guardMfaMutation(request, reply)) {
+      return reply;
+    }
+    const auth = await authenticate(request, reply);
+    if (auth === null) {
+      return reply;
+    }
+    if (options.webauthn === undefined) {
+      return webauthnUnavailable(reply);
+    }
+    const started = await beginRegistration(options.webauthn, {
+      userId: auth.profile.id,
+      tenantId: tenantOf(auth.session),
+      userName: auth.profile.email,
+      userDisplayName: auth.profile.displayName,
+    });
+    return noStore(reply).send({ challengeId: started.challengeId, options: started.options });
+  });
+
+  app.post('/api/v1/account/mfa/webauthn/verify', async (request, reply) => {
+    if (!guardMfaMutation(request, reply)) {
+      return reply;
+    }
+    const auth = await authenticate(request, reply);
+    if (auth === null) {
+      return reply;
+    }
+    if (options.webauthn === undefined) {
+      return webauthnUnavailable(reply);
+    }
+    const parsed = verifyWebauthnRegistrationSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return invalidBody(reply, '/api/v1/account/mfa/webauthn/verify', 'invalid request body');
+    }
+    const result = await finishRegistration(options.webauthn, {
+      userId: auth.profile.id,
+      challengeId: parsed.data.challengeId,
+      response: parsed.data.response,
+      name: parsed.data.name ?? 'passkey',
+    });
+    if (!result.ok) {
+      await auditWebauthnFailure(request, auth.profile.id, 'enrollment', result.reason);
+      return webauthnFailure(reply, 'enrollment', result.reason);
+    }
+    await options.audit.record({
+      actorType: 'user',
+      actorId: auth.profile.id,
+      action: 'user.mfa.enrolled',
+      targetType: 'mfa_factor',
+      targetId: result.factorId,
+      ip: request.ip ?? null,
+      userAgent: request.headers['user-agent'] ?? null,
+      result: 'success',
+      metadata: { type: 'webauthn' },
+    });
+    return noStore(reply)
+      .code(201)
+      .send({
+        ok: true,
+        factor: {
+          id: result.factorId,
+          type: 'webauthn',
+          name: result.name,
+          confirmed: true,
+        },
+      });
+  });
+
+  app.post('/api/v1/account/mfa/webauthn/authenticate/options', async (request, reply) => {
+    if (!guardMfaMutation(request, reply)) {
+      return reply;
+    }
+    const auth = await authenticate(request, reply);
+    if (auth === null) {
+      return reply;
+    }
+    if (options.webauthn === undefined) {
+      return webauthnUnavailable(reply);
+    }
+    const started = await beginAuthentication(options.webauthn, {
+      userId: auth.profile.id,
+      tenantId: tenantOf(auth.session),
+      purpose: 'step_up',
+    });
+    if (!started.ok) {
+      return sendProblem(
+        reply,
+        409,
+        'conflict',
+        'No passkey enrolled',
+        'a confirmed passkey is required for step-up',
+        { code: 'webauthn_not_enrolled' },
+      );
+    }
+    return noStore(reply).send({ challengeId: started.challengeId, options: started.options });
+  });
+
+  app.post('/api/v1/account/mfa/webauthn/authenticate/verify', async (request, reply) => {
+    if (!guardMfaMutation(request, reply)) {
+      return reply;
+    }
+    const auth = await authenticate(request, reply);
+    if (auth === null) {
+      return reply;
+    }
+    if (options.webauthn === undefined) {
+      return webauthnUnavailable(reply);
+    }
+    const parsed = verifyWebauthnAuthenticationSchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      return invalidBody(
+        reply,
+        '/api/v1/account/mfa/webauthn/authenticate/verify',
+        'invalid request body',
+      );
+    }
+    const result = await finishAuthentication(options.webauthn, {
+      userId: auth.profile.id,
+      challengeId: parsed.data.challengeId,
+      response: parsed.data.response,
+      purpose: 'step_up',
+    });
+    if (!result.ok) {
+      await auditWebauthnFailure(request, auth.profile.id, 'authentication', result.reason);
+      return webauthnFailure(reply, 'authentication', result.reason);
+    }
+    if (options.sessions.stepUp === undefined) {
+      return webauthnUnavailable(reply);
+    }
+    const at = now();
+    const amr = [...new Set([...auth.session.amr, 'webauthn', 'hwk'])];
+    const upgraded = await options.sessions.stepUp(auth.session.sid, {
+      amr,
+      acr: MFA_ACR,
+      authTime: at,
+    });
+    if (upgraded === null) {
+      return sendProblem(reply, 401, 'unauthorized', 'Unauthorized', 'session is not active', {
+        code: 'login_required',
+      });
+    }
+    // The previous session id is revoked inside the store; mirror that so the Admin API does
+    // not keep showing a session that can no longer authenticate.
+    await options.repository.revoke(auth.session.sid, at, 'rotated');
+    const tenantId =
+      auth.session.tenantId ??
+      (await options.mfa?.repository.findUserSecurity(auth.profile.id))?.tenantId ??
+      '';
+    await options.persistSession?.({
+      sid: upgraded.sid,
+      userId: upgraded.userId,
+      tenantId,
+      ...(upgraded.clientId === undefined ? {} : { clientId: upgraded.clientId }),
+      ...(upgraded.ip === undefined ? {} : { ip: upgraded.ip }),
+      ...(upgraded.userAgent === undefined ? {} : { userAgent: upgraded.userAgent }),
+      amr: upgraded.amr,
+      acr: upgraded.acr,
+      createdAt: new Date(upgraded.createdAt),
+      idleExpiresAt: new Date(upgraded.idleExpiresAt),
+      absoluteExpiresAt: new Date(upgraded.absoluteExpiresAt),
+    });
+    await options.audit.record({
+      actorType: 'user',
+      actorId: auth.profile.id,
+      action: 'user.mfa.step_up',
+      targetType: 'user',
+      targetId: auth.profile.id,
+      ip: request.ip ?? null,
+      userAgent: request.headers['user-agent'] ?? null,
+      result: 'success',
+      metadata: { method: 'webauthn', factorId: result.factorId, sid: upgraded.sid },
+    });
+    const remaining = Math.max(
+      0,
+      Math.floor((new Date(upgraded.absoluteExpiresAt).getTime() - at.getTime()) / 1000),
+    );
+    return noStore(reply)
+      .header(
+        'Set-Cookie',
+        serializeSessionCookie(upgraded.sid, {
+          secure: options.appUrl.startsWith('https://'),
+          maxAgeSeconds: remaining,
+          path: '/',
+        }),
+      )
+      .send({ ok: true, acr: upgraded.acr, amr: upgraded.amr });
+  });
+
+  app.patch<{ Params: { id: string } }>(
+    '/api/v1/account/mfa/webauthn/:id',
+    async (request, reply) => {
+      if (!guardMfaMutation(request, reply)) {
+        return reply;
+      }
+      const auth = await authenticate(request, reply);
+      if (auth === null) {
+        return reply;
+      }
+      if (options.webauthn === undefined) {
+        return webauthnUnavailable(reply);
+      }
+      const parsed = renameMfaFactorSchema.safeParse(request.body ?? {});
+      if (!parsed.success) {
+        return invalidBody(reply, '/api/v1/account/mfa/webauthn/:id', 'invalid request body');
+      }
+      const result = await renameCredential(options.webauthn, {
+        userId: auth.profile.id,
+        factorId: request.params.id,
+        name: parsed.data.name,
+      });
+      if (!result.ok) {
+        return sendProblem(reply, 404, 'not-found', 'Not found', 'passkey does not exist', {
+          code: 'mfa_factor_not_found',
+        });
+      }
+      await options.audit.record({
+        actorType: 'user',
+        actorId: auth.profile.id,
+        action: 'user.mfa.renamed',
+        targetType: 'mfa_factor',
+        targetId: request.params.id,
+        ip: request.ip ?? null,
+        userAgent: request.headers['user-agent'] ?? null,
+        result: 'success',
+        metadata: { type: 'webauthn' },
+      });
+      return noStore(reply).send({ ok: true });
+    },
+  );
+
+  app.delete<{ Params: { id: string } }>(
+    '/api/v1/account/mfa/webauthn/:id',
+    async (request, reply) => {
+      // A browser cannot send a cross-site DELETE form; the origin check is the CSRF proof.
+      if (!guardMfaMutation(request, reply, false)) {
+        return reply;
+      }
+      const auth = await authenticate(request, reply);
+      if (auth === null) {
+        return reply;
+      }
+      if (options.webauthn === undefined) {
+        return webauthnUnavailable(reply);
+      }
+      const factor = await options.webauthn.repository.findWebauthn(
+        auth.profile.id,
+        request.params.id,
+      );
+      if (factor === null) {
+        return sendProblem(reply, 404, 'not-found', 'Not found', 'passkey does not exist', {
+          code: 'mfa_factor_not_found',
+        });
+      }
+      const result = await deleteCredential(options.webauthn, {
+        userId: auth.profile.id,
+        factorId: request.params.id,
+      });
+      if (!result.ok) {
+        return sendProblem(reply, 404, 'not-found', 'Not found', 'passkey does not exist', {
+          code: 'mfa_factor_not_found',
+        });
+      }
+      await options.audit.record({
+        actorType: 'user',
+        actorId: auth.profile.id,
+        action: 'user.mfa.removed',
+        targetType: 'mfa_factor',
+        targetId: request.params.id,
+        ip: request.ip ?? null,
+        userAgent: request.headers['user-agent'] ?? null,
+        result: 'success',
+        metadata: { type: 'webauthn' },
+      });
+      return noStore(reply).send({ ok: true });
+    },
+  );
 }

@@ -47,6 +47,47 @@ export const regenerateRecoveryCodesSchema = z
   })
   .strict();
 
+/**
+ * WebAuthn ceremony bodies. The browser response is validated only structurally: the
+ * cryptographic meaning is checked by the server verifier. Strings are bounded so a hostile
+ * body cannot allocate unbounded memory.
+ */
+export const webauthnResponseSchema = z.object({
+  id: z.string().min(1).max(2048),
+  rawId: z.string().min(1).max(2048),
+  type: z.literal('public-key'),
+  response: z.record(z.string(), z.unknown()),
+  clientExtensionResults: z.record(z.string(), z.unknown()).optional(),
+  authenticatorAttachment: z.string().max(32).optional(),
+});
+
+export const verifyWebauthnRegistrationSchema = z.object({
+  challengeId: z.string().min(20).max(128),
+  response: webauthnResponseSchema,
+  name: z.string().trim().min(1).max(64).optional(),
+});
+
+export const verifyWebauthnAuthenticationSchema = z.object({
+  challengeId: z.string().min(20).max(128),
+  response: webauthnResponseSchema,
+});
+
+export const loginWebauthnOptionsSchema = z.object({
+  challengeToken: z.string().min(20).max(128),
+});
+
+export const loginWebauthnVerifySchema = z.object({
+  challengeToken: z.string().min(20).max(128),
+  challengeId: z.string().min(20).max(128),
+  response: webauthnResponseSchema,
+});
+
+export const renameMfaFactorSchema = z
+  .object({
+    name: z.string().trim().min(1).max(64),
+  })
+  .strict();
+
 /** Account lifecycle bodies (docs/auth-flows.md 8.2-8.4). The token is opaque and single-use. */
 export const forgotPasswordSchema = z
   .object({

@@ -94,6 +94,64 @@ describe('createAccountApiClient', () => {
     expect(fetchImpl.mock.calls[0]?.[0]).toBe('/api/v1/account/sessions/a%2Fb');
   });
 
+  it('drives the passkey ceremony endpoints without putting a token in the body', async () => {
+    const registration = {
+      id: 'credential-1',
+      rawId: 'credential-1',
+      type: 'public-key',
+      response: { clientDataJSON: 'client-data' },
+      clientExtensionResults: {},
+    };
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ challengeId: 'c1', options: { challenge: 'one' } }))
+      .mockResolvedValueOnce(
+        jsonResponse({ ok: true, factor: { id: 'p1', type: 'webauthn', name: 'Laptop' } }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ challengeId: 'c2', options: { challenge: 'two' } }))
+      .mockResolvedValueOnce(
+        jsonResponse({ ok: true, acr: 'urn:on4net:acr:mfa', amr: ['pwd', 'webauthn'] }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }));
+    const client = createAccountApiClient({ fetchImpl: fetchImpl as unknown as typeof fetch });
+
+    await expect(client.beginPasskeyRegistration()).resolves.toEqual({
+      challengeId: 'c1',
+      options: { challenge: 'one' },
+    });
+    await client.finishPasskeyRegistration({
+      challengeId: 'c1',
+      response: registration as never,
+      name: 'Laptop',
+    });
+    await client.beginPasskeyAuthentication();
+    await client.finishPasskeyAuthentication({
+      challengeId: 'c2',
+      response: registration as never,
+    });
+    await client.renamePasskey({ factorId: 'p/1', name: 'Office' });
+    await client.deletePasskey('p/1');
+
+    const calls = fetchImpl.mock.calls as [string, RequestInit][];
+    expect(calls[0]?.[0]).toBe('/api/v1/account/mfa/webauthn/options');
+    expect(calls[0]?.[1].method).toBe('POST');
+    expect(calls[0]?.[1].body).toBe('{}');
+    expect(calls[1]?.[0]).toBe('/api/v1/account/mfa/webauthn/verify');
+    expect(JSON.parse(String(calls[1]?.[1].body))).toMatchObject({
+      challengeId: 'c1',
+      name: 'Laptop',
+    });
+    expect(calls[2]?.[0]).toBe('/api/v1/account/mfa/webauthn/authenticate/options');
+    expect(calls[3]?.[0]).toBe('/api/v1/account/mfa/webauthn/authenticate/verify');
+    expect(calls[4]?.[0]).toBe('/api/v1/account/mfa/webauthn/p%2F1');
+    expect(calls[4]?.[1].method).toBe('PATCH');
+    expect(calls[5]?.[1].method).toBe('DELETE');
+    for (const [, init] of calls) {
+      expect(JSON.stringify(init.body ?? '')).not.toContain('token');
+    }
+  });
+
   it('exposes the problem code and password policy violations', async () => {
     const fetchImpl = fetchMock(
       jsonResponse(

@@ -5,6 +5,13 @@
  * `idpn_session` cookie, so no token ever reaches JavaScript, events or storage.
  */
 
+import type {
+  AuthenticationResponseJSON,
+  PublicKeyCredentialCreationOptionsJSON,
+  PublicKeyCredentialRequestOptionsJSON,
+  RegistrationResponseJSON,
+} from '@simplewebauthn/browser';
+
 export type AccountStatus = 'active' | 'locked' | 'disabled' | 'pending';
 
 export interface AccountProfile {
@@ -63,13 +70,35 @@ export interface AccountMfaFactor {
   confirmed: boolean;
   createdAt: string;
   lastUsedAt: string | null;
+  transports?: string[];
+  deviceType?: string | null;
+  backedUp?: boolean;
 }
 
 export interface AccountMfaStatus {
   factors: AccountMfaFactor[];
   totp: AccountMfaFactor | null;
+  webauthn?: AccountMfaFactor[];
   recoveryCodesRemaining: number;
   available: boolean;
+}
+
+/** Server-issued WebAuthn ceremony (docs/security.md 3.3). */
+export interface WebauthnCeremony<T> {
+  /** Single-use handle for the server-side challenge record. */
+  challengeId: string;
+  options: T;
+}
+
+export interface PasskeyEnrollment {
+  ok: true;
+  factor: { id: string; type: 'webauthn'; name: string; confirmed: true };
+}
+
+export interface PasskeyStepUp {
+  ok: true;
+  acr: string;
+  amr: string[];
 }
 
 export interface TotpEnrollment {
@@ -152,6 +181,19 @@ export interface AccountApiClient {
   }>;
   disableTotp(input: TotpDisableInput): Promise<{ ok: true }>;
   regenerateRecoveryCodes(input: { password: string }): Promise<{ recoveryCodes: string[] }>;
+  beginPasskeyRegistration(): Promise<WebauthnCeremony<PublicKeyCredentialCreationOptionsJSON>>;
+  finishPasskeyRegistration(input: {
+    challengeId: string;
+    response: RegistrationResponseJSON;
+    name?: string;
+  }): Promise<PasskeyEnrollment>;
+  beginPasskeyAuthentication(): Promise<WebauthnCeremony<PublicKeyCredentialRequestOptionsJSON>>;
+  finishPasskeyAuthentication(input: {
+    challengeId: string;
+    response: AuthenticationResponseJSON;
+  }): Promise<PasskeyStepUp>;
+  renamePasskey(input: { factorId: string; name: string }): Promise<{ ok: true }>;
+  deletePasskey(factorId: string): Promise<{ ok: true }>;
 }
 
 export interface AccountApiClientOptions {
@@ -267,6 +309,35 @@ export function createAccountApiClient(options: AccountApiClientOptions = {}): A
       call<{ recoveryCodes: string[] }>('/api/v1/account/mfa/recovery-codes', {
         method: 'POST',
         body: JSON.stringify(input),
+      }),
+    beginPasskeyRegistration: () =>
+      call<WebauthnCeremony<PublicKeyCredentialCreationOptionsJSON>>(
+        '/api/v1/account/mfa/webauthn/options',
+        { method: 'POST', body: '{}' },
+      ),
+    finishPasskeyRegistration: (input) =>
+      call<PasskeyEnrollment>('/api/v1/account/mfa/webauthn/verify', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    beginPasskeyAuthentication: () =>
+      call<WebauthnCeremony<PublicKeyCredentialRequestOptionsJSON>>(
+        '/api/v1/account/mfa/webauthn/authenticate/options',
+        { method: 'POST', body: '{}' },
+      ),
+    finishPasskeyAuthentication: (input) =>
+      call<PasskeyStepUp>('/api/v1/account/mfa/webauthn/authenticate/verify', {
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    renamePasskey: (input) =>
+      call<{ ok: true }>(`/api/v1/account/mfa/webauthn/${encodeURIComponent(input.factorId)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ name: input.name }),
+      }),
+    deletePasskey: (factorId) =>
+      call<{ ok: true }>(`/api/v1/account/mfa/webauthn/${encodeURIComponent(factorId)}`, {
+        method: 'DELETE',
       }),
   };
 }

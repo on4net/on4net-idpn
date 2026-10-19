@@ -6,6 +6,7 @@ import { maskEmail } from '../auth/normalize.js';
 import { hashPassword } from '../auth/password.js';
 import { mfaRequirement } from '../mfa/policy.js';
 import type { MfaLoginDependencies, MfaPolicy } from '../mfa/mfa-types.js';
+import type { WebauthnServiceDependencies } from '../mfa/webauthn.js';
 import { serializeSessionCookie } from '../session/cookie.js';
 import type { RedisSessionStore } from '../session/store.js';
 import {
@@ -59,6 +60,8 @@ export interface LoginRouteOptions {
   };
   /** Second-factor policy and challenge storage. Without it, login stays password-only. */
   mfa?: MfaLoginDependencies;
+  /** WebAuthn verification for the passkey second factor. */
+  webauthn?: WebauthnServiceDependencies;
   now?: () => Date;
 }
 
@@ -140,7 +143,7 @@ export function registerLoginRoute(app: FastifyInstance, options: LoginRouteOpti
       ...(body.clientId === undefined ? {} : { clientId: body.clientId }),
       ...(loginContext === undefined ? {} : { loginContext }),
     });
-    if (requirement === 'challenge' && options.mfa !== undefined) {
+    if (requirement.requirement === 'challenge' && options.mfa !== undefined) {
       const redirectTo = sanitizeReturnTo(body.returnTo, options.appUrl);
       const challenge = await options.mfa.challenges.create({
         userId: user.id,
@@ -159,21 +162,18 @@ export function registerLoginRoute(app: FastifyInstance, options: LoginRouteOpti
         ip: request.ip,
         userAgent: request.headers['user-agent'] ?? null,
         result: 'success',
-        metadata: sanitizeAuditMetadata({ methods: ['totp', 'recovery'] }),
+        metadata: sanitizeAuditMetadata({ methods: requirement.methods }),
       });
       // No session and no cookie until the second factor is verified (docs/auth-flows.md 7.3).
-      return reply
-        .code(200)
-        .header('Cache-Control', 'no-store')
-        .send({
-          ok: false,
-          mfa: 'challenge',
-          challengeToken: challenge.token,
-          expiresAt: challenge.record.expiresAt,
-          methods: ['totp', 'recovery'],
-        });
+      return reply.code(200).header('Cache-Control', 'no-store').send({
+        ok: false,
+        mfa: 'challenge',
+        challengeToken: challenge.token,
+        expiresAt: challenge.record.expiresAt,
+        methods: requirement.methods,
+      });
     }
-    if (requirement === 'enrollment_required') {
+    if (requirement.requirement === 'enrollment_required') {
       await options.audit.record({
         actorType: 'user',
         actorId: user.id,
@@ -291,24 +291,41 @@ function optionalLoginContext(value: string | undefined): string | undefined {
  * Decides whether the session may be issued now, or whether a second factor is required.
  *
  * The policy comes from the login context (falling back to the client) and `required_admins`
- * consults the permission tables. Only confirmed TOTP factors exist in this phase.
+ * consults the permission tables. A context with `stepUpRequired` never issues a
+ * password-only session (docs/login-contexts.md 7.2, docs/security.md 3.5): MFA is required
+ * even when the context's `mfaPolicy` is `optional`. A confirmed passkey counts as a factor
+ * exactly like TOTP.
  */
 async function resolveMfaRequirement(
   options: LoginRouteOptions,
   user: { id: string },
   input: { clientId?: string | undefined; loginContext?: string | undefined },
-): Promise<'none' | 'challenge' | 'enrollment_required'> {
+): Promise<{ requirement: 'none' | 'challenge' | 'enrollment_required'; methods: string[] }> {
   if (options.mfa === undefined) {
-    return 'none';
+    return { requirement: 'none', methods: [] };
   }
   const policy: MfaPolicy = await options.mfa.repository.resolveMfaPolicy({
     clientId: input.clientId,
     loginContext: input.loginContext,
   });
-  const factor = await options.mfa.repository.findConfirmedTotp(user.id);
+  const stepUpRequired = await options.mfa.repository.resolveStepUpRequired({
+    clientId: input.clientId,
+    loginContext: input.loginContext,
+  });
+  const effectivePolicy: MfaPolicy = stepUpRequired ? 'required_all' : policy;
+  const totp = await options.mfa.repository.findConfirmedTotp(user.id);
+  const passkeys = await options.mfa.repository.listConfirmedWebauthn(user.id);
+  const hasConfirmedFactor = totp !== null || passkeys.length > 0;
   const isAdmin =
-    policy === 'required_admins'
+    effectivePolicy === 'required_admins'
       ? await options.mfa.repository.isAdmin(user.id, input.clientId)
       : false;
-  return mfaRequirement({ policy, hasConfirmedFactor: factor !== null, isAdmin });
+  const methods = [
+    ...(totp === null ? [] : ['totp', 'recovery']),
+    ...(passkeys.length > 0 ? ['webauthn'] : []),
+  ];
+  return {
+    requirement: mfaRequirement({ policy: effectivePolicy, hasConfirmedFactor, isAdmin }),
+    methods,
+  };
 }

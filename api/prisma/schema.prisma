@@ -243,6 +243,13 @@ model MfaFactor {
   credentialId    Bytes?        @map("credential_id")
   publicKey       Bytes?        @map("public_key")
   signCount       BigInt        @default(0) @map("sign_count")
+  /// Authenticator transports reported at registration (`usb`, `nfc`, `ble`, `internal`, `hybrid`).
+  transports      String[]      @default([])
+  /// Authenticator attestation GUID; `null` for authenticators that report the zero AAGUID.
+  aaguid          String?       @db.Uuid
+  /// `singleDevice` or `multiDevice`; passkeys are multi-device and usually backed up.
+  deviceType      String?       @map("device_type") @db.VarChar(16)
+  backedUp        Boolean       @default(false) @map("backed_up")
   confirmedAt     DateTime?     @map("confirmed_at") @db.Timestamptz(6)
   lastUsedAt      DateTime?     @map("last_used_at") @db.Timestamptz(6)
   /// Last accepted TOTP step; a code from this step or earlier is replayed and rejected.

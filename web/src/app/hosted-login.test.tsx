@@ -550,6 +550,49 @@ describe('HostedLoginPage MFA step', () => {
     expect(screen.getByTestId('idpn-root')).toHaveAttribute('dir', 'rtl');
   });
 
+  it('offers the passkey second factor when the login response lists webauthn', async () => {
+    const user = userEvent.setup();
+    const verifyPasskey = vi.fn().mockResolvedValue({ ok: true });
+    const navigate = vi.fn();
+    const driver = {
+      supported: vi.fn().mockReturnValue(true),
+      register: vi.fn(),
+      authenticate: vi.fn(),
+    };
+    render(
+      <HostedLoginPage
+        search="?client_id=app-a&return_to=%2Foauth2%2Fauthorize%3Fclient_id%3Dapp-a"
+        fetchConfig={vi.fn().mockResolvedValue(null)}
+        submit={vi.fn().mockResolvedValue({ ...challenge, methods: ['totp', 'webauthn'] })}
+        verify={vi.fn()}
+        verifyPasskey={verifyPasskey}
+        passkeys={driver}
+        navigate={navigate}
+      />,
+    );
+
+    await submitWithPassword(user);
+
+    const passkey = await screen.findByTestId('mfa-passkey');
+    expect(passkey).toHaveTextContent('ورود با Passkey');
+    await user.click(passkey);
+
+    expect(verifyPasskey).toHaveBeenCalledWith({
+      challengeToken: challenge.challengeToken,
+      driver,
+    });
+    expect(navigate).toHaveBeenCalledWith('/oauth2/authorize?client_id=app-a');
+  });
+
+  it('does not offer a passkey button when the account has no passkey', async () => {
+    const user = userEvent.setup();
+    renderWith(vi.fn());
+    await submitWithPassword(user);
+    await screen.findByRole('heading', { name: 'ورود دومرحله‌ای' });
+    expect(screen.queryByTestId('mfa-passkey')).toBeNull();
+    expect(screen.getByRole('button', { name: 'تأیید و ورود' })).toBeVisible();
+  });
+
   it('switches to a recovery code and normalizes formatting', async () => {
     const user = userEvent.setup();
     const verify = vi.fn().mockResolvedValue({ ok: true });

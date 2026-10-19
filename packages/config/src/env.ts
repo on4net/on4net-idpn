@@ -116,6 +116,12 @@ export const serverEnvSchema = z.object({
   KEY_RETIRED_RETENTION_SECONDS: z.coerce.number().int().min(60).max(86_400).default(3600),
   MFE_PUBLIC_URL: optionalUrl(),
   /**
+   * Additional browser origins allowed to complete a WebAuthn ceremony. `APP_URL` is always
+   * accepted; entries must be origins (no path) and belong to the RP ID derived from
+   * `APP_URL` (`docs/security.md` 3.3).
+   */
+  WEBAUTHN_ALLOWED_ORIGINS: csv(origin).default([]),
+  /**
    * Public origin of the Hosted Auth UI. Defaults to `APP_URL` (single-origin deployment);
    * set it when the UI is served from a different host or port than the API.
    */

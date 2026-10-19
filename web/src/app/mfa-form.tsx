@@ -10,7 +10,13 @@ import { translate, type Locale } from '@/i18n';
 export type MfaMethod = 'totp' | 'recovery';
 
 /** Failure states the challenge step can show (docs/auth-flows.md 7.3). */
-export type MfaErrorCode = 'invalid_code' | 'expired' | 'rate_limited' | 'network';
+export type MfaErrorCode =
+  | 'invalid_code'
+  | 'expired'
+  | 'rate_limited'
+  | 'network'
+  | 'passkey_failed'
+  | 'passkey_unsupported';
 
 export interface MfaFormValues {
   code: string;
@@ -24,6 +30,10 @@ export interface MfaFormProps {
   errorCode: MfaErrorCode | null;
   /** Returning to the password step discards the challenge in the parent. */
   onBack?: (() => void) | undefined;
+  /** Offered when the account has a confirmed passkey (login response `methods`). */
+  passkeyAvailable?: boolean;
+  passkeySubmitting?: boolean;
+  onPasskey?: (() => void | Promise<void>) | undefined;
   onSubmit(values: MfaFormValues): void | Promise<void>;
 }
 
@@ -41,7 +51,17 @@ const RECOVERY_PATTERN = /^[A-Z0-9]{10}$/;
  * even in the RTL layout. Errors are announced through `aria-live` and never include the
  * submitted code.
  */
-export function MfaForm({ locale, dir, submitting, errorCode, onBack, onSubmit }: MfaFormProps) {
+export function MfaForm({
+  locale,
+  dir,
+  submitting,
+  errorCode,
+  onBack,
+  passkeyAvailable = false,
+  passkeySubmitting = false,
+  onPasskey,
+  onSubmit,
+}: MfaFormProps) {
   const t = (key: string): string => translate(locale, key);
   const [method, setMethod] = React.useState<MfaMethod>('totp');
   const [code, setCode] = React.useState('');
@@ -56,7 +76,11 @@ export function MfaForm({ locale, dir, submitting, errorCode, onBack, onSubmit }
           ? t('login.mfa.rateLimited')
           : errorCode === 'network'
             ? t('login.mfa.network')
-            : null;
+            : errorCode === 'passkey_failed'
+              ? t('login.mfa.passkeyFailed')
+              : errorCode === 'passkey_unsupported'
+                ? t('login.mfa.passkeyUnsupported')
+                : null;
 
   const switchMethod = (): void => {
     setMethod((current) => (current === 'totp' ? 'recovery' : 'totp'));
@@ -151,6 +175,22 @@ export function MfaForm({ locale, dir, submitting, errorCode, onBack, onSubmit }
         <Button type="button" variant="outline" onClick={switchMethod} disabled={submitting}>
           {method === 'totp' ? t('login.mfa.useRecovery') : t('login.mfa.useTotp')}
         </Button>
+
+        {passkeyAvailable && onPasskey !== undefined ? (
+          <Button
+            type="button"
+            variant="secondary"
+            className="gap-2"
+            data-testid="mfa-passkey"
+            disabled={submitting || passkeySubmitting}
+            onClick={() => void onPasskey()}
+          >
+            {passkeySubmitting ? <Spinner label={t('common.loading')} /> : null}
+            <span>
+              {passkeySubmitting ? t('login.mfa.passkeySubmitting') : t('login.mfa.passkey')}
+            </span>
+          </Button>
+        ) : null}
 
         {onBack === undefined ? null : (
           <Button type="button" variant="ghost" onClick={onBack} disabled={submitting}>

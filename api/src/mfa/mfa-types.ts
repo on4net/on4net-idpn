@@ -5,7 +5,7 @@ import type { MfaChallengeStore } from './challenge-store.js';
 
 /** ACR/AMR values proving a multi-factor session (docs/auth-flows.md 7.3). */
 export const MFA_ACR = 'urn:on4net:acr:mfa';
-export const MFA_AMR_METHODS = ['totp', 'recovery', 'webauthn'] as const;
+export const MFA_AMR_METHODS = ['totp', 'recovery', 'webauthn', 'hwk'] as const;
 
 /** MFA policy of a client or login context (docs/domain-model.md 2.6, docs/login-contexts.md 3.1). */
 export type MfaPolicy = 'optional' | 'required_admins' | 'required_all';
@@ -19,6 +19,16 @@ export interface MfaFactorRecord {
   type: MfaFactorType;
   name: string;
   secretEncrypted: Buffer | null;
+  /** WebAuthn credential id (raw bytes); `null` for TOTP. */
+  credentialId: Buffer | null;
+  /** COSE public key of a WebAuthn credential; `null` for TOTP. */
+  publicKey: Buffer | null;
+  /** Authenticator sign counter, used to detect a cloned authenticator. */
+  signCount: bigint;
+  transports: string[];
+  aaguid: string | null;
+  deviceType: string | null;
+  backedUp: boolean;
   confirmedAt: Date | null;
   lastUsedAt: Date | null;
   lastUsedStep: bigint | null;
@@ -44,6 +54,21 @@ export interface RecoveryCodeRecord {
 export type CreateTotpFactorResult =
   { ok: true; factor: MfaFactorRecord } | { ok: false; reason: 'already_enrolled' };
 
+/** A WebAuthn credential to persist after a verified registration ceremony. */
+export interface NewWebauthnCredential {
+  name: string;
+  credentialId: Uint8Array;
+  publicKey: Uint8Array;
+  signCount: bigint;
+  transports: readonly string[];
+  aaguid: string | null;
+  deviceType: string | null;
+  backedUp: boolean;
+}
+
+export type CreateWebauthnCredentialResult =
+  { ok: true; factor: MfaFactorRecord } | { ok: false; reason: 'duplicate_credential' };
+
 /**
  * Persistence port for the account surface. Every method is scoped to a `userId` so one
  * signed-in user can never read or mutate another user's factors.
@@ -54,6 +79,13 @@ export interface MfaFactorRepository {
   findTotp(userId: string): Promise<MfaFactorRecord | null>;
   findConfirmedTotp(userId: string): Promise<MfaFactorRecord | null>;
   findFactor(userId: string, factorId: string): Promise<MfaFactorRecord | null>;
+  listConfirmedWebauthn(userId: string): Promise<MfaFactorRecord[]>;
+  findWebauthn(userId: string, factorId: string): Promise<MfaFactorRecord | null>;
+  /** Looks a credential up by its raw credential id, scoped to the owning user. */
+  findWebauthnByCredentialId(
+    userId: string,
+    credentialId: Uint8Array,
+  ): Promise<MfaFactorRecord | null>;
   /**
    * Persists a new unconfirmed TOTP factor. A pending enrollment of the same user is
    * replaced; an existing confirmed factor makes this fail without touching it.
@@ -63,9 +95,27 @@ export interface MfaFactorRepository {
     name: string,
     secretEncrypted: Uint8Array,
   ): Promise<CreateTotpFactorResult>;
+  /** Registers a verified passkey. The credential id is unique across all users. */
+  createWebauthnCredential(
+    userId: string,
+    credential: NewWebauthnCredential,
+    at: Date,
+  ): Promise<CreateWebauthnCredentialResult>;
   confirmFactor(factorId: string, userId: string, at: Date): Promise<boolean>;
   /** Compare-and-set on `lastUsedStep`; `false` means the step was already used (replay). */
   markTotpUsed(factorId: string, step: bigint, at: Date): Promise<boolean>;
+  /**
+   * Compare-and-set on the sign counter: only the request that observed `expectedCounter`
+   * may advance it. `false` means a concurrent/replayed assertion lost the race.
+   */
+  updateWebauthnCounter(
+    factorId: string,
+    userId: string,
+    expectedCounter: bigint,
+    newCounter: bigint,
+    at: Date,
+  ): Promise<boolean>;
+  renameFactor(factorId: string, userId: string, name: string): Promise<boolean>;
   deleteFactor(factorId: string, userId: string): Promise<boolean>;
   /** Replaces every recovery code of the factor, invalidating the previous set atomically. */
   replaceRecoveryCodes(factorId: string, codeHashes: readonly string[], at: Date): Promise<void>;
@@ -84,7 +134,27 @@ export interface MfaLoginRepository {
     clientId?: string | undefined;
     loginContext?: string | undefined;
   }): Promise<MfaPolicy>;
+  /**
+   * Whether the selected login context requires step-up (`docs/login-contexts.md` 7.2).
+   * A step-up context never issues a session without a fresh second factor.
+   */
+  resolveStepUpRequired(input: {
+    clientId?: string | undefined;
+    loginContext?: string | undefined;
+  }): Promise<boolean>;
   findConfirmedTotp(userId: string): Promise<MfaFactorRecord | null>;
+  listConfirmedWebauthn(userId: string): Promise<MfaFactorRecord[]>;
+  findWebauthnByCredentialId(
+    userId: string,
+    credentialId: Uint8Array,
+  ): Promise<MfaFactorRecord | null>;
+  updateWebauthnCounter(
+    factorId: string,
+    userId: string,
+    expectedCounter: bigint,
+    newCounter: bigint,
+    at: Date,
+  ): Promise<boolean>;
   findUserSecurity(userId: string): Promise<MfaUserSecurity | null>;
   markTotpUsed(factorId: string, step: bigint, at: Date): Promise<boolean>;
   listUnusedRecoveryCodes(factorId: string): Promise<RecoveryCodeRecord[]>;

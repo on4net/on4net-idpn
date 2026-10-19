@@ -38,11 +38,18 @@ export interface PublicMfaFactor {
   confirmed: boolean;
   createdAt: string;
   lastUsedAt: string | null;
+  /** WebAuthn-only: transports reported by the authenticator. */
+  transports: string[];
+  /** WebAuthn-only: `singleDevice` / `multiDevice`. */
+  deviceType: string | null;
+  /** WebAuthn-only: the credential is a synced/backed-up passkey. */
+  backedUp: boolean;
 }
 
 export interface MfaStatus {
   factors: PublicMfaFactor[];
   totp: PublicMfaFactor | null;
+  webauthn: PublicMfaFactor[];
   recoveryCodesRemaining: number;
 }
 
@@ -53,6 +60,9 @@ const publish = (factor: MfaFactorRecord): PublicMfaFactor => ({
   confirmed: factor.confirmedAt !== null,
   createdAt: factor.createdAt.toISOString(),
   lastUsedAt: factor.lastUsedAt?.toISOString() ?? null,
+  transports: [...factor.transports],
+  deviceType: factor.deviceType,
+  backedUp: factor.backedUp,
 });
 
 export async function getMfaStatus(
@@ -61,6 +71,9 @@ export async function getMfaStatus(
 ): Promise<MfaStatus> {
   const factors = await deps.repository.listFactors(userId);
   const totp = factors.find((factor) => factor.type === 'totp') ?? null;
+  const webauthn = factors.filter(
+    (factor) => factor.type === 'webauthn' && factor.confirmedAt !== null,
+  );
   const recoveryCodesRemaining =
     totp === null || totp.confirmedAt === null
       ? 0
@@ -68,6 +81,7 @@ export async function getMfaStatus(
   return {
     factors: factors.map(publish),
     totp: totp === null ? null : publish(totp),
+    webauthn: webauthn.map(publish),
     recoveryCodesRemaining,
   };
 }

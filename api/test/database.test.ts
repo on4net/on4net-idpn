@@ -182,9 +182,23 @@ describe('initial schema', () => {
         '23505',
       );
       // WebAuthn authenticators are multiple per user, so the partial index must not apply.
-      await client.query(`INSERT INTO mfa_factors (user_id, type) VALUES ($1, 'webauthn')`, [
-        userId,
-      ]);
+      await client.query(
+        `INSERT INTO mfa_factors (user_id, type, credential_id, public_key)
+         VALUES ($1, 'webauthn', '\\x01'::bytea, '\\x02'::bytea)`,
+        [userId],
+      );
+      await client.query(
+        `INSERT INTO mfa_factors (user_id, type, credential_id, public_key)
+         VALUES ($1, 'webauthn', '\\x03'::bytea, '\\x04'::bytea)`,
+        [userId],
+      );
+      // The same authenticator credential cannot be enrolled twice (globally unique).
+      await expectSqlError(
+        `INSERT INTO mfa_factors (user_id, type, credential_id, public_key)
+         VALUES ($1, 'webauthn', '\\x01'::bytea, '\\x09'::bytea)`,
+        [userId],
+        '23505',
+      );
 
       await client.query(
         `INSERT INTO mfa_recovery_codes (factor_id, code_hash) VALUES ($1, 'hash')`,
@@ -323,13 +337,15 @@ describe('initial schema', () => {
 
   it('rolls back and re-applies the migrations', async () => {
     const latest = await rollbackLatestMigration({ connectionString });
-    expect(latest).toBe('0005_account_tokens');
+    expect(latest).toBe('0006_webauthn_credentials');
     const second = await rollbackLatestMigration({ connectionString });
-    expect(second).toBe('0004_mfa_factors');
+    expect(second).toBe('0005_account_tokens');
     const third = await rollbackLatestMigration({ connectionString });
-    expect(third).toBe('0003_audit_events_append_only');
+    expect(third).toBe('0004_mfa_factors');
     const fourth = await rollbackLatestMigration({ connectionString });
-    expect(fourth).toBe('0002_assignments_nulls_not_distinct');
+    expect(fourth).toBe('0003_audit_events_append_only');
+    const fifth = await rollbackLatestMigration({ connectionString });
+    expect(fifth).toBe('0002_assignments_nulls_not_distinct');
     const rolledBack = await rollbackLatestMigration({ connectionString });
     expect(rolledBack).toBe('0001_init');
 

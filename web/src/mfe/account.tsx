@@ -26,6 +26,7 @@ import {
   type AccountSession,
 } from './account-api-client';
 import { MfaSection } from './mfa-section';
+import type { PasskeyDriver } from './passkey-client';
 
 export interface AccountEvent {
   type: 'auth:error';
@@ -43,6 +44,8 @@ export interface AccountProps {
   onEvent?: (event: AccountEvent) => void;
   /** Test seam; production hosts use the configured client. */
   apiClient?: AccountApiClient;
+  /** WebAuthn browser implementation; injectable so tests never prompt a real authenticator. */
+  passkeys?: PasskeyDriver;
 }
 
 interface FieldErrors {
@@ -82,6 +85,7 @@ export function Account({
   clientId,
   onEvent,
   apiClient,
+  passkeys,
 }: AccountProps) {
   const activeLocale: Locale = resolveLocale(locale);
   const direction = dir ?? directionOf(activeLocale);
@@ -580,7 +584,13 @@ export function Account({
         </CardContent>
       </Card>
 
-      <MfaSection api={api} locale={activeLocale} t={t} onEvent={onEvent} />
+      <MfaSection
+        api={api}
+        locale={activeLocale}
+        t={t}
+        onEvent={onEvent}
+        {...(passkeys === undefined ? {} : { passkeys })}
+      />
     </section>
   );
 }
