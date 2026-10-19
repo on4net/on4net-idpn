@@ -12,6 +12,8 @@ import type { AuditRoutesOptions } from './admin/audit/routes.js';
 import { registerAuditAdminRoutes } from './admin/audit/routes.js';
 import type { ClientRoutesOptions } from './admin/clients/routes.js';
 import { registerClientAdminRoutes } from './admin/clients/routes.js';
+import type { TranslationAdminRoutesOptions } from './admin/translations/routes.js';
+import { registerTranslationAdminRoutes } from './admin/translations/routes.js';
 import type { SocialProviderRoutesOptions } from './admin/social-providers/routes.js';
 import { registerSocialProviderAdminRoutes } from './admin/social-providers/routes.js';
 import type { RbacRoutesOptions } from './admin/rbac/routes.js';
@@ -29,6 +31,8 @@ import { registerLogoutRoute } from './oidc/logout-route.js';
 import { registerOidcRoutes } from './oidc/routes.js';
 import { registerRevokeIntrospectRoutes } from './oidc/revoke-introspect.js';
 import { registerPublicConfigRoute } from './public-config/routes.js';
+import type { TranslationBundleRouteOptions } from './translations/routes.js';
+import { registerTranslationBundleRoute } from './translations/routes.js';
 import type { LoginRouteOptions } from './login/routes.js';
 import { registerLoginRoute } from './login/routes.js';
 import { registerMfaVerifyRoute } from './login/mfa-routes.js';
@@ -50,6 +54,8 @@ export interface BuildServerOptions {
     mfe: { version: string; remoteEntry: string };
     translationsUrlTemplate?: string;
   };
+  /** Mounts the public translation bundle (docs/api.md 3.3.4). */
+  translations?: TranslationBundleRouteOptions;
   userInfo?: {
     users: Parameters<typeof registerUserInfoRoute>[1]['users'];
     access?: Parameters<typeof registerUserInfoRoute>[1]['access'];
@@ -80,6 +86,8 @@ export interface BuildServerOptions {
   admin?: Omit<AdminRoutesOptions, 'issuer' | 'verifier'>;
   /** Mounts the client administration endpoints (docs/api.md 3.3). */
   adminClients?: Omit<ClientRoutesOptions, 'issuer' | 'verifier'>;
+  /** Mounts per-client locale and translation endpoints (docs/api.md 3.3.4). */
+  adminTranslations?: Omit<TranslationAdminRoutesOptions, 'issuer' | 'verifier'>;
   /** Mounts per-app social provider credentials (docs/api.md 3.3.2). */
   socialProviders?: Omit<SocialProviderRoutesOptions, 'issuer' | 'verifier'>;
   /** Mounts the permission catalog and role endpoints (docs/api.md 3.4). */
@@ -173,6 +181,10 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     });
   }
 
+  if (options.translations !== undefined) {
+    registerTranslationBundleRoute(app, options.translations);
+  }
+
   if (options.userInfo !== undefined) {
     registerUserInfoRoute(app, {
       issuer,
@@ -223,6 +235,14 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
 
   if (options.adminClients !== undefined) {
     registerClientAdminRoutes(app, { ...options.adminClients, issuer, verifier: keys });
+  }
+
+  if (options.adminTranslations !== undefined) {
+    registerTranslationAdminRoutes(app, {
+      ...options.adminTranslations,
+      issuer,
+      verifier: keys,
+    });
   }
 
   if (options.socialProviders !== undefined) {

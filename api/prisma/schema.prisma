@@ -228,6 +228,7 @@ model Client {
   refreshTokens      RefreshToken[]
   consents           Consent[]
   auditEvents        AuditEvent[]
+  translations       ClientTranslation[]
 
   @@index([tenantId, status])
   @@map("clients")
@@ -357,6 +358,25 @@ model ClientLoginContext {
   @@unique([clientId, key])
   @@index([clientId, status])
   @@map("client_login_contexts")
+}
+
+/// Per-client, per-locale message override (docs/domain-model.md 2.6.4,
+/// docs/localization.md 4 and 7). Only keys that exist in the shared base bundle are
+/// accepted; an empty value deletes the row so the bundle falls back to the base text.
+model ClientTranslation {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  clientId  String   @map("client_id") @db.Uuid
+  locale    String   @db.VarChar(35)
+  key       String   @db.VarChar(160)
+  value     String   @db.VarChar(500)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, locale, key])
+  @@index([clientId, locale])
+  @@map("client_translations")
 }
 
 model ClientMembership {

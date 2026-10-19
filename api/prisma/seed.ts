@@ -30,6 +30,8 @@ const BASE_PERMISSIONS = [
   { key: 'idp:social-provider:manage', description: 'Manage per-client social providers' },
   { key: 'idp:client-session:read', description: 'View sessions of members of an app' },
   { key: 'idp:client-session:write', description: 'Revoke sessions of members of an app' },
+  { key: 'idp:client-locale:read', description: 'View locales and translations of an app' },
+  { key: 'idp:client-locale:write', description: 'Change locales and translations of an app' },
   { key: 'idp:session:read', description: 'View active sessions' },
   { key: 'idp:session:write', description: 'Revoke sessions and close all user sessions' },
   { key: 'idp:session:revoke', description: 'Revoke sessions' },
@@ -53,6 +55,8 @@ const CLIENT_ADMIN_PERMISSIONS = [
   'idp:social-provider:write',
   'idp:client-session:read',
   'idp:client-session:write',
+  'idp:client-locale:read',
+  'idp:client-locale:write',
 ] as const;
 
 const BASE_ROLES = [

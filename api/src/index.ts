@@ -11,6 +11,7 @@ import { loadApiEnv } from './config/env.js';
 import { createPrismaAdminAudit } from './admin/prisma-audit.js';
 import { createPrismaPasswordStore } from './audit/prisma-audit.js';
 import { createPrismaAdminClientRepository } from './admin/clients/prisma-client-repository.js';
+import { createPrismaAdminTranslationRepository } from './admin/translations/prisma-translation-repository.js';
 import { createPrismaPermissionReader } from './admin/prisma-permission-reader.js';
 import { createPrismaRbacRepository } from './admin/rbac/prisma-rbac-repository.js';
 import { createPrismaMemberRepository } from './admin/members/prisma-member-repository.js';
@@ -44,6 +45,8 @@ import { createPrismaCodeRepository } from './oidc/prisma-code-repository.js';
 import { createPrismaRefreshTokenRepository } from './oidc/prisma-refresh-repository.js';
 import { createPrismaUserRepository } from './oidc/prisma-user-repository.js';
 import { createPrismaPublicConfigRepository } from './public-config/prisma-repository.js';
+import { createRedisBundleCache } from './translations/cache.js';
+import { createPrismaPublicTranslationRepository } from './translations/prisma-repository.js';
 import { createPrismaLoginRepository } from './login/prisma-repository.js';
 import { createPrismaMfaRepository } from './mfa/prisma-repository.js';
 import { RedisMfaChallengeStore } from './mfa/challenge-store.js';
@@ -91,6 +94,9 @@ const sessions = new RedisSessionStore({
 });
 
 const clientsRepository = createPrismaClientRepository(prisma);
+const adminTranslationsRepository = createPrismaAdminTranslationRepository(prisma);
+const publicTranslationsRepository = createPrismaPublicTranslationRepository(prisma);
+const translationBundleCache = createRedisBundleCache(redis);
 const usersRepository = createPrismaUserRepository(prisma);
 const loginRepository = createPrismaLoginRepository(prisma);
 const permissionReader = createPrismaPermissionReader(prisma);
@@ -276,6 +282,11 @@ const app = buildServer({
     },
     translationsUrlTemplate: `${env.APP_URL.replace(/\/+$/, '')}/api/v1/clients/{clientId}/translations/bundle`,
   },
+  translations: {
+    repository: publicTranslationsRepository,
+    cache: translationBundleCache,
+    allowedOrigins: (clientId) => clientsRepository.findAllowedOrigins(clientId),
+  },
   admin: {
     adminClientId: env.ADMIN_CLIENT_ID,
     permissions: permissionReader,
@@ -288,6 +299,13 @@ const app = buildServer({
     permissions: permissionReader,
     clients: createPrismaAdminClientRepository(prisma),
     audit: createPrismaAdminAudit(prisma),
+  },
+  adminTranslations: {
+    adminClientId: env.ADMIN_CLIENT_ID,
+    permissions: permissionReader,
+    translations: adminTranslationsRepository,
+    audit: createPrismaAdminAudit(prisma),
+    cache: translationBundleCache,
   },
   socialProviders: {
     adminClientId: env.ADMIN_CLIENT_ID,

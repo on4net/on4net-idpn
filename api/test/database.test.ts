@@ -337,17 +337,24 @@ describe('initial schema', () => {
 
   it('rolls back and re-applies the migrations', async () => {
     const latest = await rollbackLatestMigration({ connectionString });
-    expect(latest).toBe('0007_login_context_binding');
+    expect(latest).toBe('0008_client_translations');
+    const translationTable = await client.query<{ translations: string | null }>(
+      `SELECT to_regclass('public.client_translations') AS translations`,
+    );
+    expect(translationTable.rows[0]?.translations).toBeNull();
+
     const second = await rollbackLatestMigration({ connectionString });
-    expect(second).toBe('0006_webauthn_credentials');
+    expect(second).toBe('0007_login_context_binding');
     const third = await rollbackLatestMigration({ connectionString });
-    expect(third).toBe('0005_account_tokens');
+    expect(third).toBe('0006_webauthn_credentials');
     const fourth = await rollbackLatestMigration({ connectionString });
-    expect(fourth).toBe('0004_mfa_factors');
+    expect(fourth).toBe('0005_account_tokens');
     const fifth = await rollbackLatestMigration({ connectionString });
-    expect(fifth).toBe('0003_audit_events_append_only');
+    expect(fifth).toBe('0004_mfa_factors');
     const sixth = await rollbackLatestMigration({ connectionString });
-    expect(sixth).toBe('0002_assignments_nulls_not_distinct');
+    expect(sixth).toBe('0003_audit_events_append_only');
+    const seventh = await rollbackLatestMigration({ connectionString });
+    expect(seventh).toBe('0002_assignments_nulls_not_distinct');
     const rolledBack = await rollbackLatestMigration({ connectionString });
     expect(rolledBack).toBe('0001_init');
 
@@ -377,7 +384,7 @@ describe('initial schema', () => {
       expect(first.clients).toBe(1);
       expect(first.users).toBe(3);
       expect(first.roles).toBe(6);
-      expect(first.permissions).toBe(32);
+      expect(first.permissions).toBe(34);
       expect(first.assignments).toBe(2);
       expect(first.rolePermissions).toBeGreaterThan(0);
     } finally {

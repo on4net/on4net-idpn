@@ -259,22 +259,25 @@ erDiagram
 
 ### 2.6.4 ClientTranslation
 
-Override متن‌های رابط برای هر کلاینت و Locale.
+Override متن‌های رابط برای هر کلاینت و Locale. هر ردیف یک کلید را نگه می‌دارد تا
+به‌روزرسانی یک متن بدون بازنویسی کل بسته انجام شود و Audit فقط کلیدهای تغییرکرده را ثبت کند.
 
 | فیلد | نوع | توضیح |
 |---|---|---|
 | `id` | UUID | — |
-| `client_id` | UUID | اپلیکیشن (`null` = بسته پایه سراسری) |
-| `login_context_key` | string? | Override مخصوص یک Context (اختیاری) |
+| `client_id` | UUID | اپلیکیشن |
 | `locale` | string | مثل `fa-IR` |
-| `messages` | jsonb | نگاشت `key → text` |
-| `version` | string | برای Cache/ETag |
+| `key` | string | کلید موجود در بسته پایه |
+| `value` | string | متن ساده، حداکثر ۵۰۰ کاراکتر |
 | `updated_by` | UUID? | ادمین |
 | `updated_at` | timestamp | — |
 
+تنظیمات زبان (`default`، `supported`، `calendar` و `version` مبنای Cache) در
+`Client.locales` نگهداری می‌شود؛ ردیف‌های این جدول فقط مقادیر Override را دارند.
+
 **قواعد:**
 
-- یکتایی `(client_id, login_context_key, locale)`.
+- یکتایی `(client_id, locale, key)`.
 - فقط کلیدهای موجود در بسته پایه پذیرفته می‌شوند؛ کلید ناشناخته `422`.
 - مقدار فقط متن ساده و Placeholderهای مجاز؛ HTML/Script ممنوع.
 - متن خالی = حذف Override و بازگشت به مقدار پایه.
