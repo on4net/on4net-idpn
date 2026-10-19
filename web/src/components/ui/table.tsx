@@ -5,7 +5,11 @@ import { cn } from '@/lib/utils';
 export const Table = React.forwardRef<HTMLTableElement, React.ComponentProps<'table'>>(
   ({ className, ...props }, ref) => (
     <div className="relative w-full overflow-auto">
-      <table ref={ref} className={cn('w-full caption-bottom text-sm', className)} {...props} />
+      <table
+        ref={ref}
+        className={cn('w-full caption-bottom text-start text-sm', className)}
+        {...props}
+      />
     </div>
   ),
 );
@@ -52,7 +56,7 @@ TableHead.displayName = 'TableHead';
 
 export const TableCell = React.forwardRef<HTMLTableCellElement, React.ComponentProps<'td'>>(
   ({ className, ...props }, ref) => (
-    <td ref={ref} className={cn('p-2 align-middle', className)} {...props} />
+    <td ref={ref} className={cn('p-2 text-start align-middle', className)} {...props} />
   ),
 );
 TableCell.displayName = 'TableCell';
@@ -61,6 +65,10 @@ export const TableCaption = React.forwardRef<
   HTMLTableCaptionElement,
   React.ComponentProps<'caption'>
 >(({ className, ...props }, ref) => (
-  <caption ref={ref} className={cn('mt-4 text-sm text-muted-foreground', className)} {...props} />
+  <caption
+    ref={ref}
+    className={cn('mt-4 text-start text-sm text-muted-foreground', className)}
+    {...props}
+  />
 ));
 TableCaption.displayName = 'TableCaption';

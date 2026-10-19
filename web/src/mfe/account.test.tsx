@@ -304,6 +304,35 @@ describe('Account MFE', () => {
     expect(screen.getByTestId('idpn-root')).toHaveAttribute('dir', 'ltr');
   });
 
+  it('isolates machine-readable profile and session values from RTL text', async () => {
+    const fake = fakeClient();
+    const { container } = renderAccount(fake);
+
+    await screen.findByText('sara@example.com');
+
+    const email = screen.getByText('sara@example.com');
+    expect(email.tagName).toBe('BDI');
+    expect(email).toHaveAttribute('dir', 'ltr');
+
+    const username = screen.getByText('sara');
+    expect(username.tagName).toBe('BDI');
+
+    const clientIds = screen.getAllByText('app-a');
+    expect(clientIds.length).toBeGreaterThan(0);
+    for (const element of clientIds) {
+      expect(element.tagName).toBe('BDI');
+    }
+
+    const address = screen.getByText('10.0.0.1');
+    expect(address.tagName).toBe('BDI');
+    expect(screen.getByText('Firefox').tagName).toBe('BDI');
+
+    const section = container.querySelector('[data-testid="account-module"]');
+    expect(section).toHaveAttribute('dir', 'rtl');
+    expect(section).toHaveAttribute('lang', 'fa-IR');
+    expect(screen.getByRole('columnheader', { name: 'اپ' })).toHaveClass('text-start');
+  });
+
   it('shows a loading state, then an accessible error that can retry', async () => {
     const fake = fakeClient();
     fake.getProfile

@@ -74,6 +74,8 @@ describe('LoginForm', () => {
     expect(screen.getByRole('heading', { name: 'ورود به حساب' })).toBeInTheDocument();
     const identifier = screen.getByLabelText('ایمیل یا نام کاربری');
     expect(identifier).toHaveFocus();
+    expect(identifier).toHaveAttribute('dir', 'auto');
+    expect(screen.getByRole('main')).toHaveAttribute('dir', 'rtl');
     expect(screen.getByLabelText('رمز عبور')).toHaveAttribute('type', 'password');
   });
 
@@ -82,6 +84,7 @@ describe('LoginForm', () => {
 
     expect(screen.getByRole('heading', { name: 'Sign in' })).toBeInTheDocument();
     expect(screen.getByLabelText('Email or username')).toBeInTheDocument();
+    expect(screen.getByRole('main')).toHaveAttribute('dir', 'ltr');
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeInTheDocument();
   });
 

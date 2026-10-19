@@ -1,6 +1,8 @@
 import { IDPN_MFE_EVENT_NAME, type IdpnEvent, type IdpnTheme } from '@idpn/mfe-sdk';
 import { createRoot, type Root } from 'react-dom/client';
 
+import { directionOf } from '@/i18n';
+
 import { AccountRoot, type AccountEvent } from './account';
 import { UserManagementRoot, type UserManagementEvent } from './user-management';
 import styles from '@/styles/globals.css?inline';
@@ -144,10 +146,17 @@ export class IdpnMfeElement extends HTMLElement {
     if (this.root === null) {
       return;
     }
+    const locale = this.getAttribute('locale') ?? 'fa-IR';
+    const dirAttribute = this.getAttribute('dir');
+    // Configuration errors are rendered before any module root exists, so they carry the
+    // host's direction themselves instead of assuming Persian/RTL.
+    const dir =
+      dirAttribute === 'ltr' || dirAttribute === 'rtl' ? dirAttribute : directionOf(locale);
+
     const clientId = this.getAttribute('client-id') ?? '';
     if (clientId === '') {
       this.root.render(
-        <p dir="rtl" role="alert">
+        <p dir={dir} lang={locale} role="alert">
           client-id لازم است.
         </p>,
       );
@@ -157,16 +166,13 @@ export class IdpnMfeElement extends HTMLElement {
     const moduleName = this.module;
     if (moduleName === null) {
       this.root.render(
-        <p dir="rtl" role="alert">
+        <p dir={dir} lang={locale} role="alert">
           module باید user-management یا account باشد.
         </p>,
       );
       return;
     }
 
-    const locale = this.getAttribute('locale') ?? 'fa-IR';
-    const dirAttribute = this.getAttribute('dir');
-    const dir = dirAttribute === 'ltr' || dirAttribute === 'rtl' ? dirAttribute : undefined;
     const apiBaseUrl = this.getAttribute('api-base') ?? undefined;
     const theme = this.theme;
     const onEvent = this.deliverEvent;

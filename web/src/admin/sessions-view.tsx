@@ -24,7 +24,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { translate, type Locale } from '@/i18n';
+import { directionOf, translate, type Locale } from '@/i18n';
 
 export interface SessionsViewProps {
   client: AdminApiClient;
@@ -148,7 +148,7 @@ export function SessionsView({
   };
 
   return (
-    <Card dir={locale === 'fa-IR' ? 'rtl' : 'ltr'} lang={locale} data-testid="sessions-view">
+    <Card dir={directionOf(locale)} lang={locale} data-testid="sessions-view">
       <CardHeader>
         <CardTitle>{t('admin.sessions.title')}</CardTitle>
       </CardHeader>
@@ -267,7 +267,9 @@ export function SessionsView({
                         {session.userId}
                       </span>
                     </TableCell>
-                    <TableCell dir="ltr">{session.clientId ?? t('admin.audit.none')}</TableCell>
+                    <TableCell>
+                      <bdi>{session.clientId ?? t('admin.audit.none')}</bdi>
+                    </TableCell>
                     <TableCell>
                       <Badge variant={statusVariant(session.status)}>
                         {t(`admin.sessions.status.${session.status}`)}
@@ -276,12 +278,10 @@ export function SessionsView({
                     <TableCell>{formatDate(session.createdAt)}</TableCell>
                     <TableCell>{formatDate(session.lastSeenAt)}</TableCell>
                     <TableCell>
-                      <span className="block text-xs" dir="ltr">
-                        {session.ip ?? t('admin.audit.none')}
-                      </span>
+                      <bdi>{session.ip ?? t('admin.audit.none')}</bdi>
                       {session.userAgent === null ? null : (
                         <span className="block max-w-48 truncate text-xs text-muted-foreground">
-                          {session.userAgent}
+                          <bdi>{session.userAgent}</bdi>
                         </span>
                       )}
                     </TableCell>

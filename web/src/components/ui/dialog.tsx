@@ -1,4 +1,4 @@
-import { Dialog as DialogPrimitive } from 'radix-ui';
+import { Dialog as DialogPrimitive, Direction } from 'radix-ui';
 import * as React from 'react';
 
 import { resolvePortalTarget, usePortalScope } from '@/app/idpn-root';
@@ -23,6 +23,7 @@ export const DialogContent = React.forwardRef<
   DialogContentProps
 >(({ className, children, container, ...props }, ref) => {
   const scope = usePortalScope();
+  const direction = Direction.useDirection();
   const target = resolvePortalTarget(container, scope, 'DialogContent');
 
   // The root portal host is attached between commit and the following render. Rendering
@@ -33,7 +34,12 @@ export const DialogContent = React.forwardRef<
 
   return (
     <DialogPrimitive.Portal container={target}>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      {/*
+       * A portal leaves the DOM subtree that carries `dir` (the standalone admin surface
+       * portals to `document.body`), so the direction is repeated on the overlay. Inside
+       * IdpnRoot this is the same value `DirectionProvider` already supplies.
+       */}
+      <div dir={direction} className="fixed inset-0 z-50 flex items-center justify-center p-4">
         <DialogPrimitive.Overlay className="absolute inset-0 bg-black/50" />
         <DialogPrimitive.Content
           ref={ref}

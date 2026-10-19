@@ -14,13 +14,16 @@ export const SelectTrigger = React.forwardRef<
   <SelectPrimitive.Trigger
     ref={ref}
     className={cn(
-      'flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+      'flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-start text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
       className,
     )}
     {...props}
   >
     {children}
-    <SelectPrimitive.Icon className="opacity-60">▾</SelectPrimitive.Icon>
+    {/* The glyph is vertically symmetric, so it never needs mirroring; Radix places it. */}
+    <SelectPrimitive.Icon aria-hidden="true" className="opacity-60">
+      ▾
+    </SelectPrimitive.Icon>
   </SelectPrimitive.Trigger>
 ));
 SelectTrigger.displayName = 'SelectTrigger';
@@ -51,7 +54,7 @@ export const SelectContent = React.forwardRef<
       <SelectPrimitive.Content
         ref={ref}
         className={cn(
-          'z-50 max-h-60 overflow-auto rounded-md border border-border bg-background p-1 text-foreground shadow-md',
+          'z-50 max-h-60 overflow-auto rounded-md border border-border bg-background p-1 text-start text-foreground shadow-md',
           className,
         )}
         {...props}
@@ -70,7 +73,7 @@ export const SelectItem = React.forwardRef<
   <SelectPrimitive.Item
     ref={ref}
     className={cn(
-      'relative flex cursor-default select-none items-center rounded-sm py-1.5 px-2 text-sm outline-none focus:bg-accent focus:text-accent-foreground',
+      'relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-start text-sm outline-none focus:bg-accent focus:text-accent-foreground',
       className,
     )}
     {...props}

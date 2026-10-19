@@ -1,0 +1,43 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`logical layout in en-US > keeps list, dialog and table alignment structurally stable 1`] = `
+{
+  "alert": [
+    "p-4",
+    "text-start",
+  ],
+  "dialog": "ltr",
+  "listbox": "ltr",
+  "portalsInsideRoot": true,
+  "root": "ltr",
+  "tableCell": [
+    "p-2",
+    "text-start",
+  ],
+  "tableHead": [
+    "px-2",
+    "text-start",
+  ],
+}
+`;
+
+exports[`logical layout in fa-IR > keeps list, dialog and table alignment structurally stable 1`] = `
+{
+  "alert": [
+    "p-4",
+    "text-start",
+  ],
+  "dialog": "rtl",
+  "listbox": "rtl",
+  "portalsInsideRoot": true,
+  "root": "rtl",
+  "tableCell": [
+    "p-2",
+    "text-start",
+  ],
+  "tableHead": [
+    "px-2",
+    "text-start",
+  ],
+}
+`;

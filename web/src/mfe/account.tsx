@@ -309,6 +309,7 @@ export function Account({
     <section
       className="mx-auto grid w-full max-w-3xl gap-4 text-start"
       dir={direction}
+      lang={activeLocale}
       data-testid="account-module"
       {...(clientId === undefined ? {} : { 'data-client-id': clientId })}
     >
@@ -351,19 +352,27 @@ export function Account({
               </div>
               <div>
                 <dt className="text-muted-foreground">{t('account.profile.username')}</dt>
-                <dd>{profile.username}</dd>
+                <dd>
+                  <bdi>{profile.username}</bdi>
+                </dd>
               </div>
               <div>
                 <dt className="text-muted-foreground">{t('account.profile.email')}</dt>
-                <dd>{profile.email}</dd>
+                <dd>
+                  <bdi dir="ltr">{profile.email}</bdi>
+                </dd>
               </div>
               <div>
                 <dt className="text-muted-foreground">{t('account.profile.phone')}</dt>
-                <dd>{profile.phone ?? t('account.none')}</dd>
+                <dd>
+                  <bdi>{profile.phone ?? t('account.none')}</bdi>
+                </dd>
               </div>
               <div>
                 <dt className="text-muted-foreground">{t('account.profile.locale')}</dt>
-                <dd>{profile.locale}</dd>
+                <dd>
+                  <bdi>{profile.locale}</bdi>
+                </dd>
               </div>
               <div>
                 <dt className="text-muted-foreground">{t('account.profile.status')}</dt>
@@ -550,11 +559,14 @@ export function Account({
               <TableBody>
                 {sessions.map((session) => (
                   <TableRow key={session.id} data-testid={`session-${session.id}`}>
-                    <TableCell>{session.clientId ?? t('account.none')}</TableCell>
+                    <TableCell>
+                      <bdi>{session.clientId ?? t('account.none')}</bdi>
+                    </TableCell>
                     <TableCell>{formatDate(session.createdAt)}</TableCell>
                     <TableCell>{formatDate(session.lastSeenAt)}</TableCell>
                     <TableCell>
-                      {session.ip ?? t('account.none')} · {session.userAgent ?? t('account.none')}
+                      <bdi>{session.ip ?? t('account.none')}</bdi> ·{' '}
+                      <bdi>{session.userAgent ?? t('account.none')}</bdi>
                     </TableCell>
                     <TableCell>
                       {session.current ? (
@@ -580,7 +592,7 @@ export function Account({
             </Table>
           ) : null}
           <p className="mt-3 text-xs text-muted-foreground">
-            {t('account.sessions.currentLocked')} ({sessionTotal})
+            {t('account.sessions.currentLocked')} (<bdi>{sessionTotal}</bdi>)
           </p>
         </CardContent>
       </Card>

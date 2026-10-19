@@ -38,7 +38,6 @@ export function LoginForm({
   social,
   onSubmit,
 }: LoginFormProps) {
-  void dir;
   const t = (key: string): string => translate(locale, key);
 
   const schema = z.object({
@@ -67,7 +66,10 @@ export function LoginForm({
           : null;
 
   return (
-    <main className="w-full max-w-sm rounded-lg border border-border bg-card p-6 shadow-sm">
+    <main
+      dir={dir}
+      className="w-full max-w-sm rounded-lg border border-border bg-card p-6 text-start shadow-sm"
+    >
       <h1 className="mb-1 text-xl font-semibold text-foreground">{t('login.title')}</h1>
       <p className="mb-6 text-sm text-muted-foreground">{t('login.subtitle')}</p>
 
@@ -94,6 +96,7 @@ export function LoginForm({
           <Input
             id="identifier"
             type="text"
+            dir="auto"
             autoComplete="username"
             autoFocus
             aria-invalid={errors.identifier ? true : undefined}

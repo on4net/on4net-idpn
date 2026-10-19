@@ -29,7 +29,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { translate, type Locale } from '@/i18n';
+import { directionOf, translate, type Locale } from '@/i18n';
 
 export interface AuditViewerProps {
   client: AdminApiClient;
@@ -195,7 +195,7 @@ export function AuditViewer({
   const lastPage = Math.max(1, Math.ceil(total / pageSize));
 
   return (
-    <Card data-testid="admin-audit-viewer">
+    <Card dir={directionOf(locale)} lang={locale} data-testid="admin-audit-viewer">
       <CardHeader>
         <CardTitle>{t('admin.audit.title')}</CardTitle>
       </CardHeader>
@@ -362,20 +362,26 @@ export function AuditViewer({
                     <TableCell className="whitespace-nowrap">
                       {dateFormatter.format(new Date(event.occurredAt))}
                     </TableCell>
-                    <TableCell className="font-mono text-xs">{event.action}</TableCell>
-                    <TableCell>
-                      {event.actorId ?? t('admin.audit.systemActor')}
-                      <span className="block text-xs text-muted-foreground">{event.actorType}</span>
+                    <TableCell className="font-mono text-xs">
+                      <bdi>{event.action}</bdi>
                     </TableCell>
                     <TableCell>
-                      {event.targetType ?? t('admin.audit.none')}
+                      <bdi>{event.actorId ?? t('admin.audit.systemActor')}</bdi>
+                      <span className="block text-xs text-muted-foreground">
+                        <bdi>{event.actorType}</bdi>
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <bdi>{event.targetType ?? t('admin.audit.none')}</bdi>
                       {event.targetId === null ? null : (
                         <span className="block text-xs text-muted-foreground">
-                          {event.targetId}
+                          <bdi>{event.targetId}</bdi>
                         </span>
                       )}
                     </TableCell>
-                    <TableCell>{event.clientId ?? t('admin.audit.none')}</TableCell>
+                    <TableCell>
+                      <bdi>{event.clientId ?? t('admin.audit.none')}</bdi>
+                    </TableCell>
                     <TableCell>
                       <Badge variant={resultVariant(event.result)}>
                         {t(`admin.audit.result.${event.result}`)}

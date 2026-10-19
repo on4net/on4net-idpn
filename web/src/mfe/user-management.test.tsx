@@ -351,6 +351,50 @@ describe('UserManagement MFE module', () => {
     await user.click(nextButton);
     await waitFor(() => expect(listMembers).toHaveBeenCalledTimes(2));
     expect(listMembers.mock.calls[1]?.[0]).toEqual(expect.objectContaining({ page: 2 }));
-    expect(await screen.findByText('صفحه 2 از 3')).toBeInTheDocument();
+    const pageInfo = await screen.findByText(
+      (_content, element) => element?.tagName === 'SPAN' && element.textContent === 'صفحه 2 از 3',
+    );
+    expect(pageInfo).toBeInTheDocument();
+  });
+
+  it('isolates client ids, emails and role keys from the RTL paragraph direction', async () => {
+    const { client } = fakeClient();
+    renderModule(client);
+
+    await screen.findByText('سارا محمدی');
+
+    const email = screen.getByText('sara@example.com');
+    expect(email.tagName).toBe('BDI');
+    expect(email).toHaveAttribute('dir', 'ltr');
+
+    const clientIds = screen.getAllByText('app-a');
+    expect(clientIds.length).toBeGreaterThan(0);
+    for (const element of clientIds) {
+      expect(element.tagName).toBe('BDI');
+      expect(element).toHaveAttribute('dir', 'ltr');
+    }
+
+    const roleKey = screen.getByText('app-a:member');
+    expect(roleKey.tagName).toBe('BDI');
+
+    // The table keeps logical alignment; no physical text-left/right utility is used.
+    expect(screen.getByRole('columnheader', { name: 'ایمیل' })).toHaveClass('text-start');
+    expect(screen.getByRole('cell', { name: 'sara@example.com' })).toHaveClass('text-start');
+  });
+
+  it('renders the same structure in LTR and keeps machine-readable values scoped', async () => {
+    const { client } = fakeClient();
+    render(
+      <IdpnRoot locale="en-US" dir="ltr">
+        <UserManagement clientId="app-a" apiClient={client} locale="en-US" dir="ltr" />
+      </IdpnRoot>,
+    );
+
+    await screen.findByText('سارا محمدی');
+    const section = document.querySelector('[data-client-id="app-a"]');
+    expect(section).toHaveAttribute('dir', 'ltr');
+    expect(section).toHaveAttribute('lang', 'en-US');
+    expect(screen.getByText('sara@example.com')).toHaveAttribute('dir', 'ltr');
+    expect(screen.getByRole('columnheader', { name: 'ایمیل' })).toHaveClass('text-start');
   });
 });

@@ -118,7 +118,10 @@ export function MfaForm({
     .join(' ');
 
   return (
-    <main className="w-full max-w-sm rounded-lg border border-border bg-card p-6 shadow-sm">
+    <main
+      dir={dir}
+      className="w-full max-w-sm rounded-lg border border-border bg-card p-6 text-start shadow-sm"
+    >
       <h1 className="mb-1 text-xl font-semibold text-foreground">{t('login.mfa.title')}</h1>
       <p className="mb-6 text-sm text-muted-foreground">{t('login.mfa.subtitle')}</p>
 
@@ -132,7 +135,6 @@ export function MfaForm({
       <form
         className="grid gap-4"
         noValidate
-        dir={dir}
         onSubmit={submit}
         aria-describedby={errorMessage === null ? undefined : 'mfa-error'}
       >

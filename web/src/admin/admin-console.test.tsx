@@ -93,6 +93,25 @@ describe('AdminConsole', () => {
     );
   });
 
+  it('provides direction to Radix and to the portalled dialog in RTL', async () => {
+    const user = userEvent.setup();
+    const client = fakeClient();
+    render(<AdminConsole client={client} locale="fa-IR" />);
+
+    await screen.findByText('Ali Rezaei');
+    const consoleRoot = screen.getByTestId('admin-console');
+    expect(consoleRoot).toHaveAttribute('dir', 'rtl');
+
+    const email = screen.getByText('ali@example.com');
+    expect(email.tagName).toBe('BDI');
+    expect(email).toHaveAttribute('dir', 'ltr');
+
+    await user.click(screen.getByRole('button', { name: 'کاربر جدید' }));
+    const dialog = await screen.findByRole('dialog', { name: 'کاربر جدید' });
+    expect(dialog.closest('[dir]')).toHaveAttribute('dir', 'rtl');
+    expect(screen.getByLabelText('ایمیل')).toHaveAttribute('dir', 'ltr');
+  });
+
   it('searches with the typed query and resets to the first page', async () => {
     const client = fakeClient();
     render(<AdminConsole client={client} locale="en-US" />);

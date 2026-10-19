@@ -344,8 +344,8 @@ export function UserManagement({
       <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
         <div>
           <h2 className="text-lg font-semibold text-foreground">مدیریت کاربران</h2>
-          <p className="text-sm text-muted-foreground" dir="ltr">
-            {clientId}
+          <p className="text-sm text-muted-foreground">
+            <bdi dir="ltr">{clientId}</bdi>
           </p>
         </div>
 
@@ -373,6 +373,7 @@ export function UserManagement({
                   id="mfe-invite-email"
                   type="email"
                   required
+                  dir="ltr"
                   value={inviteEmail}
                   onChange={(event) => setInviteEmail(event.target.value)}
                 />
@@ -395,7 +396,8 @@ export function UserManagement({
                 <Label htmlFor="mfe-invite-attributes">ویژگی‌ها (JSON، اختیاری)</Label>
                 <textarea
                   id="mfe-invite-attributes"
-                  className="min-h-24 w-full rounded-md border border-input bg-background p-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="min-h-24 w-full rounded-md border border-input bg-background p-2 text-start text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  dir="ltr"
                   value={inviteAttributes}
                   onChange={(event) => setInviteAttributes(event.target.value)}
                   aria-describedby="mfe-invite-attributes-help"
@@ -495,7 +497,9 @@ export function UserManagement({
 
       {!loading && members.length > 0 && error === null && (
         <Table>
-          <TableCaption>اعضای اپ {clientId}</TableCaption>
+          <TableCaption>
+            اعضای اپ <bdi dir="ltr">{clientId}</bdi>
+          </TableCaption>
           <TableHeader>
             <TableRow>
               <TableHead>نام</TableHead>
@@ -509,8 +513,8 @@ export function UserManagement({
             {members.map((member) => (
               <TableRow key={member.userId}>
                 <TableCell className="font-medium text-foreground">{member.displayName}</TableCell>
-                <TableCell dir="ltr" className="text-muted-foreground">
-                  {member.email}
+                <TableCell>
+                  <bdi dir="ltr">{member.email}</bdi>
                 </TableCell>
                 <TableCell>
                   <Badge variant={STATUS_VARIANT[member.status]}>
@@ -518,7 +522,7 @@ export function UserManagement({
                   </Badge>
                 </TableCell>
                 <TableCell className="text-muted-foreground">
-                  {member.roleKeys.length === 0 ? '—' : member.roleKeys.join('، ')}
+                  <bdi>{member.roleKeys.length === 0 ? '—' : member.roleKeys.join('، ')}</bdi>
                 </TableCell>
                 <TableCell>
                   <div className="flex flex-wrap gap-2">
@@ -559,7 +563,7 @@ export function UserManagement({
 
       <div className="mt-4 flex items-center justify-between gap-2">
         <span className="text-sm text-muted-foreground">
-          صفحه {page} از {pageCount}
+          صفحه <bdi>{page}</bdi> از <bdi>{pageCount}</bdi>
         </span>
         <div className="flex gap-2">
           <Button
