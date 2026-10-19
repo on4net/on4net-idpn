@@ -5,7 +5,12 @@ import '@/styles/globals.css';
 import './host-mf.css';
 
 interface RemoteModule {
-  default: ComponentType<{ locale?: string; dir?: 'rtl' | 'ltr' }>;
+  default: ComponentType<{
+    clientId: string;
+    apiBaseUrl?: string;
+    locale?: string;
+    dir?: 'rtl' | 'ltr';
+  }>;
 }
 
 async function bootstrap(): Promise<void> {
@@ -15,11 +20,12 @@ async function bootstrap(): Promise<void> {
   }
 
   // Resolved through Module Federation; React is shared as a singleton and the
-  // module brings its own `.idpn-root` and portal container.
+  // module brings its own `.idpn-root` and portal container. `clientId` is host
+  // configuration and scopes every request to this app.
   const remote = (await import('idpnMfe/UserManagement')) as unknown as RemoteModule;
   const UserManagement = remote.default;
 
-  createRoot(container).render(<UserManagement locale="fa-IR" dir="rtl" />);
+  createRoot(container).render(<UserManagement clientId="app-a" locale="fa-IR" dir="rtl" />);
 }
 
 void bootstrap();

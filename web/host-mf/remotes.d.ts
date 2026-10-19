@@ -2,9 +2,12 @@ declare module 'idpnMfe/UserManagement' {
   import type { ComponentType } from 'react';
 
   const UserManagement: ComponentType<{
+    clientId: string;
+    apiBaseUrl?: string;
+    getAccessToken?: () => string | null;
     locale?: string;
     dir?: 'rtl' | 'ltr';
-    initialUsers?: readonly { id: string; name: string; email: string }[];
+    pageSize?: number;
   }>;
 
   export default UserManagement;
