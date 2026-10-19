@@ -9,6 +9,16 @@ export const CLIENT_ADMIN_SCOPE = 'idp.client-admin';
 /** Step-up window for sensitive delegated operations. */
 export const STEP_UP_MAX_AGE_SECONDS = 300;
 
+/**
+ * Permissions an app admin may exercise for its own client (`docs/api.md` 3): the
+ * `idp:client-*` family plus the per-app social provider credentials. Global-only
+ * permissions such as `idp:user:*` or `idp:client:*` never match, so a delegated token
+ * cannot reach a global operation even if an app-owned role mistakenly carries it.
+ */
+export function isClientScopedPermission(permission: string): boolean {
+  return permission.startsWith('idp:client-') || permission.startsWith('idp:social-provider:');
+}
+
 export interface TokenVerifier {
   verify(
     token: string,
@@ -20,8 +30,8 @@ export interface PermissionReader {
   /** Permissions the user holds through global (unscoped) role assignments. */
   globalPermissionsForUser(userId: string): Promise<string[]>;
   /**
-   * `idp:client-*` permissions the user holds for one app through global assignments of
-   * global or app-owned roles.
+   * Client-scoped permissions (`idp:client-*`, `idp:social-provider:*`) the user holds for
+   * one app through global assignments of global or app-owned roles.
    */
   clientPermissionsForUser?(userId: string, clientId: string): Promise<string[]>;
 }
@@ -185,7 +195,7 @@ export async function authorizeAdminRequest(
     }
     if (requirement.authenticatedOnly !== true) {
       const delegatedPermission = requirement.delegatedPermission ?? requirement.permission;
-      if (!delegatedPermission.startsWith('idp:client-')) {
+      if (!isClientScopedPermission(delegatedPermission)) {
         return denied(403, 'forbidden', 'delegated tokens cannot perform this operation');
       }
       if (options.permissions.clientPermissionsForUser === undefined) {

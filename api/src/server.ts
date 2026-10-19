@@ -10,6 +10,8 @@ import type { AuditRoutesOptions } from './admin/audit/routes.js';
 import { registerAuditAdminRoutes } from './admin/audit/routes.js';
 import type { ClientRoutesOptions } from './admin/clients/routes.js';
 import { registerClientAdminRoutes } from './admin/clients/routes.js';
+import type { SocialProviderRoutesOptions } from './admin/social-providers/routes.js';
+import { registerSocialProviderAdminRoutes } from './admin/social-providers/routes.js';
 import type { RbacRoutesOptions } from './admin/rbac/routes.js';
 import { registerRbacAdminRoutes } from './admin/rbac/routes.js';
 import type { MemberRoutesOptions } from './admin/members/routes.js';
@@ -62,6 +64,8 @@ export interface BuildServerOptions {
   admin?: Omit<AdminRoutesOptions, 'issuer' | 'verifier'>;
   /** Mounts the client administration endpoints (docs/api.md 3.3). */
   adminClients?: Omit<ClientRoutesOptions, 'issuer' | 'verifier'>;
+  /** Mounts per-app social provider credentials (docs/api.md 3.3.2). */
+  socialProviders?: Omit<SocialProviderRoutesOptions, 'issuer' | 'verifier'>;
   /** Mounts the permission catalog and role endpoints (docs/api.md 3.4). */
   rbac?: Omit<RbacRoutesOptions, 'issuer' | 'verifier'>;
   /** Mounts the client membership endpoints (docs/api.md 3.3.1). */
@@ -162,6 +166,14 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
 
   if (options.adminClients !== undefined) {
     registerClientAdminRoutes(app, { ...options.adminClients, issuer, verifier: keys });
+  }
+
+  if (options.socialProviders !== undefined) {
+    registerSocialProviderAdminRoutes(app, {
+      ...options.socialProviders,
+      issuer,
+      verifier: keys,
+    });
   }
 
   if (options.rbac !== undefined) {

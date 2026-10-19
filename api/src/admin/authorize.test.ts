@@ -188,6 +188,23 @@ describe('delegated admin mode', () => {
     expect(result).toMatchObject({ ok: false, status: 403, error: 'forbidden' });
   });
 
+  it('accepts the client-scoped social provider permission', async () => {
+    const result = await authorizeAdminRequest(
+      request(tokenWith(delegatedToken)),
+      guard({
+        verifier: verifier(delegatedToken),
+        permissions: permissions([], ['idp:social-provider:read']),
+      }),
+      { permission: 'idp:social-provider:read', clientId: 'app-a' },
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.principal.mode).toBe('delegated');
+      expect([...result.principal.permissions]).toEqual(['idp:social-provider:read']);
+    }
+  });
+
   it('rejects a delegated caller without the scoped permission', async () => {
     const result = await authorizeAdminRequest(
       request(tokenWith(delegatedToken)),

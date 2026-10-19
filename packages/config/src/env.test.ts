@@ -15,6 +15,8 @@ const minimalEnv = {
   SESSION_SECRET: '0123456789abcdef0123456789abcdef',
 };
 
+const validSocialSecretKey = 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=';
+
 const captureIssues = (source: Record<string, string | undefined>): EnvIssue[] => {
   try {
     parseServerEnv(source);
@@ -102,6 +104,33 @@ describe('parseServerEnv', () => {
 
     expect(issues[0]?.key).toBe('LOG_LEVEL');
     expect(issues[0]?.message).toMatch(/fatal|error|warn|info|debug|trace|silent/);
+  });
+
+  it('accepts a social secret key of exactly 32 bytes in base64', () => {
+    expect(
+      parseServerEnv({ ...minimalEnv, SOCIAL_SECRET_KEY: validSocialSecretKey }).SOCIAL_SECRET_KEY,
+    ).toBe(validSocialSecretKey);
+  });
+
+  it('allows a missing social secret key outside production', () => {
+    expect(parseServerEnv(minimalEnv).SOCIAL_SECRET_KEY).toBeUndefined();
+    expect(
+      parseServerEnv({ ...minimalEnv, SOCIAL_SECRET_KEY: '' }).SOCIAL_SECRET_KEY,
+    ).toBeUndefined();
+  });
+
+  it('rejects a social secret key that is not 32 bytes of base64', () => {
+    const issues = captureIssues({
+      ...minimalEnv,
+      SOCIAL_SECRET_KEY: 'not-a-32-byte-key',
+    });
+
+    expect(issues).toEqual([
+      {
+        key: 'SOCIAL_SECRET_KEY',
+        message: 'must be the base64 encoding of exactly 32 bytes',
+      },
+    ]);
   });
 
   it('rejects an allowed origin that carries a path', () => {

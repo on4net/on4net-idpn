@@ -42,6 +42,12 @@ const origin = z
     return url.pathname === '/' && url.search === '' && url.hash === '';
   }, 'must be an origin such as https://app.example.com, without a path');
 
+/** AES-256-GCM key for per-client social secrets: canonical base64 of exactly 32 bytes. */
+const isSecretKey = (value: string): boolean => {
+  const bytes = Buffer.from(value, 'base64');
+  return bytes.length === 32 && bytes.toString('base64') === value;
+};
+
 const csv = (item: z.ZodType<string, string>) =>
   z
     .preprocess(emptyToUndefined, z.string().optional())
@@ -118,6 +124,15 @@ export const serverEnvSchema = z.object({
   MFE_VERSION: z.preprocess(emptyToUndefined, z.string().min(1).default('0.1.0')),
   MFE_ALLOWED_ORIGINS: csv(origin).default([]),
   SOCIAL_CALLBACK_BASE_URL: optionalUrl(),
+  /**
+   * Key-encryption key for `ClientSocialProvider.clientSecretEncrypted` (AES-256-GCM).
+   * Base64 of exactly 32 bytes; supply it from KMS/Vault in production. `loadSocialSecretKey`
+   * requires it there so the API fails closed instead of storing secrets unencrypted.
+   */
+  SOCIAL_SECRET_KEY: z.preprocess(
+    emptyToUndefined,
+    z.string().refine(isSecretKey, 'must be the base64 encoding of exactly 32 bytes').optional(),
+  ),
   SMTP_URL: z.preprocess(
     emptyToUndefined,
     z

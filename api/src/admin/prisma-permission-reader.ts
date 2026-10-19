@@ -1,5 +1,5 @@
 import type { PrismaClient } from '../generated/prisma/client.js';
-import type { PermissionReader } from './authorize.js';
+import { isClientScopedPermission, type PermissionReader } from './authorize.js';
 
 /**
  * Resolves the permissions a user holds through **global** role assignments.
@@ -53,7 +53,7 @@ export function createPrismaPermissionReader(
       });
       return [
         ...new Set(
-          rows.map((row) => row.permission.key).filter((key) => key.startsWith('idp:client-')),
+          rows.map((row) => row.permission.key).filter((key) => isClientScopedPermission(key)),
         ),
       ];
     },

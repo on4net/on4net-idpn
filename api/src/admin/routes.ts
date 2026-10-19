@@ -43,11 +43,17 @@ export interface AdminRoutesOptions {
 const PROBLEM_BASE = 'https://on4net.dev/problems';
 
 type ProblemSlug =
-  'unauthorized' | 'forbidden' | 'invalid-request' | 'validation-error' | 'not-found' | 'conflict';
+  | 'unauthorized'
+  | 'forbidden'
+  | 'invalid-request'
+  | 'validation-error'
+  | 'not-found'
+  | 'conflict'
+  | 'service-unavailable';
 
 export function sendProblem(
   reply: FastifyReply,
-  status: 400 | 401 | 403 | 404 | 409 | 422,
+  status: 400 | 401 | 403 | 404 | 409 | 422 | 503,
   slug: ProblemSlug,
   title: string,
   detail: string,

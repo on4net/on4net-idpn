@@ -11,6 +11,8 @@ import { createPrismaRbacRepository } from './admin/rbac/prisma-rbac-repository.
 import { createPrismaMemberRepository } from './admin/members/prisma-member-repository.js';
 import { createPrismaAuditEventRepository } from './admin/audit/prisma-audit-repository.js';
 import { createPrismaAdminSessionRepository } from './admin/sessions/prisma-session-repository.js';
+import { createPrismaSocialProviderRepository } from './admin/social-providers/prisma-social-provider-repository.js';
+import { createSecretBox, loadSocialSecretKey } from './crypto/secret-box.js';
 import { createPrismaEffectiveAccessSource } from './oidc/effective-access.js';
 import {
   BackchannelLogoutDispatcher,
@@ -82,6 +84,12 @@ const effectiveAccess = createPrismaEffectiveAccessSource(prisma);
 const adminSessionsRepository = createPrismaAdminSessionRepository(prisma);
 /** Password changes keep the caller's session but revoke every other session and token. */
 const passwordStore = createPrismaPasswordStore(prisma, { sessions });
+
+// Per-app social provider secrets are encrypted with AES-256-GCM. Production refuses to
+// start without a valid SOCIAL_SECRET_KEY; development may run without one, in which case
+// writes fail closed with 503 instead of persisting an unencrypted credential.
+const socialSecretKey = loadSocialSecretKey(env);
+const socialSecretBox = socialSecretKey === null ? null : createSecretBox(socialSecretKey);
 
 /**
  * Back-channel logout is best effort: retries with backoff, then the durable Redis queue
@@ -164,6 +172,13 @@ const app = buildServer({
     permissions: permissionReader,
     clients: createPrismaAdminClientRepository(prisma),
     audit: createPrismaAdminAudit(prisma),
+  },
+  socialProviders: {
+    adminClientId: env.ADMIN_CLIENT_ID,
+    permissions: permissionReader,
+    providers: createPrismaSocialProviderRepository(prisma),
+    audit: createPrismaAdminAudit(prisma),
+    secretBox: socialSecretBox,
   },
   rbac: {
     adminClientId: env.ADMIN_CLIENT_ID,
