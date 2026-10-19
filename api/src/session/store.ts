@@ -196,7 +196,7 @@ export class RedisSessionStore implements ClientSessionRevoker {
   }
 
   /**
-   * Revokes only the sessions that were created for one app. Used when an app membership is
+   * Revokes only the sessions created for one app. Used when an app membership is
    * suspended: sessions belonging to other apps of the same user must stay valid.
    */
   async revokeForUserClient(
@@ -215,6 +215,33 @@ export class RedisSessionStore implements ClientSessionRevoker {
       if (session.clientId === clientId) {
         await this.markRevoked(session, reason);
         revoked += 1;
+      }
+    }
+    return revoked;
+  }
+
+  /**
+   * Revokes only the sessions created for one Login Context of one app
+   * (docs/login-contexts.md 3.4). Another context of the same app keeps its session, and the
+   * returned `sid`s let the caller mirror the exact revocation into PostgreSQL.
+   */
+  async revokeForUserClientContext(
+    userId: string,
+    clientId: string,
+    loginContext: string,
+    reason: RevokeReason,
+  ): Promise<string[]> {
+    const sids = await this.cache.setMembers(userKey(userId));
+    const revoked: string[] = [];
+    for (const sid of sids) {
+      const session = await this.load(sid);
+      if (session === null || session.revokedAt !== undefined) {
+        await this.cache.setRemove(userKey(userId), sid);
+        continue;
+      }
+      if (session.clientId === clientId && session.loginContext === loginContext) {
+        await this.markRevoked(session, reason);
+        revoked.push(sid);
       }
     }
     return revoked;

@@ -255,6 +255,47 @@ describe('RedisSessionStore', () => {
     await expect(store.read(otherUser.sid)).resolves.not.toBeNull();
   });
 
+  it('revokes only the sessions of one login context for a context suspension', async () => {
+    const { cache } = createMemoryCache();
+    const store = new RedisSessionStore({ cache, policy });
+
+    const adminContext = await store.create({
+      userId: 'user-1',
+      clientId: 'app-a',
+      loginContext: 'customer-admin',
+      amr: ['pwd'],
+      acr: 'pwd',
+    });
+    const teamContext = await store.create({
+      userId: 'user-1',
+      clientId: 'app-a',
+      loginContext: 'customer-team',
+      amr: ['pwd'],
+      acr: 'pwd',
+    });
+    const otherApp = await store.create({
+      userId: 'user-1',
+      clientId: 'app-b',
+      loginContext: 'partner-portal',
+      amr: ['pwd'],
+      acr: 'pwd',
+    });
+    const noContext = await store.create({
+      userId: 'user-1',
+      clientId: 'app-a',
+      amr: ['pwd'],
+      acr: 'pwd',
+    });
+
+    await expect(
+      store.revokeForUserClientContext('user-1', 'app-a', 'customer-admin', 'admin'),
+    ).resolves.toEqual([adminContext.sid]);
+    await expect(store.read(adminContext.sid)).resolves.toBeNull();
+    await expect(store.read(teamContext.sid)).resolves.not.toBeNull();
+    await expect(store.read(otherApp.sid)).resolves.not.toBeNull();
+    await expect(store.read(noContext.sid)).resolves.not.toBeNull();
+  });
+
   it('keeps a completed revocation when the audit hook fails', async () => {
     const { cache } = createMemoryCache();
     const store = new RedisSessionStore({

@@ -41,6 +41,25 @@ const SUPPORTED_TYPES = new Set([
   'null',
 ]);
 
+/**
+ * Validates roles written through a Login Context membership endpoint
+ * (docs/api.md 3.3.3, docs/login-contexts.md 5).
+ *
+ * A context may only grant roles from its own `allowed_roles`; anything else would let an
+ * app (or a delegated context admin) mint a role the context does not expose. The check is
+ * pure so it runs before any write and can be unit tested.
+ */
+export function contextRoleProblems(
+  roleKeys: readonly string[],
+  allowedRoles: readonly string[],
+): string[] {
+  const allowed = new Set(allowedRoles);
+  return [...new Set(roleKeys)]
+    .filter((key) => !allowed.has(key))
+    .sort()
+    .map((key) => `role "${key}" is not allowed in this login context`);
+}
+
 export function validateMembershipAttributes(
   schema: Record<string, unknown> | null,
   attributes: unknown,

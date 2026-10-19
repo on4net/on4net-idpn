@@ -20,6 +20,17 @@ export interface SessionRevoker {
 export interface ClientSessionRevoker {
   /** `clientId` is the public client identifier stored on the session. */
   revokeForUserClient(userId: string, clientId: string, reason: RevokeReason): Promise<number>;
+  /**
+   * Login-Context-scoped revocation (docs/login-contexts.md 3.4, 7.3): only sessions that
+   * were created for the given context of the client are revoked. The revoked `sid`s are
+   * returned so the caller can mirror exactly those rows into PostgreSQL.
+   */
+  revokeForUserClientContext?(
+    userId: string,
+    clientId: string,
+    loginContext: string,
+    reason: RevokeReason,
+  ): Promise<string[]>;
 }
 
 export type SessionRevocationHook = (

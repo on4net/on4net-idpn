@@ -633,6 +633,9 @@ describe('login context admin API', () => {
         description: 'customer-admin context',
         methods: ['password', 'google'],
         mfaPolicy: 'optional',
+        // Documented Public Config field (docs/login-contexts.md 7.1); it became part of the
+        // response with the context selector (#63) and is public by design.
+        registrationPolicy: 'invite_only',
       },
     ]);
     expect(first.body.defaultLoginContext).toBe('customer-admin');

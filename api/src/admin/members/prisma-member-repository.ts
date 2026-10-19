@@ -4,15 +4,18 @@ import type { PrismaClient } from '../../generated/prisma/client.js';
 import { normalizeEmail } from '../../auth/normalize.js';
 import type { ClientSessionRevoker } from '../../session/revocation.js';
 import type { AdminRbacRepository } from '../rbac/rbac-types.js';
-import { validateMembershipAttributes } from './member-validation.js';
+import { contextRoleProblems, validateMembershipAttributes } from './member-validation.js';
 import type {
   AdminMember,
   AdminMemberRepository,
   AdminMemberSession,
+  ContextAdminScope,
   InviteMemberInput,
   ListMembersQuery,
+  MemberFailure,
   MemberResult,
   MembershipStatus,
+  MemberScope,
   UpdateMemberInput,
 } from './member-types.js';
 
@@ -89,8 +92,33 @@ const usernameFromEmail = (email: string): string => {
   return cleaned.length >= 3 ? cleaned : 'user';
 };
 
+const isUniqueViolation = (error: unknown): boolean =>
+  typeof error === 'object' && error !== null && (error as { code?: unknown }).code === 'P2002';
+
+const failure = (reason: MemberFailure, detail: string): MemberResult<never> => ({
+  ok: false,
+  reason,
+  detail,
+});
+
+/** The Login Context a membership belongs to; `null` is the client-wide (default) scope. */
+interface MembershipContext {
+  id: string;
+  key: string;
+  allowedRoles: string[];
+  defaultRoles: string[];
+}
+
+type ResolvedScope =
+  | {
+      ok: true;
+      client: { id: string; tenantId: string; membershipSchema: unknown };
+      context: MembershipContext | null;
+    }
+  | { ok: false; reason: 'client-not-found' | 'context-not-found'; detail: string };
+
 export interface PrismaMemberRepositoryOptions {
-  /** Used to apply the client's `is_default` roles on the first membership. */
+  /** Used to apply the client's `is_default` roles on the first client-wide membership. */
   rbac?: Pick<AdminRbacRepository, 'assignDefaultRoles'>;
   /** Revokes the app's Redis sessions when a membership is suspended. */
   sessions?: ClientSessionRevoker;
@@ -110,7 +138,53 @@ export function createPrismaMemberRepository(
       select: { id: true, tenantId: true, membershipSchema: true },
     });
 
-  const roleKeysFor = async (clientUuid: string, userIds: string[]) => {
+  const resolveContext = async (
+    clientUuid: string,
+    key: string,
+  ): Promise<MembershipContext | null> =>
+    prisma.clientLoginContext.findFirst({
+      where: { clientId: clientUuid, key },
+      select: { id: true, key: true, allowedRoles: true, defaultRoles: true },
+    });
+
+  /**
+   * Resolves the client plus, when a context was requested, that exact context of the client.
+   * A context key belonging to another client is a 404 for this client, never a cross-client
+   * read (docs/login-contexts.md 6).
+   */
+  const resolveScope = async (clientId: string, scope?: MemberScope): Promise<ResolvedScope> => {
+    const client = await resolveClient(clientId);
+    if (client === null) {
+      return {
+        ok: false,
+        reason: 'client-not-found',
+        detail: `client "${clientId}" does not exist`,
+      };
+    }
+    if (scope?.loginContext === undefined) {
+      return { ok: true, client, context: null };
+    }
+    const context = await resolveContext(client.id, scope.loginContext);
+    if (context === null) {
+      return {
+        ok: false,
+        reason: 'context-not-found',
+        detail: `login context "${scope.loginContext}" does not exist`,
+      };
+    }
+    return { ok: true, client, context };
+  };
+
+  /**
+   * Role keys the subject holds in the client. For a context the result is narrowed to
+   * `allowed_roles`, so an admin never sees (or is led to believe they can edit) roles the
+   * context cannot grant (docs/login-contexts.md 5).
+   */
+  const roleKeysFor = async (
+    clientUuid: string,
+    userIds: string[],
+    allowedRoles?: readonly string[],
+  ) => {
     if (userIds.length === 0) {
       return new Map<string, string[]>();
     }
@@ -118,7 +192,10 @@ export function createPrismaMemberRepository(
       where: {
         subjectType: 'user',
         subjectId: { in: userIds },
-        role: { clientId: clientUuid },
+        role: {
+          clientId: clientUuid,
+          ...(allowedRoles === undefined ? {} : { key: { in: [...allowedRoles] } }),
+        },
       },
       select: { subjectId: true, role: { select: { key: true } } },
     });
@@ -131,15 +208,19 @@ export function createPrismaMemberRepository(
     return byUser;
   };
 
-  const loadMember = async (clientUuid: string, userId: string): Promise<AdminMember | null> => {
+  const loadMember = async (
+    clientUuid: string,
+    userId: string,
+    context: MembershipContext | null,
+  ): Promise<AdminMember | null> => {
     const row = await prisma.clientMembership.findFirst({
-      where: { clientId: clientUuid, userId, loginContextId: null },
+      where: { clientId: clientUuid, userId, loginContextId: context?.id ?? null },
       select: MEMBER_SELECT,
     });
     if (row === null) {
       return null;
     }
-    const roles = await roleKeysFor(clientUuid, [userId]);
+    const roles = await roleKeysFor(clientUuid, [userId], context?.allowedRoles);
     return toMember(row, roles.get(userId) ?? []);
   };
 
@@ -195,6 +276,30 @@ export function createPrismaMemberRepository(
     return { ok: true as const, roles: rows.map((row) => ({ id: row.id, key: row.key })) };
   };
 
+  const roleNotAllowed = (
+    roleKeys: readonly string[],
+    context: MembershipContext,
+  ): MemberResult<never> | null => {
+    const problems = contextRoleProblems(roleKeys, context.allowedRoles);
+    return problems.length === 0 ? null : failure('role-not-allowed', problems.join('; '));
+  };
+
+  /**
+   * `default_roles` of a context are applied on its first membership
+   * (docs/domain-model.md 3.3). The policy is validated when the context is written; a
+   * stale row must not make an invite impossible, so unknown entries are skipped.
+   */
+  const defaultRoleIdsFor = async (
+    clientId: string,
+    context: MembershipContext,
+  ): Promise<string[]> => {
+    if (context.defaultRoles.length === 0) {
+      return [];
+    }
+    const resolved = await resolveRoles(clientId, context.defaultRoles);
+    return resolved.ok ? resolved.roles.map((role) => role.id) : [];
+  };
+
   const assignRoles = async (userId: string, roleIds: string[], assignedBy: string) => {
     if (roleIds.length === 0) {
       return;
@@ -241,14 +346,15 @@ export function createPrismaMemberRepository(
   };
 
   return {
-    async list(clientId: string, query: ListMembersQuery) {
-      const client = await resolveClient(clientId);
-      if (client === null) {
+    async list(clientId: string, query: ListMembersQuery, scope?: MemberScope) {
+      const resolved = await resolveScope(clientId, scope);
+      if (!resolved.ok) {
         return null;
       }
+      const { client, context } = resolved;
       const where = {
         clientId: client.id,
-        loginContextId: null,
+        loginContextId: context?.id ?? null,
         ...(query.status === undefined ? {} : { status: query.status }),
         ...(query.query === undefined
           ? {}
@@ -275,6 +381,7 @@ export function createPrismaMemberRepository(
       const roles = await roleKeysFor(
         client.id,
         rows.map((row) => row.user.id),
+        context?.allowedRoles,
       );
       return {
         items: rows.map((row) => toMember(row, roles.get(row.user.id) ?? [])),
@@ -282,23 +389,20 @@ export function createPrismaMemberRepository(
       };
     },
 
-    async find(clientId, userId) {
-      const client = await resolveClient(clientId);
-      if (client === null) {
+    async find(clientId, userId, scope) {
+      const resolved = await resolveScope(clientId, scope);
+      if (!resolved.ok) {
         return null;
       }
-      return loadMember(client.id, userId);
+      return loadMember(resolved.client.id, userId, resolved.context);
     },
 
-    async invite(clientId: string, input: InviteMemberInput) {
-      const client = await resolveClient(clientId);
-      if (client === null) {
-        return {
-          ok: false,
-          reason: 'client-not-found',
-          detail: `client "${clientId}" does not exist`,
-        };
+    async invite(clientId: string, input: InviteMemberInput, scope?: MemberScope) {
+      const resolved = await resolveScope(clientId, scope);
+      if (!resolved.ok) {
+        return failure(resolved.reason, resolved.detail);
       }
+      const { client, context } = resolved;
 
       const attributeCheck = validateAttributes(client.membershipSchema, input.attributes);
       if (!attributeCheck.ok) {
@@ -308,6 +412,13 @@ export function createPrismaMemberRepository(
       const roleCheck = await resolveRoles(clientId, input.roleKeys);
       if (!roleCheck.ok) {
         return roleCheck;
+      }
+
+      if (context !== null) {
+        const denied = roleNotAllowed(input.roleKeys, context);
+        if (denied !== null) {
+          return denied;
+        }
       }
 
       const email = normalizeEmail(input.email);
@@ -338,37 +449,47 @@ export function createPrismaMemberRepository(
         userId = existingUser.id;
       }
 
+      const duplicateDetail =
+        context === null
+          ? 'user is already a member of this client'
+          : `user is already a member of login context "${context.key}"`;
       const duplicate = await prisma.clientMembership.findFirst({
-        where: { clientId: client.id, loginContextId: null, userId },
+        where: { clientId: client.id, loginContextId: context?.id ?? null, userId },
         select: { id: true },
       });
       if (duplicate !== null) {
-        return {
-          ok: false,
-          reason: 'duplicate',
-          detail: 'user is already a member of this client',
-        };
+        return failure('duplicate', duplicateDetail);
       }
 
       const at = now();
-      await prisma.clientMembership.create({
-        data: {
-          clientId: client.id,
-          userId,
-          status: 'invited',
-          attributes: input.attributes as never,
-          invitedBy: input.invitedBy,
-          invitedAt: at,
-        },
-        select: { id: true },
-      });
+      try {
+        await prisma.clientMembership.create({
+          data: {
+            clientId: client.id,
+            loginContextId: context?.id ?? null,
+            userId,
+            status: 'invited',
+            attributes: input.attributes as never,
+            invitedBy: input.invitedBy,
+            invitedAt: at,
+          },
+          select: { id: true },
+        });
+      } catch (error) {
+        // The NULLS NOT DISTINCT unique index closes the race between the lookup and insert.
+        if (isUniqueViolation(error)) {
+          return failure('duplicate', duplicateDetail);
+        }
+        throw error;
+      }
 
+      const contextDefaults = context === null ? [] : await defaultRoleIdsFor(clientId, context);
       await assignRoles(
         userId,
-        roleCheck.roles.map((role) => role.id),
+        [...roleCheck.roles.map((role) => role.id), ...contextDefaults],
         input.invitedBy,
       );
-      if (options.rbac !== undefined) {
+      if (context === null && options.rbac !== undefined) {
         await options.rbac.assignDefaultRoles({
           clientId,
           userId,
@@ -376,28 +497,25 @@ export function createPrismaMemberRepository(
         });
       }
 
-      const member = await loadMember(client.id, userId);
+      const member = await loadMember(client.id, userId, context);
       if (member === null) {
-        return { ok: false, reason: 'not-found', detail: 'membership was not persisted' };
+        return failure('not-found', 'membership was not persisted');
       }
       return { ok: true, value: { member, createdUser } };
     },
 
-    async update(clientId: string, userId: string, input: UpdateMemberInput) {
-      const client = await resolveClient(clientId);
-      if (client === null) {
-        return {
-          ok: false,
-          reason: 'client-not-found',
-          detail: `client "${clientId}" does not exist`,
-        };
+    async update(clientId: string, userId: string, input: UpdateMemberInput, scope?: MemberScope) {
+      const resolved = await resolveScope(clientId, scope);
+      if (!resolved.ok) {
+        return failure(resolved.reason, resolved.detail);
       }
+      const { client, context } = resolved;
       const membership = await prisma.clientMembership.findFirst({
-        where: { clientId: client.id, loginContextId: null, userId },
+        where: { clientId: client.id, loginContextId: context?.id ?? null, userId },
         select: { id: true, status: true, joinedAt: true },
       });
       if (membership === null) {
-        return { ok: false, reason: 'not-found', detail: 'membership does not exist' };
+        return failure('not-found', 'membership does not exist');
       }
 
       if (input.attributes !== undefined) {
@@ -419,39 +537,75 @@ export function createPrismaMemberRepository(
       });
 
       if (status === 'suspended') {
-        await prisma.refreshToken.updateMany({
-          where: { clientId: client.id, userId, revokedAt: null },
-          data: { revokedAt: at },
-        });
-        // Only this app's sessions: the user may still be a member of other apps.
-        await prisma.session.updateMany({
-          where: { userId, clientId: client.id, revokedAt: null },
-          data: { revokedAt: at, revokeReason: 'membership_suspend' },
-        });
-        await options.sessions?.revokeForUserClient(userId, clientId, 'admin');
+        if (context === null) {
+          await prisma.refreshToken.updateMany({
+            where: { clientId: client.id, userId, revokedAt: null },
+            data: { revokedAt: at },
+          });
+          // Only this app's sessions: the user may still be a member of other apps.
+          await prisma.session.updateMany({
+            where: { userId, clientId: client.id, revokedAt: null },
+            data: { revokedAt: at, revokeReason: 'membership_suspend' },
+          });
+          await options.sessions?.revokeForUserClient(userId, clientId, 'admin');
+        } else {
+          // Refresh tokens carry the context they were issued for, so only those are
+          // revoked; the same user stays signed in to the other contexts of this app.
+          await prisma.refreshToken.updateMany({
+            where: {
+              clientId: client.id,
+              userId,
+              loginContext: context.key,
+              revokedAt: null,
+            },
+            data: { revokedAt: at },
+          });
+          // Sessions are identity-based and their PostgreSQL mirror does not store the
+          // context; revoking every session of the client would cut the other contexts too.
+          // The store revokes the exact sids and those are mirrored here.
+          const revokedSids = await options.sessions?.revokeForUserClientContext?.(
+            userId,
+            clientId,
+            context.key,
+            'admin',
+          );
+          if (revokedSids !== undefined && revokedSids.length > 0) {
+            await prisma.session.updateMany({
+              where: { id: { in: revokedSids }, revokedAt: null },
+              data: { revokedAt: at, revokeReason: 'membership_suspend' },
+            });
+          }
+        }
       }
 
-      const member = await loadMember(client.id, userId);
+      const member = await loadMember(client.id, userId, context);
       return member === null
-        ? { ok: false, reason: 'not-found', detail: 'membership does not exist' }
+        ? failure('not-found', 'membership does not exist')
         : { ok: true, value: member };
     },
 
-    async remove(clientId: string, userId: string) {
-      const client = await resolveClient(clientId);
-      if (client === null) {
+    async remove(clientId: string, userId: string, scope?: MemberScope) {
+      const resolved = await resolveScope(clientId, scope);
+      if (!resolved.ok) {
         return 'not-found';
       }
+      const { client, context } = resolved;
       const membership = await prisma.clientMembership.findFirst({
-        where: { clientId: client.id, loginContextId: null, userId },
+        where: { clientId: client.id, loginContextId: context?.id ?? null, userId },
         select: { id: true },
       });
       if (membership === null) {
         return 'not-found';
       }
 
-      const clientRoles = await prisma.role.findMany({
-        where: { clientId: client.id },
+      // A context membership may only remove roles that context could grant. Role
+      // assignments are user-level (docs/domain-model.md 2.11), so a role listed by two
+      // contexts is shared between them; contexts with disjoint role sets stay independent.
+      const removableRoles = await prisma.role.findMany({
+        where: {
+          clientId: client.id,
+          ...(context === null ? {} : { key: { in: context.allowedRoles } }),
+        },
         select: { id: true },
       });
       await prisma.$transaction([
@@ -459,7 +613,7 @@ export function createPrismaMemberRepository(
           where: {
             subjectType: 'user',
             subjectId: userId,
-            roleId: { in: clientRoles.map((role) => role.id) },
+            roleId: { in: removableRoles.map((role) => role.id) },
           },
         }),
         prisma.clientMembership.delete({ where: { id: membership.id } }),
@@ -467,21 +621,18 @@ export function createPrismaMemberRepository(
       return 'deleted';
     },
 
-    async replaceRoles(clientId, userId, roleKeys, assignedBy) {
-      const client = await resolveClient(clientId);
-      if (client === null) {
-        return {
-          ok: false,
-          reason: 'client-not-found',
-          detail: `client "${clientId}" does not exist`,
-        };
+    async replaceRoles(clientId, userId, roleKeys, assignedBy, scope?: MemberScope) {
+      const resolved = await resolveScope(clientId, scope);
+      if (!resolved.ok) {
+        return failure(resolved.reason, resolved.detail);
       }
+      const { client, context } = resolved;
       const membership = await prisma.clientMembership.findFirst({
-        where: { clientId: client.id, loginContextId: null, userId },
+        where: { clientId: client.id, loginContextId: context?.id ?? null, userId },
         select: { id: true },
       });
       if (membership === null) {
-        return { ok: false, reason: 'not-found', detail: 'membership does not exist' };
+        return failure('not-found', 'membership does not exist');
       }
 
       const roleCheck = await resolveRoles(clientId, roleKeys);
@@ -489,15 +640,28 @@ export function createPrismaMemberRepository(
         return roleCheck;
       }
 
-      const clientRoles = await prisma.role.findMany({
-        where: { clientId: client.id },
+      if (context !== null) {
+        const denied = roleNotAllowed(roleKeys, context);
+        if (denied !== null) {
+          return denied;
+        }
+      }
+
+      // Replace only the roles this scope governs: a context cannot strip another context's
+      // roles when their `allowed_roles` are disjoint, and the context-less endpoint keeps
+      // its client-wide replacement semantics. Shared role keys stay shared by design.
+      const governedRoles = await prisma.role.findMany({
+        where: {
+          clientId: client.id,
+          ...(context === null ? {} : { key: { in: context.allowedRoles } }),
+        },
         select: { id: true },
       });
       await prisma.assignment.deleteMany({
         where: {
           subjectType: 'user',
           subjectId: userId,
-          roleId: { in: clientRoles.map((role) => role.id) },
+          roleId: { in: governedRoles.map((role) => role.id) },
         },
       });
       await assignRoles(
@@ -506,9 +670,9 @@ export function createPrismaMemberRepository(
         assignedBy,
       );
 
-      const member = await loadMember(client.id, userId);
+      const member = await loadMember(client.id, userId, context);
       return member === null
-        ? { ok: false, reason: 'not-found', detail: 'membership does not exist' }
+        ? failure('not-found', 'membership does not exist')
         : { ok: true, value: member };
     },
 
@@ -548,6 +712,58 @@ export function createPrismaMemberRepository(
         revokedAt: row.revokedAt?.toISOString() ?? null,
         revokeReason: row.revokeReason,
       }));
+    },
+
+    async adminContextScope(clientId: string, userId: string): Promise<ContextAdminScope | null> {
+      const client = await resolveClient(clientId);
+      if (client === null) {
+        return null;
+      }
+      const rows = await prisma.clientMembership.findMany({
+        where: { clientId: client.id, userId, status: 'active' },
+        select: { loginContextId: true, loginContext: { select: { key: true } } },
+      });
+      const memberContexts = new Set(
+        rows
+          .map((row) => row.loginContext?.key)
+          .filter((key): key is string => typeof key === 'string'),
+      );
+      const clientWide = rows.some((row) => row.loginContextId === null);
+
+      // `docs/login-contexts.md` 8 names one role per context. Such a role is context-bound:
+      // being an ordinary member of another context must not extend it, and a client-wide
+      // membership must not widen it either. Administration still requires an active
+      // membership in the named context, so a suspension removes the scope immediately.
+      const at = now();
+      const assignments = await prisma.assignment.findMany({
+        where: {
+          subjectType: 'user',
+          subjectId: userId,
+          scopeType: 'global',
+          OR: [{ expiresAt: null }, { expiresAt: { gt: at } }],
+          role: { clientId: client.id },
+        },
+        select: { role: { select: { key: true } } },
+      });
+      const prefix = `${clientId}:context-admin-`;
+      const adminContexts = new Set(
+        assignments
+          .map((assignment) => assignment.role.key)
+          .filter((key) => key.startsWith(prefix))
+          .map((key) => key.slice(prefix.length)),
+      );
+      if (adminContexts.size > 0) {
+        const narrowed = [...memberContexts].filter((key) => adminContexts.has(key)).sort();
+        return narrowed.length === 0 ? null : narrowed;
+      }
+
+      // No context-admin role: the caller's app-level role decides, and a client-wide
+      // membership administers every context of the app. Context memberships are the only
+      // scope source otherwise.
+      if (clientWide) {
+        return 'all';
+      }
+      return memberContexts.size === 0 ? null : [...memberContexts].sort();
     },
   };
 }
