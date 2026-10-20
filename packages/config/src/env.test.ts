@@ -48,6 +48,7 @@ describe('parseServerEnv', () => {
     const env = parseServerEnv({
       ...minimalEnv,
       NODE_ENV: 'production',
+      CLIENT_SECRET_PEPPER: 'production-client-secret-pepper-value',
       PORT: '8080',
       LOG_LEVEL: 'debug',
       MFE_ALLOWED_ORIGINS: 'https://app-a.example.com, https://app-b.example.com',
@@ -162,6 +163,38 @@ describe('parseServerEnv', () => {
         message: 'must be the base64 encoding of exactly 32 bytes',
       },
     ]);
+  });
+
+  it('requires a client-secret pepper in production and defaults its public id', () => {
+    expect(captureIssues({ ...minimalEnv, NODE_ENV: 'production' })).toEqual([
+      {
+        key: 'CLIENT_SECRET_PEPPER',
+        message: 'is required in production (supply it from KMS/Vault)',
+      },
+    ]);
+
+    const dev = parseServerEnv(minimalEnv);
+    expect(dev.CLIENT_SECRET_PEPPER).toBeUndefined();
+    expect(dev.CLIENT_SECRET_PEPPER_ID).toBe('k1');
+    expect(dev.CLIENT_SECRET_PREVIOUS_PEPPERS).toBeUndefined();
+
+    const configured = parseServerEnv({
+      ...minimalEnv,
+      CLIENT_SECRET_PEPPER: 'production-client-secret-pepper-value',
+      CLIENT_SECRET_PEPPER_ID: 'k7',
+      CLIENT_SECRET_PREVIOUS_PEPPERS: 'k1:previous-client-secret-pepper-value-32',
+    });
+    expect(configured.CLIENT_SECRET_PEPPER_ID).toBe('k7');
+    expect(configured.CLIENT_SECRET_PREVIOUS_PEPPERS).toBe(
+      'k1:previous-client-secret-pepper-value-32',
+    );
+
+    expect(captureIssues({ ...minimalEnv, CLIENT_SECRET_PEPPER: 'short' })[0]?.key).toBe(
+      'CLIENT_SECRET_PEPPER',
+    );
+    expect(captureIssues({ ...minimalEnv, CLIENT_SECRET_PEPPER_ID: 'not valid' })[0]?.key).toBe(
+      'CLIENT_SECRET_PEPPER_ID',
+    );
   });
 
   it('rejects an allowed origin that carries a path', () => {

@@ -6,6 +6,7 @@ import { config as loadEnv } from 'dotenv';
 
 import { PrismaClient } from '../src/generated/prisma/client.js';
 import { hashPassword } from '../src/auth/password.js';
+import { createClientSecretService, loadClientSecretPeppers } from '../src/auth/client-secret.js';
 import { seedDatabase } from '../prisma/seed.js';
 
 /**
@@ -41,6 +42,8 @@ const SSO_REDIRECT_URI = process.env['PERF_SSO_REDIRECT_URI'] ?? 'http://127.0.0
 const DIRECTORY_USERS = Number(process.env['PERF_DIRECTORY_USERS'] ?? 250);
 
 const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: DATABASE_URL }) });
+/** Client secrets use the keyed-HMAC scheme (`src/auth/client-secret.ts`), not Argon2id. */
+const clientSecrets = createClientSecretService(loadClientSecretPeppers(process.env));
 
 async function upsertClient(input: {
   clientId: string;
@@ -73,7 +76,7 @@ async function upsertClient(input: {
     where: { clientId: input.clientId },
     select: { id: true, clientId: true },
   });
-  const secretHash = await hashPassword(input.secret);
+  const secretHash = clientSecrets.hash(input.secret);
   const active = await prisma.clientSecret.findMany({
     where: { clientId: client.id, revokedAt: null },
     select: { id: true, secretHash: true },

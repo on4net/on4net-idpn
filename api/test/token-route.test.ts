@@ -4,6 +4,11 @@ import { describe, expect, it } from 'vitest';
 
 import { hashPassword, type Argon2Params } from '../src/auth/password.js';
 import {
+  createClientSecretService,
+  hashClientSecret,
+  type ClientSecretPeppers,
+} from '../src/auth/client-secret.js';
+import {
   issueAuthorizationCode,
   s256Challenge,
   type AuthorizationCodeRecord,
@@ -23,9 +28,15 @@ import type { AuditEventInput } from '../src/audit/sanitize.js';
 import { ApiMetrics } from '../src/observability/metrics.js';
 
 const FAST: Argon2Params = { memoryCost: 8192, timeCost: 1, parallelism: 1 };
+const peppers: ClientSecretPeppers = {
+  current: { id: 'k1', value: Buffer.from('token-route-test-client-secret-pepper', 'utf8') },
+  previous: [],
+};
+const clientSecrets = createClientSecretService(peppers);
 const verifier = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~';
 const issuer = 'https://auth.example.com';
 const secret = 'super-secret-value';
+const otherSecret = 'another-client-secret-value';
 
 const profile: TokenProfile = {
   id: 'user-1',
@@ -120,7 +131,18 @@ async function buildClients(): Promise<ClientAuthRepository> {
     accessTokenTtl: 600,
     refreshTokenTtl: 2_592_000,
     scopes: ['openid', 'profile', 'offline_access'],
-    secretHashes: [await hashPassword(secret, FAST)],
+    // New scheme: keyed HMAC (docs/client-secret-hashing.md).
+    secretHashes: [hashClientSecret(secret, peppers)],
+  };
+  const secondClient: ClientAuthClientRecord = {
+    clientId: 'other-app',
+    status: 'active',
+    type: 'web',
+    requirePkce: true,
+    accessTokenTtl: 600,
+    refreshTokenTtl: 2_592_000,
+    scopes: ['openid', 'profile', 'offline_access'],
+    secretHashes: [hashClientSecret(otherSecret, peppers)],
   };
   const m2m: ClientAuthClientRecord = {
     clientId: 'service',
@@ -130,10 +152,14 @@ async function buildClients(): Promise<ClientAuthRepository> {
     accessTokenTtl: 600,
     refreshTokenTtl: 2_592_000,
     scopes: ['reports:read'],
+    // Legacy Argon2id row: still verifies through the upgrade path.
     secretHashes: [await hashPassword(secret, FAST)],
   };
   const byId = new Map(
-    [publicClient, confidentialClient, m2m].map((client) => [client.clientId, client]),
+    [publicClient, confidentialClient, secondClient, m2m].map((client) => [
+      client.clientId,
+      client,
+    ]),
   );
 
   return {
@@ -162,6 +188,7 @@ async function harness(options: HarnessOptions = {}) {
   registerTokenRoute(app, {
     issuer,
     clients,
+    clientSecrets,
     codes,
     refreshTokens,
     keys,
@@ -419,6 +446,37 @@ describe('POST /oauth2/token — authorization_code', () => {
       .expect(401);
     expect(wrongSecret.body.error).toBe('invalid_client');
     expect(wrongSecret.headers['www-authenticate']).toContain('Basic');
+    await app.close();
+  });
+
+  it('rejects a secret that belongs to another client', async () => {
+    const { app, codes } = await harness();
+    const code = await seedCode(codes);
+
+    const crossClient = await request(app.server)
+      .post('/oauth2/token')
+      .set('Authorization', `Basic ${Buffer.from(`web-app:${otherSecret}`).toString('base64')}`)
+      .send({
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: 'https://spa.example.com/cb',
+        code_verifier: verifier,
+      })
+      .expect(401);
+    expect(crossClient.body.error).toBe('invalid_client');
+
+    const crossClientPost = await request(app.server)
+      .post('/oauth2/token')
+      .send({
+        grant_type: 'authorization_code',
+        client_id: 'other-app',
+        client_secret: secret,
+        code,
+        redirect_uri: 'https://spa.example.com/cb',
+        code_verifier: verifier,
+      })
+      .expect(401);
+    expect(crossClientPost.body.error).toBe('invalid_client');
     await app.close();
   });
 

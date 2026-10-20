@@ -66,5 +66,24 @@ export function createPrismaClientRepository(
           .map((secret) => secret.secretHash),
       };
     },
+
+    /**
+     * Rewrites a legacy (Argon2id) or rotated-pepper hash in place after a successful
+     * verification. Scoped to the client and to the exact stored hash, so a concurrent
+     * rotation can never overwrite a different row.
+     */
+    async rehashSecret(clientId, previousHash, nextHash): Promise<void> {
+      const client = await prisma.client.findUnique({
+        where: { clientId },
+        select: { id: true },
+      });
+      if (client === null) {
+        return;
+      }
+      await prisma.clientSecret.updateMany({
+        where: { clientId: client.id, secretHash: previousHash, revokedAt: null },
+        data: { secretHash: nextHash },
+      });
+    },
   };
 }

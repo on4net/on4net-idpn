@@ -6,6 +6,7 @@ import { config as loadEnv } from 'dotenv';
 
 import { PrismaClient } from '../src/generated/prisma/client.js';
 import { hashPassword } from '../src/auth/password.js';
+import { createClientSecretService, loadClientSecretPeppers } from '../src/auth/client-secret.js';
 import { seedDatabase } from '../prisma/seed.js';
 
 /**
@@ -82,7 +83,8 @@ async function seedE2eFixtures(prisma: PrismaClient): Promise<void> {
 
   const client = await prisma.client.findUniqueOrThrow({ where: { clientId: E2E_CLIENT_ID } });
 
-  const secretHash = await hashPassword(E2E_CLIENT_SECRET);
+  const clientSecrets = createClientSecretService(loadClientSecretPeppers(process.env));
+  const secretHash = clientSecrets.hash(E2E_CLIENT_SECRET);
   const activeSecrets = await prisma.clientSecret.findMany({
     where: { clientId: client.id, revokedAt: null },
   });

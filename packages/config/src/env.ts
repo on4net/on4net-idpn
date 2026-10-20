@@ -81,7 +81,7 @@ const booleanFlag = (defaultValue: boolean) =>
   }, z.boolean());
 
 /** Variables required by the API/Auth Server process, as documented in docs/architecture.md §5. */
-export const serverEnvSchema = z.object({
+const serverEnvBase = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   HOST: z.string().min(1).default('127.0.0.1'),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
@@ -118,6 +118,28 @@ export const serverEnvSchema = z.object({
   SESSION_MAX_CONCURRENT: z.coerce.number().int().min(0).max(100).default(5),
   /** Optional server-side pepper for Argon2id; supply from KMS/Vault in production. */
   PASSWORD_PEPPER: z.preprocess(emptyToUndefined, z.string().min(32).optional()),
+  /**
+   * Server-side pepper for client-secret hashes (HMAC-SHA-256). Supply it from KMS/Vault: it
+   * must never be stored next to the digests and it is required in production
+   * (docs/client-secret-hashing.md). At least 32 characters.
+   */
+  CLIENT_SECRET_PEPPER: z.preprocess(emptyToUndefined, z.string().min(32).optional()),
+  /**
+   * Public identifier stored with every client-secret hash. Rotate the pepper by setting a
+   * new id here and listing the previous pepper in `CLIENT_SECRET_PREVIOUS_PEPPERS`.
+   */
+  CLIENT_SECRET_PEPPER_ID: z.preprocess(
+    emptyToUndefined,
+    z
+      .string()
+      .regex(/^[A-Za-z0-9_-]{1,16}$/, 'must be 1-16 letters, digits, dash or underscore')
+      .default('k1'),
+  ),
+  /**
+   * Superseded client-secret peppers accepted for verification only, as a comma separated
+   * list of `id:pepper` pairs (each pepper at least 32 characters).
+   */
+  CLIENT_SECRET_PREVIOUS_PEPPERS: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
   ARGON2_MEMORY_KIB: z.coerce.number().int().min(8192).max(1_048_576).default(65_536),
   ARGON2_TIME_COST: z.coerce.number().int().min(1).max(10).default(3),
   ARGON2_PARALLELISM: z.coerce.number().int().min(1).max(8).default(1),
@@ -199,6 +221,21 @@ export const serverEnvSchema = z.object({
    * `idpn_backup_last_success_timestamp_seconds` so the backup-freshness alert can fire.
    */
   BACKUP_STATUS_FILE: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
+});
+
+/**
+ * Validated server configuration. The extra refinement fails closed: production must never
+ * store client secrets under the public development pepper, and the check reports with every
+ * other configuration error at startup.
+ */
+export const serverEnvSchema = serverEnvBase.superRefine((value, ctx) => {
+  if (value.NODE_ENV === 'production' && value.CLIENT_SECRET_PEPPER === undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['CLIENT_SECRET_PEPPER'],
+      message: 'is required in production (supply it from KMS/Vault)',
+    });
+  }
 });
 
 /** Subset embedded in the browser bundle; Vite only exposes `VITE_`-prefixed variables. */

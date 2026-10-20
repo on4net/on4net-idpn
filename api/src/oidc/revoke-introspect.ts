@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
+import type { ClientSecretService } from '../auth/client-secret.js';
 import { registerFormBodyParser } from '../http/form-body.js';
 import {
   authenticateClient,
@@ -12,6 +13,8 @@ import { hashRefreshToken, type RefreshTokenRepository } from './refresh-token.j
 export interface RevokeIntrospectOptions {
   issuer: string;
   clients: ClientAuthRepository;
+  /** Keyed client-secret verifier; defaults to the process environment configuration. */
+  clientSecrets?: ClientSecretService;
   refreshTokens: RefreshTokenRepository;
   keys: SigningKeyManager;
   now?: () => Date;
@@ -63,6 +66,7 @@ export function registerRevokeIntrospectRoutes(
       ...(clientId === undefined ? {} : { clientId }),
       ...(clientSecret === undefined ? {} : { clientSecret }),
       method,
+      ...(options.clientSecrets === undefined ? {} : { clientSecrets: options.clientSecrets }),
     });
     if (!auth.ok) {
       noStore(reply).code(401).send({ error: 'invalid_client' });

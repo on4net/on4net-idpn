@@ -9,6 +9,7 @@ import { createPrismaAccountTokenStore } from './account/prisma-token-repository
 import { createMailer } from './mail/index.js';
 import { createRedisRateLimiter } from './http/rate-limit.js';
 import { loadApiEnv } from './config/env.js';
+import { createClientSecretService, loadClientSecretPeppers } from './auth/client-secret.js';
 import { createPrismaAdminAudit } from './admin/prisma-audit.js';
 import { createPrismaPasswordStore } from './audit/prisma-audit.js';
 import { createPrismaAdminClientRepository } from './admin/clients/prisma-client-repository.js';
@@ -157,6 +158,13 @@ const sessions = new RedisSessionStore({
 });
 
 const clientsRepository = createPrismaClientRepository(prisma);
+/**
+ * Client secrets are stored as a keyed HMAC-SHA-256 (`docs/client-secret-hashing.md`), not
+ * Argon2id: they are 256-bit machine-generated values, so a memory-hard hash only made every
+ * `/token` request pay ~120ms. Production refuses to start without `CLIENT_SECRET_PEPPER`;
+ * the public pepper id supports rotation while previous peppers keep verifying.
+ */
+const clientSecrets = createClientSecretService(loadClientSecretPeppers(env));
 const adminTranslationsRepository = createPrismaAdminTranslationRepository(prisma);
 const publicTranslationsRepository = createPrismaPublicTranslationRepository(prisma);
 const translationBundleCache = createRedisBundleCache(redis);
@@ -296,6 +304,7 @@ const app = buildServer({
     : {}),
   token: {
     clients: clientsRepository,
+    clientSecrets,
     codes: createPrismaCodeRepository(prisma),
     refreshTokens: createPrismaRefreshTokenRepository(prisma),
     users: usersRepository,
@@ -384,6 +393,7 @@ const app = buildServer({
     adminClientId: env.ADMIN_CLIENT_ID,
     permissions: permissionReader,
     clients: createPrismaAdminClientRepository(prisma),
+    clientSecrets,
     audit: createPrismaAdminAudit(prisma),
   },
   adminTranslations: {

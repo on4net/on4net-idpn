@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 
-import { hashPassword } from '../../auth/password.js';
+import { defaultClientSecretService, type ClientSecretService } from '../../auth/client-secret.js';
 import { sendProblem } from '../routes.js';
 import {
   authorizeAdminRequest,
@@ -36,7 +36,8 @@ export interface ClientRoutesOptions {
   permissions: PermissionReader;
   clients: AdminClientRepository;
   audit: AdminAudit;
-  hashPassword?: (plain: string) => Promise<string>;
+  /** Keyed client-secret hasher; defaults to the process environment configuration. */
+  clientSecrets?: ClientSecretService;
   generateSecret?: () => string;
   now?: () => Date;
 }
@@ -114,7 +115,7 @@ export function registerClientAdminRoutes(
   options: ClientRoutesOptions,
 ): void {
   const now = options.now ?? (() => new Date());
-  const hash = options.hashPassword ?? ((plain: string) => hashPassword(plain));
+  const clientSecrets = options.clientSecrets ?? defaultClientSecretService();
   const generateSecret = options.generateSecret ?? defaultGenerateSecret;
 
   const guard = async (
@@ -249,7 +250,7 @@ export function registerClientAdminRoutes(
     if (body.type !== 'spa' && body.type !== 'mobile') {
       clientSecret = generateSecret();
       await options.clients.addSecret(created.clientId, {
-        secretHash: await hash(clientSecret),
+        secretHash: clientSecrets.hash(clientSecret),
         prefix: clientSecret.slice(0, 12),
         expiresAt: null,
       });
@@ -399,7 +400,7 @@ export function registerClientAdminRoutes(
       const expiresAt =
         parsed.data.expiresAt === undefined ? null : new Date(parsed.data.expiresAt);
       const created = await options.clients.addSecret(existing.clientId, {
-        secretHash: await hash(secret),
+        secretHash: clientSecrets.hash(secret),
         prefix: secret.slice(0, 12),
         expiresAt,
       });

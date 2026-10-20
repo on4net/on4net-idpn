@@ -2,7 +2,11 @@ import Fastify from 'fastify';
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 
-import { hashPassword, type Argon2Params } from '../src/auth/password.js';
+import {
+  createClientSecretService,
+  hashClientSecret,
+  type ClientSecretPeppers,
+} from '../src/auth/client-secret.js';
 import type { ClientAuthClientRecord, ClientAuthRepository } from '../src/oidc/client-auth.js';
 import { MemorySigningKeyRepository, SigningKeyManager } from '../src/oidc/keys.js';
 import {
@@ -12,9 +16,13 @@ import {
 } from '../src/oidc/refresh-token.js';
 import { registerRevokeIntrospectRoutes } from '../src/oidc/revoke-introspect.js';
 
-const FAST: Argon2Params = { memoryCost: 8192, timeCost: 1, parallelism: 1 };
 const issuer = 'https://auth.example.com';
 const secret = 'super-secret-value';
+const peppers: ClientSecretPeppers = {
+  current: { id: 'k1', value: Buffer.from('revoke-test-client-secret-pepper!!', 'utf8') },
+  previous: [],
+};
+const clientSecrets = createClientSecretService(peppers);
 
 function memoryRefreshTokens() {
   const records = new Map<string, RefreshTokenRecord>();
@@ -68,7 +76,7 @@ async function harness() {
     accessTokenTtl: 600,
     refreshTokenTtl: 2_592_000,
     scopes: ['openid', 'offline_access', 'reports:read'],
-    secretHashes: [await hashPassword(secret, FAST)],
+    secretHashes: [hashClientSecret(secret, peppers)],
   };
   const clients: ClientAuthRepository = {
     async findForAuth(clientId) {
@@ -79,6 +87,7 @@ async function harness() {
   registerRevokeIntrospectRoutes(app, {
     issuer,
     clients,
+    clientSecrets,
     refreshTokens,
     keys,
     now: () => new Date('2026-10-18T12:00:00Z'),

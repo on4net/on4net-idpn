@@ -180,6 +180,9 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
       keys,
       clients: options.token.clients,
       refreshTokens: options.token.refreshTokens,
+      ...(options.token.clientSecrets === undefined
+        ? {}
+        : { clientSecrets: options.token.clientSecrets }),
       ...(options.token.now === undefined ? {} : { now: options.token.now }),
     });
 

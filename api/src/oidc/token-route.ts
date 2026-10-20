@@ -5,6 +5,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { AuditEventInput } from '../audit/sanitize.js';
 import { registerFormBodyParser } from '../http/form-body.js';
 import type { IdpSession } from '../session/types.js';
+import type { ClientSecretService } from '../auth/client-secret.js';
 import {
   exchangeAuthorizationCode,
   type AuthorizationCodeRecord,
@@ -41,6 +42,8 @@ import type { EffectiveAccess, EffectiveAccessSource } from './effective-access.
 export interface TokenRouteOptions {
   issuer: string;
   clients: ClientAuthRepository;
+  /** Keyed client-secret verifier; defaults to the process environment configuration. */
+  clientSecrets?: ClientSecretService;
   codes: AuthorizationCodeRepository;
   refreshTokens: RefreshTokenRepository;
   users: UserProfileRepository;
@@ -128,6 +131,7 @@ export function registerTokenRoute(app: FastifyInstance, options: TokenRouteOpti
       ...(clientId === undefined ? {} : { clientId }),
       ...(clientSecret === undefined ? {} : { clientSecret }),
       method,
+      ...(options.clientSecrets === undefined ? {} : { clientSecrets: options.clientSecrets }),
     });
 
     if (!auth.ok) {
