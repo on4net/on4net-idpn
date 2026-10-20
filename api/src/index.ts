@@ -1,4 +1,5 @@
 import { PrismaPg } from '@prisma/adapter-pg';
+import type { FastifyBaseLogger } from 'fastify';
 import { Redis } from 'ioredis';
 
 import { createPrismaAccountProfileRepository } from './account/prisma-account-repository.js';
@@ -27,6 +28,7 @@ import { GoogleSocialAdapter } from './social/google.js';
 import { createPrismaEffectiveAccessSource } from './oidc/effective-access.js';
 import {
   BackchannelLogoutDispatcher,
+  BACKCHANNEL_LOGOUT_QUEUE_KEY,
   FetchBackchannelLogoutSender,
   RedisBackchannelLogoutQueue,
 } from './oidc/backchannel-logout.js';
@@ -58,6 +60,10 @@ import { SimpleWebauthnLibrary } from './mfa/webauthn-library.js';
 import { resolveWebauthnConfig } from './mfa/webauthn.js';
 import { verifyPassword } from './auth/password.js';
 import { buildServer } from './server.js';
+import { readBackupStatus } from './observability/backup-status.js';
+import { DependencyMonitor } from './observability/health.js';
+import { sanitizeLogMessage } from './observability/logging.js';
+import { ApiMetrics } from './observability/metrics.js';
 import { createPrismaSessionRevocationHook } from './session/prisma-revocation.js';
 import { RedisSessionCache } from './session/redis-cache.js';
 import { RedisSessionStore } from './session/store.js';
@@ -66,6 +72,59 @@ const env = loadApiEnv();
 
 const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: env.DATABASE_URL }) });
 const redis = new Redis(env.REDIS_URL, { maxRetriesPerRequest: 3 });
+
+/**
+ * Operational metrics and readiness (docs/monitoring.md). Metrics are in-process counters;
+ * the expensive gauges (dependency probes, session count, key age, queue depth) are only
+ * collected during a scrape so request handling stays unaffected.
+ */
+const metrics = new ApiMetrics();
+const dependencyMonitor = new DependencyMonitor({
+  probes: [
+    {
+      name: 'postgres',
+      check: async () => {
+        await prisma.$queryRaw`SELECT 1`;
+      },
+    },
+    {
+      name: 'redis',
+      check: async () => {
+        const reply = await redis.ping();
+        if (reply !== 'PONG') {
+          throw new Error(`unexpected PING reply: ${reply}`);
+        }
+      },
+    },
+  ],
+});
+
+/**
+ * Startup code (signing keys, back-channel queue) runs before the Fastify logger exists, so
+ * these helpers buffer on the console until `appLogger` is assigned and are structured
+ * afterwards. Neither helper receives token or secret material.
+ */
+const loggerRef: { current?: FastifyBaseLogger } = {};
+const logWarning = (context: Record<string, unknown>, message: string): void => {
+  if (loggerRef.current === undefined) {
+    console.warn(message);
+    return;
+  }
+  loggerRef.current.warn(context, message);
+};
+const logError = (context: Record<string, unknown>, message: string): void => {
+  if (loggerRef.current === undefined) {
+    console.error(message);
+    return;
+  }
+  loggerRef.current.error(context, message);
+};
+
+// Without a listener ioredis prints "Unhandled error event" for every reconnect attempt.
+// A structured, sanitized line keeps a Redis outage visible without flooding plain text.
+redis.on('error', (error: unknown) => {
+  logError({ component: 'redis' }, `redis error: ${sanitizeLogMessage(error)}`);
+});
 
 // Development key store (git-ignored). Production points SIGNING_KEY_REF at KMS/Vault.
 // When scheduled rotation is disabled the health flag still reports a rotation after the
@@ -80,7 +139,7 @@ const keys = new SigningKeyManager(
         ? env.KEY_ROTATION_INTERVAL_DAYS
         : DEFAULT_ROTATION_DUE_DAYS,
     keyCacheTtlSeconds: env.KEY_CACHE_TTL_SECONDS,
-    onWarning: (message) => console.warn(`signing key: ${message}`),
+    onWarning: (message) => logWarning({ component: 'signing-key' }, message),
   },
 );
 await keys.ensureKey();
@@ -197,10 +256,13 @@ const backchannelLogout = new BackchannelLogoutDispatcher({
   }),
   sender: new FetchBackchannelLogoutSender(),
   queue: new RedisBackchannelLogoutQueue(redis),
+  onDelivery: (delivery) => metrics.recordBackchannelDelivery(delivery.status),
   onError: (error, context) => {
-    // Never log token material, only the client and the phase that failed.
-    const reason = error instanceof Error ? error.message : 'unknown error';
-    console.error(`back-channel logout ${context.phase} failed for ${context.clientId}: ${reason}`);
+    // Never log token material, only the client, the phase and a sanitized reason.
+    logError(
+      { component: 'backchannel-logout', clientId: context.clientId, phase: context.phase },
+      `back-channel logout failed: ${sanitizeLogMessage(error)}`,
+    );
   },
 });
 
@@ -221,6 +283,17 @@ const loginContextAccess = createPrismaLoginContextAccessSource(prisma);
 const app = buildServer({
   issuer: env.APP_URL,
   keys,
+  logLevel: env.LOG_LEVEL,
+  readiness: dependencyMonitor,
+  ...(env.METRICS_ENABLED
+    ? {
+        metrics: {
+          metrics,
+          collect: collectGaugeMetrics,
+          ...(env.METRICS_TOKEN === undefined ? {} : { token: env.METRICS_TOKEN }),
+        },
+      }
+    : {}),
   token: {
     clients: clientsRepository,
     codes: createPrismaCodeRepository(prisma),
@@ -230,6 +303,8 @@ const app = buildServer({
     isClientAdminEligible,
     access: effectiveAccess,
     contextAccess: loginContextAccess,
+    metrics,
+    audit: createPrismaAdminAudit(prisma),
   },
   userInfo: { users: usersRepository, access: effectiveAccess },
   authorize: {
@@ -394,6 +469,71 @@ const app = buildServer({
   },
 });
 
+loggerRef.current = app.log;
+
+/**
+ * Gauge collection for `/metrics`. Each source is isolated: one failing collector increments
+ * `idpn_metrics_collector_errors_total` and leaves the other gauges intact, so a degraded
+ * database does not blank the whole dashboard.
+ */
+async function collectGaugeMetrics(): Promise<void> {
+  const readiness = await dependencyMonitor.check();
+  for (const check of readiness.checks) {
+    metrics.dependencyUp.set({ service: check.name }, check.status === 'ok' ? 1 : 0);
+  }
+
+  try {
+    const health = await keys.inspect();
+    if (health.activeKey !== null) {
+      metrics.signingKeyAgeDays.set({}, health.activeKey.ageDays);
+    }
+    metrics.signingKeyRotationDue.set({}, health.rotationDue ? 1 : 0);
+  } catch (error) {
+    metrics.recordCollectorError('signing_key');
+    logWarning(
+      { component: 'metrics', collector: 'signing_key', error: sanitizeLogMessage(error) },
+      'collector failed',
+    );
+  }
+
+  try {
+    const at = new Date();
+    const active = await prisma.session.count({
+      where: { revokedAt: null, idleExpiresAt: { gt: at }, absoluteExpiresAt: { gt: at } },
+    });
+    metrics.activeSessions.set({}, active);
+  } catch (error) {
+    metrics.recordCollectorError('active_sessions');
+    logWarning(
+      { component: 'metrics', collector: 'active_sessions', error: sanitizeLogMessage(error) },
+      'collector failed',
+    );
+  }
+
+  try {
+    metrics.backchannelQueueDepth.set({}, await redis.llen(BACKCHANNEL_LOGOUT_QUEUE_KEY));
+  } catch (error) {
+    metrics.recordCollectorError('backchannel_queue');
+    logWarning(
+      { component: 'metrics', collector: 'backchannel_queue', error: sanitizeLogMessage(error) },
+      'collector failed',
+    );
+  }
+
+  try {
+    const backup = await readBackupStatus(env.BACKUP_STATUS_FILE);
+    if (backup !== null) {
+      metrics.backupLastSuccess.set({}, Math.floor(backup.lastSuccessAt.getTime() / 1000));
+    }
+  } catch (error) {
+    metrics.recordCollectorError('backup_status');
+    logWarning(
+      { component: 'metrics', collector: 'backup_status', error: sanitizeLogMessage(error) },
+      'collector failed',
+    );
+  }
+}
+
 /**
  * Scheduled rotation (docs/architecture.md 5). `KEY_ROTATION_INTERVAL_DAYS=0` disables it;
  * the scheduler never starts in a test build, and index.ts is the only place that starts
@@ -417,12 +557,16 @@ const keyRotationScheduler = new KeyRotationScheduler({
         trigger: 'scheduled',
       },
     });
-    console.log(
-      `signing key rotated: active=${result.active.kid} previous=${result.previousKid ?? 'none'}`,
+    app.log.info(
+      { component: 'signing-key', kid: result.active.kid, previousKid: result.previousKid },
+      'signing key rotated',
     );
   },
   onError: (error) => {
-    console.error(`signing key rotation failed: ${error.message}`);
+    logError(
+      { component: 'signing-key' },
+      `signing key rotation failed: ${sanitizeLogMessage(error)}`,
+    );
   },
 });
 keyRotationScheduler.start();
@@ -439,4 +583,12 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
 }
 
 await app.listen({ port: env.PORT, host: env.HOST });
-console.log(`on4net IDPN API listening on http://${env.HOST}:${env.PORT}`);
+app.log.info(
+  {
+    host: env.HOST,
+    port: env.PORT,
+    metrics: env.METRICS_ENABLED,
+    readiness: true,
+  },
+  'on4net IDPN API listening',
+);

@@ -19,7 +19,9 @@
     "db:seed:perf": "tsx --env-file-if-exists=../.env scripts/seed-perf.ts",
     "seed:e2e": "tsx --env-file-if-exists=../.env scripts/seed-e2e.ts",
     "onboard:client": "tsx --env-file-if-exists=../.env scripts/onboard-client.ts",
-    "import:users": "tsx --env-file-if-exists=../.env scripts/import-users.ts"
+    "import:users": "tsx --env-file-if-exists=../.env scripts/import-users.ts",
+    "ops:backup": "tsx scripts/ops/backup.ts",
+    "ops:restore": "tsx scripts/ops/restore.ts"
   },
   "dependencies": {
     "@idpn/config": "workspace:*",

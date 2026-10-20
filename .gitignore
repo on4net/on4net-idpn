@@ -40,3 +40,6 @@ artifacts/
 *.log
 .DS_Store
 Thumbs.db
+
+# Operational backups and restore drills contain production PII: never commit them.
+backups/

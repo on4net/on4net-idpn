@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { healthResponseSchema, type HealthResponse } from '@idpn/contracts';
 import Fastify, { type FastifyInstance } from 'fastify';
 
@@ -44,8 +46,24 @@ import { registerSocialLoginRoutes } from './social/routes.js';
 import type { TokenRouteOptions } from './oidc/token-route.js';
 import { registerTokenRoute } from './oidc/token-route.js';
 import { registerUserInfoRoute } from './oidc/userinfo-route.js';
+import type { DependencyMonitor } from './observability/health.js';
+import { sanitizeRequestId, buildLoggerOptions } from './observability/logging.js';
+import {
+  registerHttpMetrics,
+  registerMetricsRoute,
+  registerReadinessRoute,
+  type MetricsRouteOptions,
+} from './observability/routes.js';
+
+export type LogLevel = 'fatal' | 'error' | 'warn' | 'info' | 'debug' | 'trace' | 'silent';
 
 export interface BuildServerOptions {
+  /** Structured JSON logging level; omitted keeps the logger disabled (tests stay quiet). */
+  logLevel?: LogLevel;
+  /** Mounts `GET /metrics` (docs/monitoring.md); opt-in and internal-only. */
+  metrics?: MetricsRouteOptions;
+  /** Mounts `GET /readyz` with the given dependency probes. */
+  readiness?: DependencyMonitor;
   /** Public issuer URL; defaults to a local development value. */
   issuer?: string;
   keys?: SigningKeyManager;
@@ -119,7 +137,10 @@ export interface BuildServerOptions {
  * stage; the remaining OIDC and Admin API routes are mounted here as they are implemented.
  */
 export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
-  const app = Fastify({ logger: false });
+  const app = Fastify({
+    logger: options.logLevel === undefined ? false : buildLoggerOptions(options.logLevel),
+    genReqId: (request) => sanitizeRequestId(request.headers['x-request-id']) ?? randomUUID(),
+  });
   const issuer = options.issuer ?? 'http://127.0.0.1:3000';
   const keys = options.keys ?? new SigningKeyManager(new MemorySigningKeyRepository());
 
@@ -127,12 +148,21 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   // revocation endpoints; the JSON body stays supported for first-party callers.
   registerFormBodyParser(app);
 
+  if (options.metrics !== undefined) {
+    registerHttpMetrics(app, { metrics: options.metrics.metrics });
+    registerMetricsRoute(app, options.metrics);
+  }
+  if (options.readiness !== undefined) {
+    registerReadinessRoute(app, options.readiness);
+  }
+
   // Baseline response hardening: no content sniffing and no referrer leakage. The Hosted UI
   // sets its own CSP/HSTS at the edge (`docs/security.md` 12); these headers are safe for
   // JSON and redirect responses alike.
-  app.addHook('onSend', async (_request, reply, payload) => {
+  app.addHook('onSend', async (request, reply, payload) => {
     reply.header('X-Content-Type-Options', 'nosniff');
     reply.header('Referrer-Policy', 'no-referrer');
+    reply.header('X-Request-Id', request.id);
     return payload;
   });
 

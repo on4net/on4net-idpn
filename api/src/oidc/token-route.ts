@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
+import type { AuditEventInput } from '../audit/sanitize.js';
 import { registerFormBodyParser } from '../http/form-body.js';
 import type { IdpSession } from '../session/types.js';
 import {
@@ -65,7 +66,16 @@ export interface TokenRouteOptions {
    * for it is still active; otherwise no token is issued. A missing source fails closed.
    */
   contextAccess?: LoginContextAccessSource;
+  /** Observability sink for outcomes that are not visible from the HTTP response. */
+  metrics?: TokenMetricsSink;
+  /** Audit sink; used for `token.refresh.reuse_detected` (docs/security.md 9.1). */
+  audit?: { record(event: AuditEventInput): Promise<void> };
   now?: () => Date;
+}
+
+/** Minimal observability contract so this module does not depend on the metrics registry. */
+export interface TokenMetricsSink {
+  recordRefreshReuse(): void;
 }
 
 const CLIENT_ADMIN_SCOPE = 'idp.client-admin';
@@ -259,6 +269,29 @@ async function refreshTokenGrant(
 
   if (!rotation.ok) {
     // Reuse revokes the whole family inside rotateRefreshToken; the client only sees invalid_grant.
+    if (rotation.reason === 'reuse_detected') {
+      options.metrics?.recordRefreshReuse();
+      // The presenter of a reused token is unauthenticated; record the client and the fact
+      // without the token itself. An audit failure must not change the OAuth response.
+      if (options.audit !== undefined) {
+        try {
+          await options.audit.record({
+            actorType: 'anonymous',
+            action: 'token.refresh.reuse_detected',
+            targetType: 'refresh_token',
+            targetId: null,
+            clientId: client.clientId,
+            result: 'failure',
+            metadata: {
+              reason: 'reuse_detected',
+              revokedFamily: rotation.revokedFamily,
+            },
+          });
+        } catch {
+          // Never turn an audit write failure into a different OAuth error.
+        }
+      }
+    }
     return tokenError(reply, oauthError('invalid_grant', 'refresh token is not valid'));
   }
 

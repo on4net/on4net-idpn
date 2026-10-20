@@ -62,6 +62,24 @@ const csv = (item: z.ZodType<string, string>) =>
     })
     .pipe(z.array(item));
 
+/**
+ * Explicit boolean parsing: `z.coerce.boolean()` treats the string `"false"` as true, which
+ * would silently enable an operational switch (for example the metrics endpoint).
+ */
+const booleanFlag = (defaultValue: boolean) =>
+  z.preprocess((value) => {
+    if (value === undefined || value === '') {
+      return defaultValue;
+    }
+    if (value === true || value === 'true' || value === '1') {
+      return true;
+    }
+    if (value === false || value === 'false' || value === '0') {
+      return false;
+    }
+    return value;
+  }, z.boolean());
+
 /** Variables required by the API/Auth Server process, as documented in docs/architecture.md §5. */
 export const serverEnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -166,6 +184,21 @@ export const serverEnvSchema = z.object({
   MAIL_FROM: z.preprocess(emptyToUndefined, z.string().email().default('no-reply@on4net.dev')),
   TRUSTED_PROXY_CIDRS: csv(z.string().min(1)).default([]),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
+  /**
+   * Enables the internal Prometheus endpoint (`GET /metrics`, docs/monitoring.md). Keep it
+   * disabled unless the instance is reachable only from the metrics network.
+   */
+  METRICS_ENABLED: booleanFlag(false),
+  /**
+   * Optional bearer token required by `/metrics`. Supply it from KMS/Vault in production;
+   * an empty value relies on network isolation instead.
+   */
+  METRICS_TOKEN: z.preprocess(emptyToUndefined, z.string().min(16).optional()),
+  /**
+   * JSON status file written by `scripts/ops/backup.ts`; the API exposes its timestamp as
+   * `idpn_backup_last_success_timestamp_seconds` so the backup-freshness alert can fire.
+   */
+  BACKUP_STATUS_FILE: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
 });
 
 /** Subset embedded in the browser bundle; Vite only exposes `VITE_`-prefixed variables. */

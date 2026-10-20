@@ -1,0 +1,38 @@
+# Prometheus configuration for the on4net IDPN API (docs/monitoring.md).
+#
+# Local:  docker compose -f deploy/observability/compose.observability.yaml up -d
+# The API is scraped through the Docker host alias, so the API keeps binding 127.0.0.1.
+#
+# Production: scrape the internal service address (never the public ingress) and keep
+# `/metrics` behind a network policy or METRICS_TOKEN. Do not add the public hostname here.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    environment: local
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ['127.0.0.1:9090']
+
+  - job_name: idpn-api
+    metrics_path: /metrics
+    scheme: http
+    static_configs:
+      - targets: ['host.docker.internal:3000']
+        labels:
+          service: on4net-idpn-api
+          environment: local
+
+  # Optional: node_exporter for the disk alerts. Enable the `node-exporter` profile in
+  # compose.observability.yaml on a Linux host (Docker Desktop cannot mount the host root).
+  - job_name: node
+    static_configs:
+      - targets: ['node-exporter:9100']
+        labels:
+          environment: local

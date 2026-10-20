@@ -1,0 +1,170 @@
+# Alert rules for the on4net IDPN API (docs/monitoring.md, docs/runbooks/incidents.md).
+#
+# Validate:
+#   docker run --rm -v "$PWD/deploy/observability/prometheus:/rules:ro" \
+#     --entrypoint promtool prom/prometheus:v3.1.0 check rules /rules/alerts.yml
+# Test that the rules actually fire:
+#   docker run --rm -v "$PWD/deploy/observability/prometheus:/rules:ro" \
+#     --entrypoint promtool prom/prometheus:v3.1.0 test rules /rules/alerts.test.yaml
+groups:
+  - name: idpn-availability
+    rules:
+      - alert: IdpnApiUnavailable
+        expr: up{job="idpn-api"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          team: idpn
+        annotations:
+          summary: 'IDPN API is not answering Prometheus scrapes'
+          runbook: 'docs/runbooks/incidents.md#2-api-down-or-unavailable'
+
+      - alert: IdpnApiErrorRateHigh
+        expr: |
+          sum(rate(idpn_http_requests_total{job="idpn-api",status=~"5.."}[5m]))
+            /
+          clamp_min(sum(rate(idpn_http_requests_total{job="idpn-api"}[5m])), 0.001)
+            > 0.02
+        for: 5m
+        labels:
+          severity: warning
+          team: idpn
+        annotations:
+          summary: 'IDPN API 5xx rate is above 2% for 5 minutes'
+          runbook: 'docs/runbooks/incidents.md#3-elevated-error-rate'
+
+      - alert: IdpnApiLatencyP95High
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(idpn_http_request_duration_seconds_bucket{job="idpn-api"}[5m]))
+          ) > 0.3
+        for: 10m
+        labels:
+          severity: warning
+          team: idpn
+        annotations:
+          summary: 'IDPN API p95 latency is above 300ms for 10 minutes'
+          runbook: 'docs/runbooks/incidents.md#31-latency-regression'
+
+      - alert: IdpnDependencyDown
+        expr: idpn_dependency_up{job="idpn-api"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          team: idpn
+        annotations:
+          summary: 'IDPN dependency {{ $labels.service }} is down'
+          runbook: 'docs/runbooks/incidents.md#4-dependency-down-postgresql-or-redis'
+
+  - name: idpn-authentication
+    rules:
+      - alert: IdpnAuthFailureSpike
+        expr: sum(rate(idpn_auth_failures_total{job="idpn-api"}[5m])) > 5
+        for: 5m
+        labels:
+          severity: warning
+          team: idpn
+        annotations:
+          summary: 'Authentication failures above 5/s for 5 minutes'
+          runbook: 'docs/runbooks/incidents.md#5-brute-force-or-credential-stuffing'
+
+      - alert: IdpnRefreshTokenReuseDetected
+        expr: increase(idpn_refresh_token_reuse_detected_total{job="idpn-api"}[5m]) > 0
+        labels:
+          severity: critical
+          team: idpn
+        annotations:
+          summary: 'A rotated refresh token was presented again; the family was revoked'
+          runbook: 'docs/runbooks/incidents.md#6-refresh-token-reuse'
+
+      - alert: IdpnSigningKeyRotationDue
+        expr: idpn_signing_key_rotation_due{job="idpn-api"} == 1
+        for: 1h
+        labels:
+          severity: warning
+          team: idpn
+        annotations:
+          summary: 'The active signing key passed its rotation threshold'
+          runbook: 'docs/runbooks/incidents.md#7-signing-key-rotation'
+
+      - alert: IdpnSigningKeyTooOld
+        expr: idpn_signing_key_age_days{job="idpn-api"} > 90
+        for: 1h
+        labels:
+          severity: warning
+          team: idpn
+        annotations:
+          summary: 'The active signing key is older than 90 days'
+          runbook: 'docs/runbooks/incidents.md#7-signing-key-rotation'
+
+  - name: idpn-backchannel
+    rules:
+      - alert: IdpnBackchannelQueueBacklog
+        expr: idpn_backchannel_queue_depth{job="idpn-api"} > 100
+        for: 10m
+        labels:
+          severity: warning
+          team: idpn
+        annotations:
+          summary: 'Back-channel logout queue has more than 100 pending entries'
+          runbook: 'docs/runbooks/incidents.md#8-back-channel-logout-backlog'
+
+      - alert: IdpnBackchannelDeliveryFailures
+        expr: sum(rate(idpn_backchannel_logout_total{job="idpn-api",status="failed"}[10m])) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+          team: idpn
+        annotations:
+          summary: 'Back-channel logout deliveries keep failing'
+          runbook: 'docs/runbooks/incidents.md#8-back-channel-logout-backlog'
+
+  - name: idpn-backup
+    rules:
+      - alert: IdpnBackupStale
+        expr: max by (job) (time() - idpn_backup_last_success_timestamp_seconds{job="idpn-api"}) > 36 * 3600
+        for: 10m
+        labels:
+          severity: critical
+          team: idpn
+        annotations:
+          summary: 'No successful backup for more than 36 hours (RPO 15 minutes)'
+          runbook: 'docs/runbooks/incidents.md#9-backup-failure'
+
+      - alert: IdpnBackupMetricMissing
+        expr: absent(idpn_backup_last_success_timestamp_seconds{job="idpn-api"})
+        for: 6h
+        labels:
+          severity: warning
+          team: idpn
+        annotations:
+          summary: 'The API exposes no backup freshness metric (BACKUP_STATUS_FILE)'
+          runbook: 'docs/runbooks/incidents.md#9-backup-failure'
+
+  - name: idpn-capacity
+    rules:
+      - alert: IdpnDiskSpaceLow
+        expr: |
+          (
+            node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay"}
+              /
+            node_filesystem_size_bytes{mountpoint="/",fstype!~"tmpfs|overlay"}
+          ) < 0.15
+        for: 15m
+        labels:
+          severity: warning
+          team: idpn
+        annotations:
+          summary: 'Less than 15% disk space left on {{ $labels.instance }}'
+          runbook: 'docs/runbooks/incidents.md#10-disk-space'
+
+      - alert: IdpnDiskWillFillSoon
+        expr: predict_linear(node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay"}[6h], 4 * 3600) < 0
+        for: 30m
+        labels:
+          severity: warning
+          team: idpn
+        annotations:
+          summary: 'Disk on {{ $labels.instance }} is predicted to fill within 4 hours'
+          runbook: 'docs/runbooks/incidents.md#10-disk-space'

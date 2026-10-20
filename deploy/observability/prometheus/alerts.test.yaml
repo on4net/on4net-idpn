@@ -1,0 +1,224 @@
+# promtool rule unit tests: these prove that each alert actually fires on the documented
+# condition (docs/monitoring.md). Run with:
+#   docker run --rm -v "$PWD/deploy/observability/prometheus:/rules:ro" \
+#     --entrypoint promtool prom/prometheus:v3.1.0 test rules /rules/alerts.test.yaml
+rule_files:
+  - alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: API unavailable fires
+    interval: 1m
+    input_series:
+      - series: 'up{job="idpn-api",instance="host.docker.internal:3000"}'
+        values: '0x10'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: IdpnApiUnavailable
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              team: idpn
+              job: idpn-api
+              instance: host.docker.internal:3000
+            exp_annotations:
+              summary: 'IDPN API is not answering Prometheus scrapes'
+              runbook: 'docs/runbooks/incidents.md#2-api-down-or-unavailable'
+
+  - name: error rate above 2 percent fires
+    interval: 1m
+    input_series:
+      - series: 'idpn_http_requests_total{job="idpn-api",method="GET",route="/oauth2/token",status="200"}'
+        values: '0+100x20'
+      - series: 'idpn_http_requests_total{job="idpn-api",method="GET",route="/oauth2/token",status="500"}'
+        values: '0+10x20'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: IdpnApiErrorRateHigh
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: idpn
+            exp_annotations:
+              summary: 'IDPN API 5xx rate is above 2% for 5 minutes'
+              runbook: 'docs/runbooks/incidents.md#3-elevated-error-rate'
+
+  - name: p95 latency above 300ms fires
+    interval: 1m
+    input_series:
+      - series: 'idpn_http_request_duration_seconds_bucket{job="idpn-api",method="GET",route="/oauth2/token",le="0.3"}'
+        values: '0+0x25'
+      - series: 'idpn_http_request_duration_seconds_bucket{job="idpn-api",method="GET",route="/oauth2/token",le="1"}'
+        values: '0+10x25'
+      - series: 'idpn_http_request_duration_seconds_bucket{job="idpn-api",method="GET",route="/oauth2/token",le="+Inf"}'
+        values: '0+10x25'
+      - series: 'idpn_http_request_duration_seconds_sum{job="idpn-api",method="GET",route="/oauth2/token"}'
+        values: '0+5000x25'
+      - series: 'idpn_http_request_duration_seconds_count{job="idpn-api",method="GET",route="/oauth2/token"}'
+        values: '0+10x25'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: IdpnApiLatencyP95High
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: idpn
+            exp_annotations:
+              summary: 'IDPN API p95 latency is above 300ms for 10 minutes'
+              runbook: 'docs/runbooks/incidents.md#31-latency-regression'
+
+  - name: dependency down fires per dependency
+    interval: 1m
+    input_series:
+      - series: 'idpn_dependency_up{job="idpn-api",service="postgres"}'
+        values: '1x2 0x8'
+      - series: 'idpn_dependency_up{job="idpn-api",service="redis"}'
+        values: '1x10'
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: IdpnDependencyDown
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              team: idpn
+              job: idpn-api
+              service: postgres
+            exp_annotations:
+              summary: 'IDPN dependency postgres is down'
+              runbook: 'docs/runbooks/incidents.md#4-dependency-down-postgresql-or-redis'
+
+  - name: authentication failure spike fires
+    interval: 1m
+    input_series:
+      - series: 'idpn_auth_failures_total{job="idpn-api",route="/oauth2/token",reason="invalid_client"}'
+        values: '0+600x20'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: IdpnAuthFailureSpike
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: idpn
+            exp_annotations:
+              summary: 'Authentication failures above 5/s for 5 minutes'
+              runbook: 'docs/runbooks/incidents.md#5-brute-force-or-credential-stuffing'
+
+  - name: refresh token reuse fires immediately
+    interval: 1m
+    input_series:
+      - series: 'idpn_refresh_token_reuse_detected_total{job="idpn-api"}'
+        values: '0+1x10'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: IdpnRefreshTokenReuseDetected
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              team: idpn
+              job: idpn-api
+            exp_annotations:
+              summary: 'A rotated refresh token was presented again; the family was revoked'
+              runbook: 'docs/runbooks/incidents.md#6-refresh-token-reuse'
+
+  - name: signing key age and rotation due fire
+    interval: 1m
+    input_series:
+      - series: 'idpn_signing_key_age_days{job="idpn-api"}'
+        values: '91x300'
+      - series: 'idpn_signing_key_rotation_due{job="idpn-api"}'
+        values: '1x300'
+    alert_rule_test:
+      - eval_time: 130m
+        alertname: IdpnSigningKeyTooOld
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: idpn
+              job: idpn-api
+            exp_annotations:
+              summary: 'The active signing key is older than 90 days'
+              runbook: 'docs/runbooks/incidents.md#7-signing-key-rotation'
+      - eval_time: 130m
+        alertname: IdpnSigningKeyRotationDue
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: idpn
+              job: idpn-api
+            exp_annotations:
+              summary: 'The active signing key passed its rotation threshold'
+              runbook: 'docs/runbooks/incidents.md#7-signing-key-rotation'
+
+  - name: back-channel queue backlog fires
+    interval: 1m
+    input_series:
+      - series: 'idpn_backchannel_queue_depth{job="idpn-api"}'
+        values: '150x30'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: IdpnBackchannelQueueBacklog
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: idpn
+              job: idpn-api
+            exp_annotations:
+              summary: 'Back-channel logout queue has more than 100 pending entries'
+              runbook: 'docs/runbooks/incidents.md#8-back-channel-logout-backlog'
+
+  - name: stale backup fires after 36 hours
+    interval: 1m
+    input_series:
+      - series: 'idpn_backup_last_success_timestamp_seconds{job="idpn-api",target="postgres+redis"}'
+        values: '0x3000'
+    alert_rule_test:
+      - eval_time: 41h
+        alertname: IdpnBackupStale
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              team: idpn
+              job: idpn-api
+            exp_annotations:
+              summary: 'No successful backup for more than 36 hours (RPO 15 minutes)'
+              runbook: 'docs/runbooks/incidents.md#9-backup-failure'
+
+  - name: low disk space fires
+    interval: 1m
+    input_series:
+      - series: 'node_filesystem_avail_bytes{job="node",instance="host:9100",mountpoint="/",fstype="ext4"}'
+        values: '10x30'
+      - series: 'node_filesystem_size_bytes{job="node",instance="host:9100",mountpoint="/",fstype="ext4"}'
+        values: '100x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: IdpnDiskSpaceLow
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: idpn
+              job: node
+              instance: host:9100
+              mountpoint: '/'
+              fstype: ext4
+            exp_annotations:
+              summary: 'Less than 15% disk space left on host:9100'
+              runbook: 'docs/runbooks/incidents.md#10-disk-space'
+
+  - name: missing backup metric fires after six hours
+    interval: 1m
+    input_series:
+      - series: 'up{job="idpn-api",instance="host.docker.internal:3000"}'
+        values: '1x500'
+    alert_rule_test:
+      - eval_time: 7h
+        alertname: IdpnBackupMetricMissing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: idpn
+              job: idpn-api
+            exp_annotations:
+              summary: 'The API exposes no backup freshness metric (BACKUP_STATUS_FILE)'
+              runbook: 'docs/runbooks/incidents.md#9-backup-failure'

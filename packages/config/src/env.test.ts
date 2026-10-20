@@ -112,6 +112,31 @@ describe('parseServerEnv', () => {
     expect(issues[0]?.message).toMatch(/fatal|error|warn|info|debug|trace|silent/);
   });
 
+  it('parses the metrics switches explicitly and keeps the endpoint off by default', () => {
+    const defaults = parseServerEnv(minimalEnv);
+    expect(defaults.METRICS_ENABLED).toBe(false);
+    expect(defaults.METRICS_TOKEN).toBeUndefined();
+    expect(defaults.BACKUP_STATUS_FILE).toBeUndefined();
+
+    const enabled = parseServerEnv({
+      ...minimalEnv,
+      METRICS_ENABLED: 'true',
+      METRICS_TOKEN: '0123456789abcdef',
+      BACKUP_STATUS_FILE: 'artifacts/backup/status.json',
+    });
+    expect(enabled.METRICS_ENABLED).toBe(true);
+    expect(enabled.METRICS_TOKEN).toBe('0123456789abcdef');
+    expect(enabled.BACKUP_STATUS_FILE).toBe('artifacts/backup/status.json');
+
+    expect(parseServerEnv({ ...minimalEnv, METRICS_ENABLED: 'false' }).METRICS_ENABLED).toBe(false);
+    expect(captureIssues({ ...minimalEnv, METRICS_ENABLED: 'yes' })[0]?.key).toBe(
+      'METRICS_ENABLED',
+    );
+    expect(captureIssues({ ...minimalEnv, METRICS_TOKEN: 'too-short' })[0]?.key).toBe(
+      'METRICS_TOKEN',
+    );
+  });
+
   it('accepts a social secret key of exactly 32 bytes in base64', () => {
     expect(
       parseServerEnv({ ...minimalEnv, SOCIAL_SECRET_KEY: validSocialSecretKey }).SOCIAL_SECRET_KEY,

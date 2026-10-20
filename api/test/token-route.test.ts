@@ -17,8 +17,10 @@ import {
   type RefreshTokenRecord,
   type RefreshTokenRepository,
 } from '../src/oidc/refresh-token.js';
-import { registerTokenRoute } from '../src/oidc/token-route.js';
+import { registerTokenRoute, type TokenMetricsSink } from '../src/oidc/token-route.js';
 import type { TokenProfile } from '../src/oidc/token-claims.js';
+import type { AuditEventInput } from '../src/audit/sanitize.js';
+import { ApiMetrics } from '../src/observability/metrics.js';
 
 const FAST: Argon2Params = { memoryCost: 8192, timeCost: 1, parallelism: 1 };
 const verifier = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~';
@@ -146,6 +148,8 @@ interface HarnessOptions {
   sessionValid?: boolean;
   clientAdminEligible?: boolean;
   contextAccess?: LoginContextAccessSource;
+  metrics?: TokenMetricsSink;
+  audit?: { record(event: AuditEventInput): Promise<void> };
 }
 
 async function harness(options: HarnessOptions = {}) {
@@ -187,6 +191,8 @@ async function harness(options: HarnessOptions = {}) {
     now: () => options.now ?? new Date('2026-10-18T12:00:00Z'),
     isClientAdminEligible: async () => options.clientAdminEligible ?? true,
     ...(options.contextAccess === undefined ? {} : { contextAccess: options.contextAccess }),
+    ...(options.metrics === undefined ? {} : { metrics: options.metrics }),
+    ...(options.audit === undefined ? {} : { audit: options.audit }),
   });
   await app.ready();
   return { app, codes, refreshTokens, keys };
@@ -431,7 +437,16 @@ describe('POST /oauth2/token — authorization_code', () => {
 
 describe('POST /oauth2/token — refresh_token', () => {
   it('rotates the refresh token and rejects reuse, revoking the family', async () => {
-    const { app, codes, refreshTokens } = await harness();
+    const metrics = new ApiMetrics();
+    const auditEvents: AuditEventInput[] = [];
+    const { app, codes, refreshTokens } = await harness({
+      metrics,
+      audit: {
+        async record(event) {
+          auditEvents.push(event);
+        },
+      },
+    });
     const code = await seedCode(codes, ['openid', 'offline_access']);
 
     const first = await request(app.server)
@@ -472,6 +487,18 @@ describe('POST /oauth2/token — refresh_token', () => {
       (record) => record.revokedAt === null,
     );
     expect(active).toHaveLength(0);
+
+    // Reuse is observable: the metric fires and the audit event carries no token material.
+    expect(metrics.render()).toContain('idpn_refresh_token_reuse_detected_total 1');
+    expect(auditEvents).toHaveLength(1);
+    expect(auditEvents[0]).toMatchObject({
+      actorType: 'anonymous',
+      action: 'token.refresh.reuse_detected',
+      clientId: 'spa-app',
+      result: 'failure',
+      metadata: { reason: 'reuse_detected' },
+    });
+    expect(JSON.stringify(auditEvents)).not.toContain(first.body.refresh_token);
 
     // The new token is also dead now.
     await request(app.server)

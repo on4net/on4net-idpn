@@ -74,6 +74,8 @@ export interface BackchannelLogoutDispatcherOptions {
     error: unknown,
     context: { clientId: string; phase: 'issue' | 'send' | 'queue' },
   ) => void;
+  /** Observability hook for each delivery outcome; receives no token material. */
+  onDelivery?: (delivery: BackchannelDelivery) => void;
 }
 
 const DEFAULT_RETRY_DELAYS_MS = [250, 1000] as const;
@@ -106,6 +108,15 @@ export class BackchannelLogoutDispatcher {
   }
 
   private async deliver(
+    participant: BackchannelLogoutParticipant,
+    input: BackchannelLogoutNotifyInput,
+  ): Promise<BackchannelDelivery> {
+    const delivery = await this.deliverInternal(participant, input);
+    this.options.onDelivery?.(delivery);
+    return delivery;
+  }
+
+  private async deliverInternal(
     participant: BackchannelLogoutParticipant,
     input: BackchannelLogoutNotifyInput,
   ): Promise<BackchannelDelivery> {
