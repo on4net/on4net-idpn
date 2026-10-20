@@ -51,6 +51,12 @@
 | T27 | MFE Token Exposure | دسترسی Host به توکن | BFF-first، عدم ارسال توکن در رویدادها، SPA فقط برای اپ معتمد |
 | T28 | Cross-Client Admin Access | دستکاری `clientId` در API | اعمال سروری `client_id` توکن، Deny-by-default، تست منفی |
 | T29 | Social Email Spoofing | Provider ایمیل جعلی برمی‌گرداند | الزام `email_verified`، بررسی دامنه، عدم Auto-link بدون تأیید |
+| T30 | Context Confusion | استفاده از توکن Context ضعیف در مسیر حساس | Claim `login_context` و الزام آن در Resource Server |
+| T31 | Cross-Context Escalation | انتخاب Context با نقش‌های بیشتر | فیلتر `allowed_roles` در زمان صدور توکن؛ منع `idp:*` |
+| T32 | Context Parameter Tampering | تغییر `login_context` در URL | اعتبارسنجی سروری مالکیت Context و عضویت فعال |
+| T33 | Translation Injection | متن مخرب یا HTML در Override | فقط متن ساده، Escape در رندر، Allowlist کلید و Placeholder |
+| T34 | Translation Enumeration | افشای زبان‌ها یا کلیدهای داخلی با خطا | پاسخ عمومی، Allowlist Locale، Rate Limit |
+| T35 | Locale Path Traversal | مقدار مخرب در `locale` | Allowlist Locale از Public Config؛ بدون مسیر مستقیم فایل |
 
 ## 3. کنترل‌های احراز هویت
 
@@ -106,6 +112,37 @@
 | Provider Tokens | ذخیره نمی‌شوند؛ در صورت نیاز موقت و رمزنگاری‌شده |
 | Admin Panel | ورود سوشال غیرفعال یا محدود به Provider سازمانی |
 | Rate Limit | روی start و callback؛ پیام خطای عمومی |
+
+### 3.5 Login Context (چند مدل ورود)
+
+| کنترل | الزام |
+|---|---|
+| مالکیت Context | `login_context` باید متعلق به همان `client_id` باشد؛ در غیر این صورت رد |
+| فعال‌بودن | Context غیرفعال در authorize و token پذیرفته نمی‌شود |
+| عضویت | کاربر باید Membership فعال همان Context داشته باشد |
+| نقش‌ها | فقط `allowed_roles` همان Context؛ نقش `idp:*` ممنوع |
+| Claim | `login_context` در Access/ID Token و بررسی آن در مسیرهای حساس |
+| MFA | `mfa_policy` هر Context جداگانه اعمال می‌شود |
+| Step-up | Contextهای `step_up_required` بدون احراز هویت تازه توکن نمی‌دهند |
+| Refresh | Refresh Token به همان Context مقید است و برای Context دیگر کار نمی‌کند |
+| Audit | هر ورود/رد با `client_id` و `login_context` ثبت می‌شود |
+| Admin | ادمین Context فقط به همان Context دسترسی دارد |
+
+> Context نباید جایگزین بررسی سروری شود: Resource Server باید `login_context` را برای مسیرهای حساس الزام کند.
+
+### 3.6 چندزبانه بودن (Localization)
+
+| کنترل | الزام |
+|---|---|
+| منبع متن | فقط کلیدهای بسته پایه؛ کلید ناشناخته رد می‌شود |
+| مقدار متن | متن ساده، حداکثر 500 کاراکتر؛ HTML/Script ممنوع |
+| Placeholder | فقط `{name}`, `{appName}`, `{supportEmail}` |
+| رندر | Escape پیش‌فرض React؛ `dangerouslySetInnerHTML` ممنوع |
+| Locale | Allowlist از Public Config؛ بدون ساخت مسیر از ورودی |
+| Bundle عمومی | فقط متن‌ها؛ بدون داده شخصی یا Secret |
+| دسترسی | ادمین اپ فقط ترجمه اپ خودش |
+| Audit | `client.locale.updated` و `client.translation.updated` |
+| Cache | `ETag` بر اساس `version`؛ بدون افشای نسخه‌های دیگر |
 
 ## 4. کنترل‌های توکن
 
@@ -308,4 +345,10 @@
 - [ ] رویدادهای MFE هیچ توکنی افشا نمی‌کنند.
 - [ ] Delegated Admin در تست منفی به داده اپ دیگر دسترسی ندارد.
 - [ ] `suspended` شدن Membership توکن‌های همان اپ را باطل می‌کند.
+- [ ] Context فقط نقش‌های `allowed_roles` خودش را می‌دهد و `idp:*` صادر نمی‌کند.
+- [ ] Resource Server برای مسیرهای حساس `login_context` را الزام می‌کند.
+- [ ] `login_context` نامعتبر یا متعلق به اپ دیگر رد می‌شود.
+- [ ] متن‌های ترجمه فقط متنی و Escape‌شده رندر می‌شوند.
+- [ ] Locale فقط از Allowlist پذیرفته می‌شود.
+- [ ] تغییر Context و ترجمه Audit و Step-up دارد.
 - [ ] تغییر Provider سوشال و نقش حساس Audit و Step-up دارد.

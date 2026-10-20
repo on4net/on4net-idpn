@@ -13,6 +13,8 @@
 - [docs/api.md](../../docs/api.md)
 - [docs/micro-frontend.md](../../docs/micro-frontend.md)
 - [docs/design-system.md](../../docs/design-system.md) — **shadcn/ui**
+- [docs/localization.md](../../docs/localization.md) — چندزبانه per-app
+- [docs/login-contexts.md](../../docs/login-contexts.md) — چند مدل ورود per-app
 - [docs/security.md](../../docs/security.md)
 - [docs/testing.md](../../docs/testing.md)
 - [docs/integration-guide.md](../../docs/integration-guide.md)

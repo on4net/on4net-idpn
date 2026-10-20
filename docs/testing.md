@@ -90,6 +90,11 @@ flowchart TB
 | UNIT-SOCIAL-002 | Provider غیرفعال برای کلاینت رد می‌شود |
 | UNIT-MFE-001 | Config نامعتبر باعث Error قابل مشاهده می‌شود |
 | UNIT-MFE-002 | رویدادها توکن افشا نمی‌کنند |
+| UNIT-LOC-001 | زنجیره تعیین زبان به‌ترتیب درست عمل می‌کند |
+| UNIT-LOC-002 | Locale غیرفعال به مرحله بعد سقوط می‌کند |
+| UNIT-LOC-003 | متن HTML/Script رد یا Escape می‌شود |
+| UNIT-CTX-001 | Context نامعتبر/متعلق به اپ دیگر رد می‌شود |
+| UNIT-CTX-002 | نقش خارج از `allowed_roles` در توکن درج نمی‌شود |
 
 ## 5. Integration Tests
 
@@ -132,6 +137,13 @@ flowchart TB
 | INT-MEMBER-002 | غیرفعال‌سازی عضویت فقط دسترسی همان App را قطع می‌کند |
 | INT-SOCIAL-001 | هر کلاینت از Credential سوشال خودش استفاده می‌کند |
 | INT-SOCIAL-002 | Callback با `client_id` اشتباه رد می‌شود |
+| INT-LOC-001 | Override متن اپ روی بسته پایه اعمال می‌شود |
+| INT-LOC-002 | کلید ناشناخته با `422` رد می‌شود |
+| INT-LOC-003 | Bundle با `ETag` و `version` درست Cache می‌شود |
+| INT-CTX-001 | توکن فقط نقش‌های `allowed_roles` همان Context را دارد |
+| INT-CTX-002 | Refresh Token یک Context برای Context دیگر کار نمی‌کند |
+| INT-CTX-003 | ادمین Context به Context دیگر دسترسی ندارد |
+| INT-CTX-004 | Context غیرفعال ورود و Refresh را رد می‌کند |
 | INT-AUDIT-001 | تغییر نقش و تغییر Provider سوشال Audit می‌شود |
 
 ## 6. Contract Tests
@@ -163,6 +175,9 @@ flowchart TB
 | E2E-013 | عدم نشت CSS/Preflight از MFE به Host با Tailwind مستقل |
 | E2E-014 | RTL فارسی و Visual Regression در Light/Dark |
 | E2E-015 | Portalهای Radix (Dialog/Select) داخل ریشه MFE/Shadow DOM |
+| E2E-016 | ورود از دو Context مختلف یک اپ با نقش‌های متفاوت |
+| E2E-017 | تغییر زبان و RTL بدون Reload و با حفظ State |
+| E2E-018 | متن اختصاصی اپ در صفحه ورود نمایش داده می‌شود |
 
 ### 7.2 قواعد
 
@@ -272,6 +287,8 @@ flowchart TB
 | سوشال با کلید هر اپ | UNIT-SOCIAL-001..002، INT-SOCIAL-001..002، E2E-006..007 |
 | میکرو-فرانت‌اند مشترک | UNIT-MFE-001..002، E2E-010..012 |
 | shadcn/ui و ایزولاسیون | E2E-013..015، Visual/A11y |
+| چندزبانه per-app | UNIT-LOC-001..003، INT-LOC-001..003، E2E-017..018 |
+| چند مدل ورود per-app | UNIT-CTX-001..002، INT-CTX-001..004، E2E-016 |
 | امنیت توکن | UNIT-AUTH-001..004، INT-OIDC-001..004 |
 | MFA و Step-up | E2E-008 |
 

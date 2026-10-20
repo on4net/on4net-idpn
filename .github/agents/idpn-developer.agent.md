@@ -1,7 +1,7 @@
 ---
 description: "Implementation agent for on4net IDPN. Pulls cards from GitHub Project 2, implements them end-to-end with the project skills, runs the real checks, reports on the issue, and moves the card to In review. Use when asked to work the board, implement the next task, or continue a phase."
 name: idpn-developer
-tools: [read, search, edit, execute, web, todo]
+tools: [read, search, edit, execute, web, todo, agent]
 argument-hint: "Work the board, implement #<issue>, or continue phase N"
 ---
 
@@ -25,6 +25,8 @@ Read the relevant docs **before** planning. They override any assumption:
 | OIDC + Admin API contract | `docs/api.md` |
 | MFE, Hosted UI, versioning | `docs/micro-frontend.md` |
 | shadcn/ui, tokens, RTL, isolation | `docs/design-system.md` |
+| Multi-language per app | `docs/localization.md` |
+| Multiple login models per app | `docs/login-contexts.md` |
 | Threat model, controls, checklist | `docs/security.md` |
 | Unit/Integration/Contract/E2E | `docs/testing.md` |
 | Host integration | `docs/integration-guide.md` |
@@ -47,6 +49,8 @@ Load the skill when the step runs; do not improvise a process you already have a
 | UI work, tokens, components | `docs/design-system.md` (no skill — the doc is the standard) |
 | Accessibility of UI | `accessibility-review` |
 | Persian/English RTL and translations | `i18n-rtl-review` |
+| Multi-language / per-app locales | `docs/localization.md` + `i18n-rtl-review` |
+| Login contexts / multiple login models | `docs/login-contexts.md` |
 | API/contract changes | `api-contract-review` |
 | Schema/migration/query changes | `database-review` |
 | Dependency changes | `dependency-review` |
@@ -97,6 +101,10 @@ Read a card's body with `gh issue view <n> -R on4net/on4net-idpn --body` (not th
 2. Otherwise `board.ps1 ready`. If empty, `board.ps1 fill 5` and list again.
 3. Take the **first** card, then `board.ps1 claim <issue>` **before writing any code**.
 4. Never work two cards at once.
+
+A card that came back from review is `Ready` again and carries a `<!-- idpn-review -->` comment with
+a `FAIL` verdict. Read that comment first: its findings are the failure evidence you must fix, and
+the same review runs again when you move the card back to `In review`.
 
 ### 1. Understand (skill: `senior-developer`, phase 1)
 
@@ -149,6 +157,8 @@ Required coverage by change type:
 |---|---|
 | Backend logic | Unit + Integration |
 | OIDC / token / session / RBAC / social | Unit + Integration, including negative cases |
+| Login Context / role filtering | Unit + Integration + Cross-Context negative tests |
+| Localization / translations | Unit + Integration + RTL snapshot |
 | User flow (Hosted UI, SSO, logout, MFA) | E2E |
 | UI component | RTL + axe |
 | MFE | Mount/unmount, CSS isolation, Portal container |

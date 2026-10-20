@@ -58,10 +58,13 @@ MVP زمانی آماده است که:
 - Endpointهای `/.well-known/openid-configuration`، `/.well-known/jwks.json`
 - `/oauth2/authorize`، `/oauth2/token`، `/oauth2/userinfo`
 - `GET /api/v1/clients/{clientId}/public-config`
+- زنجیره تعیین زبان (`ui_locales` → پروفایل → کلاینت → سازمان → `fa-IR`)
+- بسته پایه `fa-IR`/`en-US`، ICU MessageFormat و RTL/LTR
 - Authorization Code + PKCE (S256)
 - صدور Access/ID/Refresh و چرخش Refresh
 - کشف و اعتبارسنجی کلید ES256
 - ماژول ورود Hosted با کدبیس مشترک + shadcn/ui + تم/زبان/خطا
+- زنجیره تعیین زبان و بسته پایه `fa-IR`/`en-US` + RTL/LTR
 - ایزولاسیون CSS/Preflight و Radix Portal در MFE
 - Audit و Patch RTL برای کامپوننت‌های shadcn
 - اپ نمونه BFF برای تست دستی
@@ -72,6 +75,7 @@ MVP زمانی آماده است که:
 
 - جریان کامل Code + PKCE با یک کلاینت تست موفق است.
 - صفحه ورود Hosted در اپ نمونه از طریق Redirect کار می‌کند و در حالت BFF توکنی در مرورگر ذخیره نمی‌شود.
+- زبان پیش‌فرض و RTL/LTR درست اعمال می‌شوند.
 - CSS به Host نشت نمی‌کند و Portalها داخل ریشه MFE رندر می‌شوند.
 - RTL فارسی و axe در فرم ورود پاس می‌شوند.
 - Code یک‌بارمصرف و 60 ثانیه‌ای است.
@@ -91,14 +95,17 @@ MVP زمانی آماده است که:
 - CRUD کلاینت‌ها، تنظیمات MFE و چرخش Secret
 - کاتالوگ مجوز و نقش مخصوص هر اپ
 - `ClientMembership` (دعوت، وضعیت، ویژگی‌های اختصاصی)
+- `ClientLoginContext`: مدل، Admin API و ادمین واگذارشده در سطح Context
+- اعمال `login_context` در authorize/token و فیلتر نقش‌ها با `allowed_roles`
+- چندزبانه per-app: مدیریت زبان‌ها، Override متن و Bundle عمومی
 - Delegated Admin و اعمال سروری `clientId`
-- محاسبه مجوز مؤثر + `membership` در Access Token
+- محاسبه مجوز مؤثر + `membership` و `login_context` در Access Token
 - ماژول MFE `user-management` با Scope همان اپ + shadcn/ui
 - آزمون A11y، Visual و RTL کامپوننت‌های مصرفی
 - مدیریت نشست‌ها
 - Audit Log و صفحه مشاهده
-- Seed نقش‌های پیش‌فرض هر اپ
-- تست Integration/E2E برای Cross-Client
+- Seed نقش‌های پیش‌فرض و Contextهای پایه هر اپ
+- تست Integration/E2E برای Cross-Client و Cross-Context
 
 **معیار پذیرش:**
 
@@ -106,7 +113,10 @@ MVP زمانی آماده است که:
 - توکن صادرشده برای اپ A فقط مجوزها/ویژگی‌های A را دارد.
 - نقش `idp:*` در توکن کلاینت‌های عادی ظاهر نمی‌شود.
 - ادمین اپ A در تست منفی به عضو/نقش اپ B دسترسی ندارد (`403`).
-- MFE مدیریت کاربران فقط اعضای همان اپ را نشان می‌دهد.
+- هر اپ می‌تواند دو Context بسازد و کاربر در هر دو نقش متفاوت بگیرد.
+- Context نمی‌تواند نقش خارج از `allowed_roles` بدهد.
+- هر اپ می‌تواند زبان و متن اختصاصی خودش را داشته باشد.
+- MFE مدیریت کاربران فقط اعضای همان اپ/Context را نشان می‌دهد.
 - همه عملیات تغییردهنده Audit می‌شوند.
 
 ---
@@ -123,6 +133,7 @@ MVP زمانی آماده است که:
 - مدیریت نشست کاربر (مشاهده/بستن)
 - ابطال نشست در تغییر رمز/غیرفعال‌سازی/Suspend Membership
 - مدیریت کلید و چرخش
+- نشست و Refresh آگاه به Context + Step-up برای Context حساس
 - ماژول MFE `account` (پروفایل و نشست‌ها)
 - تست E2E برای SSO/Logout در دو Host
 
@@ -240,6 +251,9 @@ flowchart LR
 | ایزولاسیون Tailwind v4 | نشت CSS به Host | بالا | اسپایک، Scope/Shadow DOM، Portal Container، تست Visual |
 | RTL ناقص کامپوننت‌ها | تجربه فارسی نامناسب | متوسط | Audit، Logical Utilities، DirectionProvider |
 | React 19 در Hostها | ناسازگاری Singleton | متوسط | استانداردسازی React 19 یا Web Component |
+| ایزولاسیون Context | ورود در Context اشتباه یا ارتقای دسترسی | بالا | فیلتر `allowed_roles`، Claim `login_context`، تست منفی |
+| تنوع زبان‌ها | متن ناقص یا RTL نادرست | متوسط | Allowlist زبان، تست کلید گمشده، Visual Regression |
+| کیفیت ترجمه | متن نادرست یا ناامن | متوسط | فقط متن ساده، Audit، بازبینی انسانی |
 | نسخه‌بندی MFE | شکستن Hostها | متوسط | SemVer، نسخه پین‌شده، Contract Test، Fallback |
 | سیاست Providerهای سوشال | محدودیت/تعلیق اپ | متوسط | آداپتر مستقل، پشتیبانی از چند Provider |
 | مدیریت Secret هر اپ | نشت/اشتباه در Credential | متوسط | رمزنگاری، Step-up، Audit، تفکیک محیط |

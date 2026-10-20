@@ -4,21 +4,21 @@
 
 ## 1. قراردادهای عمومی
 
-| موضوع | قرارداد |
-|---|---|
-| Base URL | `https://auth.example.com` |
-| مسیر OIDC | `/oauth2/*` و کشف در `/.well-known/*` |
-| مسیر Admin | `/api/v1/*` |
-| نسخه‌بندی | نسخه در مسیر (`/api/v1`)؛ تغییرات ناسازگار با `/v2` |
-| فرمت | JSON با `Content-Type: application/json` (به‌جز Endpointهای OAuth فرم‌محور) |
-| نام‌گذاری | OAuth: `snake_case`؛ Admin API: `camelCase` |
-| تاریخ‌ها | ISO 8601 UTC (`2026-10-18T12:00:00Z`) |
-| شناسه‌ها | UUID v7 برای موجودیت‌ها |
+| موضوع            | قرارداد                                                                             |
+| ---------------- | ----------------------------------------------------------------------------------- |
+| Base URL         | `https://auth.example.com`                                                          |
+| مسیر OIDC        | `/oauth2/*` و کشف در `/.well-known/*`                                               |
+| مسیر Admin       | `/api/v1/*`                                                                         |
+| نسخه‌بندی        | نسخه در مسیر (`/api/v1`)؛ تغییرات ناسازگار با `/v2`                                 |
+| فرمت             | JSON با `Content-Type: application/json` (به‌جز Endpointهای OAuth فرم‌محور)         |
+| نام‌گذاری        | OAuth: `snake_case`؛ Admin API: `camelCase`                                         |
+| تاریخ‌ها         | ISO 8601 UTC (`2026-10-18T12:00:00Z`)                                               |
+| شناسه‌ها         | UUID v7 برای موجودیت‌ها                                                             |
 | احراز هویت Admin | Bearer Access Token با Scope `idp.admin` (Global) یا `idp.client-admin` (Delegated) |
-| CSRF | برای Admin Panel مبتنی بر Cookie، هدر `X-CSRF-Token` الزامی |
-| Rate Limit | هدرهای `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset` |
-| Idempotency | برای `POST`های حساس، هدر اختیاری `Idempotency-Key` |
-| زبان خطا | انگلیسی برای کد/پیام فنی؛ متن UI از پنل بومی‌سازی می‌شود |
+| CSRF             | برای Admin Panel مبتنی بر Cookie، هدر `X-CSRF-Token` الزامی                         |
+| Rate Limit       | هدرهای `RateLimit-Limit`, `RateLimit-Remaining`, `RateLimit-Reset`                  |
+| Idempotency      | برای `POST`های حساس، هدر اختیاری `Idempotency-Key`                                  |
+| زبان خطا         | انگلیسی برای کد/پیام فنی؛ متن UI از پنل بومی‌سازی می‌شود                            |
 
 ### 1.1 قالب خطا (RFC 9457)
 
@@ -56,20 +56,20 @@ GET /api/v1/users?page=1&limit=25&sort=createdAt:desc&q=ali
 
 ## 2. Endpointهای OIDC
 
-| متد | مسیر | توضیح |
-|---|---|---|
-| GET | `/.well-known/openid-configuration` | کشف تنظیمات |
-| GET | `/.well-known/jwks.json` | کلیدهای عمومی امضا |
-| GET | `/oauth2/authorize` | شروع ورود |
-| POST | `/oauth2/token` | تبدیل Code/Refresh به توکن |
-| GET | `/oauth2/userinfo` | اطلاعات کاربر |
-| POST | `/oauth2/introspect` | بررسی اعتبار توکن (برای سرویس‌ها) |
-| POST | `/oauth2/revoke` | ابطال توکن |
-| GET/POST | `/oauth2/logout` | خروج سراسری (RP-Initiated) |
-| POST | `/oauth2/backchannel-logout` | دریافت Logout Token توسط کلاینت (سمت کلاینت) |
-| GET | `/oauth2/social/{clientId}/{provider}/start` | شروع ورود اجتماعی با Credential همان اپ |
-| GET | `/oauth2/social/{clientId}/{provider}/callback` | Callback اختصاصی Provider |
-| POST | `/oauth2/device_authorization` | اختیاری، فاز بعد |
+| متد      | مسیر                                            | توضیح                                        |
+| -------- | ----------------------------------------------- | -------------------------------------------- |
+| GET      | `/.well-known/openid-configuration`             | کشف تنظیمات                                  |
+| GET      | `/.well-known/jwks.json`                        | کلیدهای عمومی امضا                           |
+| GET      | `/oauth2/authorize`                             | شروع ورود                                    |
+| POST     | `/oauth2/token`                                 | تبدیل Code/Refresh به توکن                   |
+| GET      | `/oauth2/userinfo`                              | اطلاعات کاربر                                |
+| POST     | `/oauth2/introspect`                            | بررسی اعتبار توکن (برای سرویس‌ها)            |
+| POST     | `/oauth2/revoke`                                | ابطال توکن                                   |
+| GET/POST | `/oauth2/logout`                                | خروج سراسری (RP-Initiated)                   |
+| POST     | `/oauth2/backchannel-logout`                    | دریافت Logout Token توسط کلاینت (سمت کلاینت) |
+| GET      | `/oauth2/social/{clientId}/{provider}/start`    | شروع ورود اجتماعی با Credential همان اپ      |
+| GET      | `/oauth2/social/{clientId}/{provider}/callback` | Callback اختصاصی Provider                    |
+| POST     | `/oauth2/device_authorization`                  | اختیاری، فاز بعد                             |
 
 ### 2.1 کشف تنظیمات
 
@@ -87,13 +87,36 @@ GET /api/v1/users?page=1&limit=25&sort=createdAt:desc&q=ali
   "grant_types_supported": ["authorization_code", "refresh_token", "client_credentials"],
   "subject_types_supported": ["public"],
   "id_token_signing_alg_values_supported": ["ES256"],
-  "scopes_supported": ["openid", "profile", "email", "phone", "offline_access", "idp.client-admin"],
+  "scopes_supported": [
+    "openid",
+    "profile",
+    "email",
+    "phone",
+    "offline_access",
+    "idp.client-admin",
+    "idp.client-locale",
+    "idp.client-context"
+  ],
   "token_endpoint_auth_methods_supported": ["client_secret_basic", "none"],
   "code_challenge_methods_supported": ["S256"],
   "claims_supported": [
-    "sub", "iss", "aud", "exp", "iat", "auth_time", "nonce",
-    "acr", "amr", "sid", "tenant_id", "preferred_username",
-    "email", "email_verified", "name"
+    "sub",
+    "iss",
+    "aud",
+    "exp",
+    "iat",
+    "auth_time",
+    "nonce",
+    "acr",
+    "amr",
+    "sid",
+    "tenant_id",
+    "preferred_username",
+    "email",
+    "email_verified",
+    "name",
+    "locale",
+    "login_context"
   ],
   "backchannel_logout_supported": true,
   "backchannel_logout_session_supported": true
@@ -234,9 +257,32 @@ GET /api/v1/clients/{clientId}/public-config
   "name": "App A",
   "logoUrl": "https://app-a.example.com/logo.svg",
   "locale": "fa-IR",
+  "locales": {
+    "default": "fa-IR",
+    "supported": ["fa-IR", "en-US"],
+    "dir": { "fa-IR": "rtl", "en-US": "ltr" },
+    "version": "2026-10-18T12:00:00Z"
+  },
+  "translationsUrl": "https://auth.example.com/api/v1/clients/app-a/translations/bundle",
   "theme": { "primary": "#0f766e", "radius": "8px" },
   "registrationPolicy": "invite_only",
   "mfaPolicy": "required_admins",
+  "loginContexts": [
+    {
+      "key": "customer-admin",
+      "name": "ورود مدیر مشتری",
+      "description": "مدیریت کاربران و صورتحساب",
+      "methods": ["password", "google"],
+      "mfaPolicy": "required_all"
+    },
+    {
+      "key": "customer-team",
+      "name": "ورود تیم مشتری",
+      "methods": ["password"],
+      "mfaPolicy": "optional"
+    }
+  ],
+  "defaultLoginContext": "customer-team",
   "socialProviders": [
     { "provider": "google", "label": "Google" },
     { "provider": "facebook", "label": "Facebook" }
@@ -253,7 +299,8 @@ GET /api/v1/clients/{clientId}/public-config
 }
 ```
 
-- فقط داده عمومی؛ هیچ Secret، Redirect URI یا تنظیمات حساس برنمی‌گردد.
+- فقط داده عمومی؛ هیچ Secret، Redirect URI، `allowed_roles` یا تنظیمات حساس برنمی‌گردد.
+- `loginContexts` فقط Contextهای `active` را نشان می‌دهد.
 - `Cache-Control: public, max-age=60` + `ETag`.
 - CORS فقط برای `allowed_origins` همان کلاینت.
 - Rate Limit برای جلوگیری از Enumeration.
@@ -289,17 +336,21 @@ Admin API دو سطح دسترسی دارد:
 - IdP این Scope را فقط زمانی صادر می‌کند که کاربر حداقل یک مجوز `idp:client-*` برای همان اپ داشته باشد؛ در غیر این صورت درخواست رد می‌شود.
 - BFF اپ توکن کاربر را به Admin API می‌فرستد؛ Admin API هم `aud` و هم Scope را بررسی می‌کند.
 
-| مجوز | دسترسی |
-|---|---|
-| `idp:client-member:read` | مشاهده اعضای همان اپ |
-| `idp:client-member:invite` | دعوت عضو جدید به همان اپ |
-| `idp:client-member:write` | تغییر وضعیت/ویژگی‌های عضو همان اپ |
-| `idp:client-role:read` | مشاهده نقش‌های همان اپ |
-| `idp:client-role:write` | ایجاد/ویرایش نقش‌های همان اپ |
-| `idp:client-role:assign` | تخصیص/حذف نقش‌های همان اپ |
-| `idp:social-provider:read` | مشاهده تنظیمات سوشال همان اپ (بدون Secret) |
-| `idp:social-provider:write` | تغییر Credential سوشال همان اپ (با Step-up) |
-| `idp:client-session:read` | مشاهده نشست‌های اعضای همان اپ |
+| مجوز                        | دسترسی                                                    |
+| --------------------------- | --------------------------------------------------------- |
+| `idp:client-member:read`    | مشاهده اعضای همان اپ                                      |
+| `idp:client-member:invite`  | دعوت عضو جدید به همان اپ                                  |
+| `idp:client-member:write`   | تغییر وضعیت/ویژگی‌های عضو همان اپ                         |
+| `idp:client-role:read`      | مشاهده نقش‌های همان اپ                                    |
+| `idp:client-role:write`     | ایجاد/ویرایش نقش‌های همان اپ                              |
+| `idp:client-role:assign`    | تخصیص/حذف نقش‌های همان اپ                                 |
+| `idp:social-provider:read`  | مشاهده تنظیمات سوشال همان اپ (بدون Secret)                |
+| `idp:social-provider:write` | تغییر Credential سوشال همان اپ (با Step-up)               |
+| `idp:client-session:read`   | مشاهده نشست‌های اعضای همان اپ                             |
+| `idp:client-locale:read`    | مشاهده زبان‌ها و ترجمه‌های همان اپ                        |
+| `idp:client-locale:write`   | ویرایش زبان‌ها و ترجمه‌های همان اپ                        |
+| `idp:client-context:read`   | مشاهده Login Contextهای همان اپ                           |
+| `idp:client-context:write`  | ایجاد/ویرایش/غیرفعال‌سازی Contextهای همان اپ (با Step-up) |
 
 - `clientId` مسیر باید با `client_id` توکن یکی باشد؛ در غیر این صورت `403`.
 - ادمین اپ هرگز نمی‌تواند نقش سراسری، Client Secret، کلید امضا یا داده اپ دیگر را ببیند/تغییر دهد.
@@ -309,30 +360,30 @@ Admin API دو سطح دسترسی دارد:
 
 ### 3.1 حساب جاری ادمین
 
-| متد | مسیر | توضیح |
-|---|---|---|
-| GET | `/api/v1/me` | پروفایل، نقش‌ها و مجوزهای ادمین |
-| GET | `/api/v1/me/sessions` | نشست‌های فعال خود |
-| DELETE | `/api/v1/me/sessions/{sid}` | بستن نشست خود |
+| متد    | مسیر                        | توضیح                           |
+| ------ | --------------------------- | ------------------------------- |
+| GET    | `/api/v1/me`                | پروفایل، نقش‌ها و مجوزهای ادمین |
+| GET    | `/api/v1/me/sessions`       | نشست‌های فعال خود               |
+| DELETE | `/api/v1/me/sessions/{sid}` | بستن نشست خود                   |
 
 ### 3.2 کاربران
 
-| متد | مسیر | مجوز | توضیح |
-|---|---|---|---|
-| GET | `/api/v1/users` | `idp:user:read` | فهرست + جست‌وجو |
-| POST | `/api/v1/users` | `idp:user:write` | ایجاد کاربر |
-| GET | `/api/v1/users/{id}` | `idp:user:read` | جزئیات |
-| PATCH | `/api/v1/users/{id}` | `idp:user:write` | ویرایش |
-| POST | `/api/v1/users/{id}/disable` | `idp:user:write` | غیرفعال‌سازی + ابطال نشست |
-| POST | `/api/v1/users/{id}/enable` | `idp:user:write` | فعال‌سازی |
-| POST | `/api/v1/users/{id}/unlock` | `idp:user:write` | بازکردن قفل |
-| POST | `/api/v1/users/{id}/reset-password` | `idp:user:write` | ارسال لینک بازنشانی |
-| POST | `/api/v1/users/{id}/invite` | `idp:user:invite` | دعوت کاربر |
-| GET | `/api/v1/users/{id}/sessions` | `idp:session:read` | نشست‌های کاربر |
-| DELETE | `/api/v1/users/{id}/sessions` | `idp:session:write` | بستن همه نشست‌ها |
-| DELETE | `/api/v1/users/{id}/sessions/{sid}` | `idp:session:write` | بستن یک نشست |
-| GET | `/api/v1/users/{id}/roles` | `idp:role:read` | نقش‌های مؤثر |
-| GET | `/api/v1/users/{id}/audit` | `idp:audit:read` | رویدادهای کاربر |
+| متد    | مسیر                                | مجوز                | توضیح                     |
+| ------ | ----------------------------------- | ------------------- | ------------------------- |
+| GET    | `/api/v1/users`                     | `idp:user:read`     | فهرست + جست‌وجو           |
+| POST   | `/api/v1/users`                     | `idp:user:write`    | ایجاد کاربر               |
+| GET    | `/api/v1/users/{id}`                | `idp:user:read`     | جزئیات                    |
+| PATCH  | `/api/v1/users/{id}`                | `idp:user:write`    | ویرایش                    |
+| POST   | `/api/v1/users/{id}/disable`        | `idp:user:write`    | غیرفعال‌سازی + ابطال نشست |
+| POST   | `/api/v1/users/{id}/enable`         | `idp:user:write`    | فعال‌سازی                 |
+| POST   | `/api/v1/users/{id}/unlock`         | `idp:user:write`    | بازکردن قفل               |
+| POST   | `/api/v1/users/{id}/reset-password` | `idp:user:write`    | ارسال لینک بازنشانی       |
+| POST   | `/api/v1/users/{id}/invite`         | `idp:user:invite`   | دعوت کاربر                |
+| GET    | `/api/v1/users/{id}/sessions`       | `idp:session:read`  | نشست‌های کاربر            |
+| DELETE | `/api/v1/users/{id}/sessions`       | `idp:session:write` | بستن همه نشست‌ها          |
+| DELETE | `/api/v1/users/{id}/sessions/{sid}` | `idp:session:write` | بستن یک نشست              |
+| GET    | `/api/v1/users/{id}/roles`          | `idp:role:read`     | نقش‌های مؤثر              |
+| GET    | `/api/v1/users/{id}/audit`          | `idp:audit:read`    | رویدادهای کاربر           |
 
 **ایجاد کاربر:**
 
@@ -360,22 +411,17 @@ POST /api/v1/users
 
 **پاسخ:** `201` با شناسه کاربر؛ رمز عبور موقت فقط در صورت تولید خودکار و **یک بار** برگردانده می‌شود.
 
-**نکته پیاده‌سازی:** مجوزها همیشه از دیتابیس خوانده می‌شوند (Assignment → Role → Permission با
-`scopeType=global`)، نه از توکن؛ بنابراین پس‌گرفتن یک نقش بلافاصله اثر می‌کند. تا پیش از کارت اعلان‌ها،
-`POST /users/{id}/reset-password` به‌جای ارسال ایمیل یک رمز موقت یک‌بارمصرف برمی‌گرداند و همه نشست‌ها و
-Refresh Tokenها را باطل می‌کند.
-
 ### 3.3 کلاینت‌ها
 
-| متد | مسیر | مجوز | توضیح |
-|---|---|---|---|
-| GET | `/api/v1/clients` | `idp:client:read` | فهرست |
-| POST | `/api/v1/clients` | `idp:client:write` | ایجاد |
-| GET | `/api/v1/clients/{clientId}` | `idp:client:read` | جزئیات (با `clientId` عمومی) |
-| PATCH | `/api/v1/clients/{clientId}` | `idp:client:write` | ویرایش |
-| POST | `/api/v1/clients/{clientId}/secrets` | `idp:client:write` | ساخت Secret جدید |
-| DELETE | `/api/v1/clients/{clientId}/secrets/{secretId}` | `idp:client:write` | ابطال Secret |
-| POST | `/api/v1/clients/{clientId}/disable` | `idp:client:write` | غیرفعال‌سازی + ابطال توکن‌ها |
+| متد    | مسیر                                            | مجوز               | توضیح                        |
+| ------ | ----------------------------------------------- | ------------------ | ---------------------------- |
+| GET    | `/api/v1/clients`                               | `idp:client:read`  | فهرست                        |
+| POST   | `/api/v1/clients`                               | `idp:client:write` | ایجاد                        |
+| GET    | `/api/v1/clients/{clientId}`                    | `idp:client:read`  | جزئیات (با `clientId` عمومی) |
+| PATCH  | `/api/v1/clients/{clientId}`                    | `idp:client:write` | ویرایش                       |
+| POST   | `/api/v1/clients/{clientId}/secrets`            | `idp:client:write` | ساخت Secret جدید             |
+| DELETE | `/api/v1/clients/{clientId}/secrets/{secretId}` | `idp:client:write` | ابطال Secret                 |
+| POST   | `/api/v1/clients/{clientId}/disable`            | `idp:client:write` | غیرفعال‌سازی + ابطال توکن‌ها |
 
 **ایجاد کلاینت:**
 
@@ -417,15 +463,15 @@ Refresh Tokenها را باطل می‌کند.
 
 ### 3.3.1 عضویت کاربران در اپ (Client Members)
 
-| متد | مسیر | مجوز | توضیح |
-|---|---|---|---|
-| GET | `/api/v1/clients/{clientId}/members` | `idp:client-member:read` | فهرست اعضای همان اپ |
-| POST | `/api/v1/clients/{clientId}/members/invite` | `idp:client-member:invite` | دعوت/افزودن عضو |
-| GET | `/api/v1/clients/{clientId}/members/{userId}` | `idp:client-member:read` | جزئیات عضویت |
-| PATCH | `/api/v1/clients/{clientId}/members/{userId}` | `idp:client-member:write` | تغییر وضعیت/ویژگی‌ها |
-| DELETE | `/api/v1/clients/{clientId}/members/{userId}` | `idp:client-member:write` | حذف عضویت (نه حذف کاربر) |
-| PUT | `/api/v1/clients/{clientId}/members/{userId}/roles` | `idp:client-role:assign` | جایگزینی نقش‌های همان اپ |
-| GET | `/api/v1/clients/{clientId}/members/{userId}/sessions` | `idp:client-session:read` | نشست‌های همان اپ |
+| متد    | مسیر                                                   | مجوز                       | توضیح                    |
+| ------ | ------------------------------------------------------ | -------------------------- | ------------------------ |
+| GET    | `/api/v1/clients/{clientId}/members`                   | `idp:client-member:read`   | فهرست اعضای همان اپ      |
+| POST   | `/api/v1/clients/{clientId}/members/invite`            | `idp:client-member:invite` | دعوت/افزودن عضو          |
+| GET    | `/api/v1/clients/{clientId}/members/{userId}`          | `idp:client-member:read`   | جزئیات عضویت             |
+| PATCH  | `/api/v1/clients/{clientId}/members/{userId}`          | `idp:client-member:write`  | تغییر وضعیت/ویژگی‌ها     |
+| DELETE | `/api/v1/clients/{clientId}/members/{userId}`          | `idp:client-member:write`  | حذف عضویت (نه حذف کاربر) |
+| PUT    | `/api/v1/clients/{clientId}/members/{userId}/roles`    | `idp:client-role:assign`   | جایگزینی نقش‌های همان اپ |
+| GET    | `/api/v1/clients/{clientId}/members/{userId}/sessions` | `idp:client-session:read`  | نشست‌های همان اپ         |
 
 **دعوت عضو:**
 
@@ -456,11 +502,11 @@ Refresh Tokenها را باطل می‌کند.
 
 ### 3.3.2 Providerهای سوشال هر اپ
 
-| متد | مسیر | مجوز | توضیح |
-|---|---|---|---|
-| GET | `/api/v1/clients/{clientId}/social-providers` | `idp:social-provider:read` | فهرست (بدون Secret) |
-| PUT | `/api/v1/clients/{clientId}/social-providers/{provider}` | `idp:social-provider:write` | ایجاد/به‌روزرسانی Credential |
-| DELETE | `/api/v1/clients/{clientId}/social-providers/{provider}` | `idp:social-provider:write` | حذف/غیرفعال‌سازی |
+| متد    | مسیر                                                     | مجوز                        | توضیح                        |
+| ------ | -------------------------------------------------------- | --------------------------- | ---------------------------- |
+| GET    | `/api/v1/clients/{clientId}/social-providers`            | `idp:social-provider:read`  | فهرست (بدون Secret)          |
+| PUT    | `/api/v1/clients/{clientId}/social-providers/{provider}` | `idp:social-provider:write` | ایجاد/به‌روزرسانی Credential |
+| DELETE | `/api/v1/clients/{clientId}/social-providers/{provider}` | `idp:social-provider:write` | حذف/غیرفعال‌سازی             |
 
 ```json
 {
@@ -489,19 +535,96 @@ Refresh Tokenها را باطل می‌کند.
 - `callbackUrl` باید دقیقاً در کنسول Google/Facebook ثبت شود.
 - ادمین اپ فقط برای `clientId` خودش مجاز است.
 
+### 3.3.3 Login Contextهای هر اپ
+
+| متد    | مسیر                                                               | مجوز                       | توضیح                  |
+| ------ | ------------------------------------------------------------------ | -------------------------- | ---------------------- |
+| GET    | `/api/v1/clients/{clientId}/login-contexts`                        | `idp:client-context:read`  | فهرست Contextها        |
+| POST   | `/api/v1/clients/{clientId}/login-contexts`                        | `idp:client-context:write` | ایجاد Context          |
+| GET    | `/api/v1/clients/{clientId}/login-contexts/{key}`                  | `idp:client-context:read`  | جزئیات                 |
+| PATCH  | `/api/v1/clients/{clientId}/login-contexts/{key}`                  | `idp:client-context:write` | ویرایش سیاست‌ها        |
+| POST   | `/api/v1/clients/{clientId}/login-contexts/{key}/disable`          | `idp:client-context:write` | غیرفعال‌سازی           |
+| DELETE | `/api/v1/clients/{clientId}/login-contexts/{key}`                  | `idp:client-context:write` | حذف (بدون عضویت فعال)  |
+| GET    | `/api/v1/clients/{clientId}/login-contexts/{key}/members`          | `idp:client-member:read`   | اعضای همان Context     |
+| POST   | `/api/v1/clients/{clientId}/login-contexts/{key}/members/invite`   | `idp:client-member:invite` | دعوت به Context        |
+| PATCH  | `/api/v1/clients/{clientId}/login-contexts/{key}/members/{userId}` | `idp:client-member:write`  | تغییر وضعیت/ویژگی      |
+| DELETE | `/api/v1/clients/{clientId}/login-contexts/{key}/members/{userId}` | `idp:client-member:write`  | حذف عضویت همان Context |
+
+**ایجاد Context:**
+
+```json
+{
+  "key": "customer-admin",
+  "name": "ورود مدیر مشتری",
+  "description": "مدیریت کاربران و صورتحساب",
+  "allowedRoles": ["app-a:customer-admin"],
+  "defaultRoles": ["app-a:customer-admin"],
+  "loginMethods": ["password", "google"],
+  "mfaPolicy": "required_all",
+  "registrationPolicy": "invite_only",
+  "stepUpRequired": true,
+  "isDefault": false,
+  "sortOrder": 1
+}
+```
+
+- `allowedRoles` فقط نقش‌هایی با `clientId` همین اپ را می‌پذیرد؛ نقش `idp:*` → `422`.
+- فقط یک Context می‌تواند `isDefault=true` باشد.
+- تغییر `allowedRoles`، `mfaPolicy` یا `loginMethods` نیازمند Step-up و Audit است.
+- جزئیات جریان و امنیت: [login-contexts.md](./login-contexts.md).
+
+### 3.3.4 زبان و ترجمه هر اپ
+
+| متد    | مسیر                                                          | مجوز                      | توضیح                          |
+| ------ | ------------------------------------------------------------- | ------------------------- | ------------------------------ |
+| GET    | `/api/v1/clients/{clientId}/locales`                          | `idp:client-locale:read`  | زبان‌های فعال و پیش‌فرض        |
+| PUT    | `/api/v1/clients/{clientId}/locales`                          | `idp:client-locale:write` | تنظیم زبان‌ها                  |
+| GET    | `/api/v1/clients/{clientId}/translations`                     | `idp:client-locale:read`  | فهرست Localeهای دارای Override |
+| GET    | `/api/v1/clients/{clientId}/translations/{locale}`            | `idp:client-locale:read`  | متن‌های Override               |
+| PUT    | `/api/v1/clients/{clientId}/translations/{locale}`            | `idp:client-locale:write` | ثبت/به‌روزرسانی متن‌ها         |
+| DELETE | `/api/v1/clients/{clientId}/translations/{locale}`            | `idp:client-locale:write` | حذف همه Overrideهای آن Locale  |
+| GET    | `/api/v1/clients/{clientId}/translations/bundle?locale=fa-IR` | عمومی                     | Bundle نهایی برای UI           |
+
+**تنظیم زبان‌ها:**
+
+```json
+{
+  "default": "fa-IR",
+  "supported": ["fa-IR", "en-US"],
+  "calendar": "persian"
+}
+```
+
+**ثبت متن:**
+
+```json
+{
+  "messages": {
+    "login.title": "ورود به پنل مشتریان",
+    "login.submit": "ورود"
+  }
+}
+```
+
+- کلید ناشناخته → `422` با فهرست کلیدها.
+- متن خالی → حذف Override و بازگشت به مقدار پایه.
+- مقدار حداکثر 500 کاراکتر؛ HTML/Script مجاز نیست.
+- تغییرات `client.locale.updated` / `client.translation.updated` در Audit ثبت می‌شود.
+- جزئیات کامل: [localization.md](./localization.md).
+
 ### 3.4 نقش‌ها و مجوزها
 
-| متد | مسیر | مجوز | توضیح |
-|---|---|---|---|
-| GET | `/api/v1/permissions` | `idp:role:read` | فهرست مجوزها |
-| POST | `/api/v1/permissions` | `idp:role:write` | ایجاد مجوز |
-| DELETE | `/api/v1/permissions/{id}` | `idp:role:write` | حذف مجوز (بدون تخصیص فعال) |
-| GET | `/api/v1/roles` | `idp:role:read` | فهرست نقش‌ها |
-| POST | `/api/v1/roles` | `idp:role:write` | ایجاد نقش |
-| GET | `/api/v1/roles/{id}` | `idp:role:read` | جزئیات + مجوزها |
-| PATCH | `/api/v1/roles/{id}` | `idp:role:write` | ویرایش |
-| PUT | `/api/v1/roles/{id}/permissions` | `idp:role:write` | جایگزینی مجوزها |
-| DELETE | `/api/v1/roles/{id}` | `idp:role:write` | حذف (در صورت نبود تخصیص) |
+| متد    | مسیر                             | مجوز             | توضیح                      |
+| ------ | -------------------------------- | ---------------- | -------------------------- |
+| GET    | `/api/v1/permissions`            | `idp:role:read`  | فهرست مجوزها               |
+| POST   | `/api/v1/permissions`            | `idp:role:write` | ایجاد مجوز                 |
+| DELETE | `/api/v1/permissions/{id}`       | `idp:role:write` | حذف مجوز (بدون تخصیص فعال) |
+| GET    | `/api/v1/roles`                  | `idp:role:read`  | فهرست نقش‌ها               |
+| POST   | `/api/v1/roles`                  | `idp:role:write` | ایجاد نقش                  |
+| GET    | `/api/v1/roles/{id}`             | `idp:role:read`  | جزئیات + مجوزها            |
+| PATCH  | `/api/v1/roles/{id}`             | `idp:role:write` | ویرایش                     |
+| PUT    | `/api/v1/roles/{id}/permissions` | `idp:role:write` | جایگزینی مجوزها            |
+| DELETE | `/api/v1/roles/{id}`             | `idp:role:write` | حذف (در صورت نبود تخصیص)   |
 
 **ایجاد نقش:**
 
@@ -510,10 +633,7 @@ Refresh Tokenها را باطل می‌کند.
   "key": "platform-a:editor",
   "name": "ویرایشگر پلتفرم A",
   "clientId": "platform-a",
-  "permissions": [
-    "platform-a:contact:read",
-    "platform-a:contact:write"
-  ]
+  "permissions": ["platform-a:contact:read", "platform-a:contact:write"]
 }
 ```
 
@@ -523,11 +643,11 @@ Refresh Tokenها را باطل می‌کند.
 
 ### 3.5 تخصیص نقش
 
-| متد | مسیر | مجوز | توضیح |
-|---|---|---|---|
-| GET | `/api/v1/assignments` | `idp:role:read` | فیلتر بر اساس Subject/Scope |
-| POST | `/api/v1/assignments` | `idp:role:write` | تخصیص |
-| DELETE | `/api/v1/assignments/{id}` | `idp:role:write` | حذف تخصیص |
+| متد    | مسیر                       | مجوز             | توضیح                       |
+| ------ | -------------------------- | ---------------- | --------------------------- |
+| GET    | `/api/v1/assignments`      | `idp:role:read`  | فیلتر بر اساس Subject/Scope |
+| POST   | `/api/v1/assignments`      | `idp:role:write` | تخصیص                       |
+| DELETE | `/api/v1/assignments/{id}` | `idp:role:write` | حذف تخصیص                   |
 
 ```json
 {
@@ -547,29 +667,29 @@ Refresh Tokenها را باطل می‌کند.
 
 ### 3.6 گروه‌ها و سازمان‌ها (اختیاری)
 
-| متد | مسیر | توضیح |
-|---|---|---|
-| GET/POST | `/api/v1/groups` | فهرست/ایجاد گروه |
-| GET/PATCH/DELETE | `/api/v1/groups/{id}` | مدیریت گروه |
-| PUT | `/api/v1/groups/{id}/members` | جایگزینی اعضا |
-| GET/POST | `/api/v1/organizations` | فهرست/ایجاد سازمان |
-| GET/PATCH/DELETE | `/api/v1/organizations/{id}` | مدیریت سازمان |
-| PUT | `/api/v1/organizations/{id}/members` | جایگزینی اعضا |
+| متد              | مسیر                                 | توضیح              |
+| ---------------- | ------------------------------------ | ------------------ |
+| GET/POST         | `/api/v1/groups`                     | فهرست/ایجاد گروه   |
+| GET/PATCH/DELETE | `/api/v1/groups/{id}`                | مدیریت گروه        |
+| PUT              | `/api/v1/groups/{id}/members`        | جایگزینی اعضا      |
+| GET/POST         | `/api/v1/organizations`              | فهرست/ایجاد سازمان |
+| GET/PATCH/DELETE | `/api/v1/organizations/{id}`         | مدیریت سازمان      |
+| PUT              | `/api/v1/organizations/{id}/members` | جایگزینی اعضا      |
 
 ### 3.7 نشست‌ها
 
-| متد | مسیر | مجوز | توضیح |
-|---|---|---|---|
-| GET | `/api/v1/sessions` | `idp:session:read` | فیلتر کاربر/کلاینت/وضعیت |
-| DELETE | `/api/v1/sessions/{sid}` | `idp:session:write` | ابطال |
-| POST | `/api/v1/users/{id}/logout-all` | `idp:session:write` | خروج سراسری کاربر |
+| متد    | مسیر                            | مجوز                | توضیح                    |
+| ------ | ------------------------------- | ------------------- | ------------------------ |
+| GET    | `/api/v1/sessions`              | `idp:session:read`  | فیلتر کاربر/کلاینت/وضعیت |
+| DELETE | `/api/v1/sessions/{sid}`        | `idp:session:write` | ابطال                    |
+| POST   | `/api/v1/users/{id}/logout-all` | `idp:session:write` | خروج سراسری کاربر        |
 
 ### 3.8 Audit
 
-| متد | مسیر | مجوز | توضیح |
-|---|---|---|---|
-| GET | `/api/v1/audit-events` | `idp:audit:read` | فیلتر زمانی/عملیات/کاربر |
-| GET | `/api/v1/audit-events/export` | `idp:audit:export` | خروجی CSV/NDJSON |
+| متد | مسیر                          | مجوز               | توضیح                    |
+| --- | ----------------------------- | ------------------ | ------------------------ |
+| GET | `/api/v1/audit-events`        | `idp:audit:read`   | فیلتر زمانی/عملیات/کاربر |
+| GET | `/api/v1/audit-events/export` | `idp:audit:export` | خروجی CSV/NDJSON         |
 
 نمونه فیلتر:
 
@@ -579,16 +699,16 @@ GET /api/v1/audit-events?from=2026-10-01T00:00:00Z&to=2026-10-18T23:59:59Z&actio
 
 ### 3.9 کلیدهای امضا
 
-| متد | مسیر | مجوز | توضیح |
-|---|---|---|---|
-| GET | `/api/v1/keys` | `idp:key:read` | فهرست کلیدها (بدون کلید خصوصی) |
-| POST | `/api/v1/keys/rotate` | `idp:key:write` | چرخش کلید |
+| متد  | مسیر                  | مجوز            | توضیح                          |
+| ---- | --------------------- | --------------- | ------------------------------ |
+| GET  | `/api/v1/keys`        | `idp:key:read`  | فهرست کلیدها (بدون کلید خصوصی) |
+| POST | `/api/v1/keys/rotate` | `idp:key:write` | چرخش کلید                      |
 
 ### 3.10 تنظیمات
 
-| متد | مسیر | مجوز | توضیح |
-|---|---|---|---|
-| GET | `/api/v1/settings` | `idp:settings:read` | تنظیمات عمومی |
+| متد   | مسیر               | مجوز                 | توضیح                    |
+| ----- | ------------------ | -------------------- | ------------------------ |
+| GET   | `/api/v1/settings` | `idp:settings:read`  | تنظیمات عمومی            |
 | PATCH | `/api/v1/settings` | `idp:settings:write` | سیاست رمز، عمر نشست، MFA |
 
 ---
@@ -615,19 +735,19 @@ GET /api/v1/audit-events?from=2026-10-01T00:00:00Z&to=2026-10-18T23:59:59Z&actio
 
 ## 5. کدهای وضعیت
 
-| کد | کاربرد |
-|---|---|
-| `200` | موفق |
-| `201` | ایجاد شد |
-| `204` | بدون محتوا |
-| `400` | درخواست نامعتبر |
-| `401` | عدم احراز هویت |
-| `403` | عدم مجوز |
-| `404` | یافت نشد |
+| کد    | کاربرد                     |
+| ----- | -------------------------- |
+| `200` | موفق                       |
+| `201` | ایجاد شد                   |
+| `204` | بدون محتوا                 |
+| `400` | درخواست نامعتبر            |
+| `401` | عدم احراز هویت             |
+| `403` | عدم مجوز                   |
+| `404` | یافت نشد                   |
 | `409` | تعارض (مثلاً ایمیل تکراری) |
-| `422` | خطای اعتبارسنجی |
-| `429` | محدودیت نرخ |
-| `500` | خطای داخلی |
+| `422` | خطای اعتبارسنجی            |
+| `429` | محدودیت نرخ                |
+| `500` | خطای داخلی                 |
 | `503` | سرویس موقتاً در دسترس نیست |
 
 ---

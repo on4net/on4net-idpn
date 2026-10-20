@@ -1,4 +1,18 @@
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
+
 import { defineConfig, devices } from '@playwright/test';
+
+// The web servers and the specs must talk to the same stack the API uses locally. Without
+// this, a checkout whose `.env` overrides the ports (see compose.yaml) talks to whatever
+// else listens on the defaults instead. Precedence matches api/prisma.config.ts: `api/.env`
+// wins over the repository root `.env`, and a real environment variable wins over both.
+for (const envFile of ['api/.env', '.env']) {
+  const path = resolve(process.cwd(), envFile);
+  if (existsSync(path)) {
+    process.loadEnvFile(path);
+  }
+}
 
 const API_PORT = Number(process.env.E2E_PORT ?? 3100);
 const WEB_PORT = Number(process.env.E2E_WEB_PORT ?? 5180);

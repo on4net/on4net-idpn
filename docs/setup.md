@@ -5,12 +5,12 @@
 
 ## 1. پیش‌نیازها
 
-| ابزار | نسخه | توضیح |
-|---|---|---|
-| Node.js | `>= 22.11` (LTS) | در `package.json` با `engines` اعمال می‌شود |
-| pnpm | `>= 9` | نسخه پین‌شده: `9.12.0` |
-| Git | — | — |
-| Docker + Compose | — | برای PostgreSQL، Redis و Mailhog (کارت #9) |
+| ابزار            | نسخه             | توضیح                                       |
+| ---------------- | ---------------- | ------------------------------------------- |
+| Node.js          | `>= 22.11` (LTS) | در `package.json` با `engines` اعمال می‌شود |
+| pnpm             | `>= 9`           | نسخه پین‌شده: `9.12.0`                      |
+| Git              | —                | —                                           |
+| Docker + Compose | —                | برای PostgreSQL، Redis و Mailhog (کارت #9)  |
 
 فعال‌سازی pnpm با Corepack:
 
@@ -56,23 +56,23 @@ Copy-Item .env.example .env
 سپس مقادیر واقعی را در `.env` جایگزین کنید. `.env` در `.gitignore` است و **هرگز Commit نمی‌شود**؛
 فقط `.env.example` با مقادیر نمونه در مخزن نگهداری می‌شود.
 
-| متغیر | الزامی | نمونه | توضیح |
-|---|---|---|---|
-| `NODE_ENV` | خیر | `development` | یکی از `development`، `test`، `production`؛ پیش‌فرض `development` |
-| `PORT` | خیر | `3000` | پورت سرور API؛ پیش‌فرض `3000` |
-| `APP_URL` | **بله** | `https://auth.example.com` | Issuer و Base URL سامانه |
-| `VITE_APP_URL` | **بله** (برای `web`) | `http://localhost:3000` | همان `APP_URL` که در Build فرانت‌اند قابل استفاده است |
-| `ADMIN_URL` | خیر | `https://admin.example.com` | آدرس پنل مدیریت |
-| `DATABASE_URL` | **بله** | `postgresql://…` | اتصال PostgreSQL (باید `postgres://` یا `postgresql://` باشد) |
-| `REDIS_URL` | **بله** | `redis://localhost:6379` | اتصال Redis (باید `redis://` یا `rediss://` باشد) |
-| `SESSION_SECRET` | **بله** | — | حداقل ۳۲ کاراکتر؛ امضای کوکی/CSRF |
-| `SIGNING_KEY_REF` | خیر | `vault://idpn/signing` | مرجع کلید امضا؛ در توسعه خالی می‌ماند |
-| `MFE_PUBLIC_URL` | خیر | `https://cdn.example.com/idpn-mfe` | آدرس پایه Remoteهای MFE |
-| `MFE_ALLOWED_ORIGINS` | خیر | `https://app-a.example.com,https://app-b.example.com` | فهرست Originهای مجاز Host (با کاما) |
-| `SOCIAL_CALLBACK_BASE_URL` | خیر | `https://auth.example.com` | پایه Callback سوشال |
-| `SMTP_URL` | خیر | `smtp://localhost:1025` | ارسال ایمیل (به `smtp://` یا `smtps://` نیاز دارد) |
-| `TRUSTED_PROXY_CIDRS` | خیر | `10.0.0.0/8` | CIDRهای پراکسی معتمد (با کاما) |
-| `LOG_LEVEL` | خیر | `info` | `fatal`، `error`، `warn`، `info`، `debug`، `trace`، `silent` |
+| متغیر                      | الزامی               | نمونه                                                 | توضیح                                                             |
+| -------------------------- | -------------------- | ----------------------------------------------------- | ----------------------------------------------------------------- |
+| `NODE_ENV`                 | خیر                  | `development`                                         | یکی از `development`، `test`، `production`؛ پیش‌فرض `development` |
+| `PORT`                     | خیر                  | `3000`                                                | پورت سرور API؛ پیش‌فرض `3000`                                     |
+| `APP_URL`                  | **بله**              | `https://auth.example.com`                            | Issuer و Base URL سامانه                                          |
+| `VITE_APP_URL`             | **بله** (برای `web`) | `http://localhost:3000`                               | همان `APP_URL` که در Build فرانت‌اند قابل استفاده است             |
+| `ADMIN_URL`                | خیر                  | `https://admin.example.com`                           | آدرس پنل مدیریت                                                   |
+| `DATABASE_URL`             | **بله**              | `postgresql://…`                                      | اتصال PostgreSQL (باید `postgres://` یا `postgresql://` باشد)     |
+| `REDIS_URL`                | **بله**              | `redis://localhost:6379`                              | اتصال Redis (باید `redis://` یا `rediss://` باشد)                 |
+| `SESSION_SECRET`           | **بله**              | —                                                     | حداقل ۳۲ کاراکتر؛ امضای کوکی/CSRF                                 |
+| `SIGNING_KEY_REF`          | خیر                  | `vault://idpn/signing`                                | مرجع کلید امضا؛ در توسعه خالی می‌ماند                             |
+| `MFE_PUBLIC_URL`           | خیر                  | `https://cdn.example.com/idpn-mfe`                    | آدرس پایه Remoteهای MFE                                           |
+| `MFE_ALLOWED_ORIGINS`      | خیر                  | `https://app-a.example.com,https://app-b.example.com` | فهرست Originهای مجاز Host (با کاما)                               |
+| `SOCIAL_CALLBACK_BASE_URL` | خیر                  | `https://auth.example.com`                            | پایه Callback سوشال                                               |
+| `SMTP_URL`                 | خیر                  | `smtp://localhost:1025`                               | ارسال ایمیل (به `smtp://` یا `smtps://` نیاز دارد)                |
+| `TRUSTED_PROXY_CIDRS`      | خیر                  | `10.0.0.0/8`                                          | CIDRهای پراکسی معتمد (با کاما)                                    |
+| `LOG_LEVEL`                | خیر                  | `info`                                                | `fatal`، `error`، `warn`، `info`، `debug`، `trace`، `silent`      |
 
 ### اعتبارسنجی
 
@@ -103,11 +103,11 @@ Fix the values in your .env file. See .env.example and docs/setup.md.
 
 ## 5. سرویس‌های محلی با Docker Compose
 
-| سرویس | آدرس محلی | کاربرد |
-|---|---|---|
-| PostgreSQL 16 | `localhost:5432` | پایگاه داده اصلی |
-| Redis 7 | `localhost:6379` | نشست، Rate Limit، Cache |
-| Mailhog | `localhost:1025` (SMTP) و `localhost:8025` (UI) | ایمیل آزمایشی |
+| سرویس         | آدرس محلی                                       | کاربرد                  |
+| ------------- | ----------------------------------------------- | ----------------------- |
+| PostgreSQL 16 | `localhost:5432`                                | پایگاه داده اصلی        |
+| Redis 7       | `localhost:6379`                                | نشست، Rate Limit، Cache |
+| Mailhog       | `localhost:1025` (SMTP) و `localhost:8025` (UI) | ایمیل آزمایشی           |
 
 ```powershell
 docker compose up -d --wait   # شروع و انتظار تا Healthy شدن همه سرویس‌ها
@@ -133,13 +133,13 @@ docker compose down -v        # حذف کامل همراه داده‌ها (تخ
 
 مدل داده با **Prisma 7** و PostgreSQL 16 پیاده‌سازی شده است.
 
-| مورد | مسیر |
-|---|---|
-| Schema | `api/prisma/schema.prisma` |
-| Migrationها | `api/prisma/migrations/<name>/migration.sql` و `down.sql` |
-| Seed | `api/prisma/seed.ts` |
+| مورد            | مسیر                                                                     |
+| --------------- | ------------------------------------------------------------------------ |
+| Schema          | `api/prisma/schema.prisma`                                               |
+| Migrationها     | `api/prisma/migrations/<name>/migration.sql` و `down.sql`                |
+| Seed            | `api/prisma/seed.ts`                                                     |
 | Client تولیدشده | `api/src/generated/prisma` (در Git نیست؛ با `pnpm install` تولید می‌شود) |
-| تنظیم اتصال | `api/prisma.config.ts` (از `DATABASE_URL` در `.env` ریشه استفاده می‌کند) |
+| تنظیم اتصال     | `api/prisma.config.ts` (از `DATABASE_URL` در `.env` ریشه استفاده می‌کند) |
 
 ```powershell
 pnpm --filter @idpn/api db:generate   # تولید Client
@@ -164,14 +164,14 @@ pnpm --filter @idpn/api db:seed       # داده اولیه (Idempotent)
 
 ## 7. اسکریپت‌ها
 
-| دستور | کار |
-|---|---|
-| `pnpm lint` | ESLint (Flat Config) روی کل مخزن |
-| `pnpm lint:fix` | رفع خودکار خطاهای Lint |
-| `pnpm typecheck` | `tsc --noEmit` در تمام پکیج‌های Workspace |
-| `pnpm test` | Vitest در تمام پکیج‌های Workspace |
-| `pnpm format` / `pnpm format:check` | قالب‌بندی یا بررسی قالب با Prettier |
-| `pnpm build` | Build پکیج‌هایی که اسکریپت `build` دارند |
+| دستور                               | کار                                       |
+| ----------------------------------- | ----------------------------------------- |
+| `pnpm lint`                         | ESLint (Flat Config) روی کل مخزن          |
+| `pnpm lint:fix`                     | رفع خودکار خطاهای Lint                    |
+| `pnpm typecheck`                    | `tsc --noEmit` در تمام پکیج‌های Workspace |
+| `pnpm test`                         | Vitest در تمام پکیج‌های Workspace         |
+| `pnpm format` / `pnpm format:check` | قالب‌بندی یا بررسی قالب با Prettier       |
+| `pnpm build`                        | Build پکیج‌هایی که اسکریپت `build` دارند  |
 
 اجرای اسکریپت در یک پکیج مشخص:
 
@@ -182,14 +182,14 @@ pnpm --filter @idpn/api typecheck
 
 ## 8. تست و CI
 
-| دستور | چه چیزی اجرا می‌شود |
-|---|---|
-| `pnpm test` | همه تست‌های پکیج‌ها (بدون Coverage) |
-| `pnpm test:unit` | Unit + Contract با Coverage: `packages/config`، `packages/contracts`، `examples/bff`، `web` |
-| `pnpm test:integration` | تست‌های `api` (HTTP، Postgres، Redis، Rollback، Seed) با Coverage |
-| `pnpm test:e2e` | Playwright Smoke در Chromium |
-| `pnpm contract:check` | مقایسه Artifactهای تولیدشده با Schemaها (Drift = شکست) |
-| `pnpm contract:generate` | بازتولید `openapi.json` و Schemaهای MFE |
+| دستور                    | چه چیزی اجرا می‌شود                                                                         |
+| ------------------------ | ------------------------------------------------------------------------------------------- |
+| `pnpm test`              | همه تست‌های پکیج‌ها (بدون Coverage)                                                         |
+| `pnpm test:unit`         | Unit + Contract با Coverage: `packages/config`، `packages/contracts`، `examples/bff`، `web` |
+| `pnpm test:integration`  | تست‌های `api` (HTTP، Postgres، Redis، Rollback، Seed) با Coverage                           |
+| `pnpm test:e2e`          | Playwright Smoke در Chromium                                                                |
+| `pnpm contract:check`    | مقایسه Artifactهای تولیدشده با Schemaها (Drift = شکست)                                      |
+| `pnpm contract:generate` | بازتولید `openapi.json` و Schemaهای MFE                                                     |
 
 ### Integration Tests و Docker
 
@@ -202,8 +202,8 @@ $env:TEST_REDIS_URL='redis://localhost:6379'
 pnpm test:integration
 ```
 
-  در این حالت یک دیتابیس موقت (`idpn_test_<timestamp>`) روی همان سرور ساخته، آزمایش‌ها روی آن اجرا و در پایان
-  حذف می‌شود؛ دادهٔ دیتابیس توسعه دست‌نخورده می‌ماند. اگر این دو متغیر ست نشوند، همان Testcontainers استفاده می‌شود.
+در این حالت یک دیتابیس موقت (`idpn_test_<timestamp>`) روی همان سرور ساخته، آزمایش‌ها روی آن اجرا و در پایان
+حذف می‌شود؛ دادهٔ دیتابیس توسعه دست‌نخورده می‌ماند. اگر این دو متغیر ست نشوند، همان Testcontainers استفاده می‌شود.
 
 ### E2E
 
@@ -212,17 +212,17 @@ pnpm exec playwright install chromium   # فقط یک بار
 pnpm test:e2e
 ```
 
-`playwright.config.ts` خودش سرویس‌ها را بالا می‌آورد و منتظر Endpoint سلامت هرکدام می‌ماند:
+`playwright.config.ts` خودش سرویس‌ها را بالا می‌آورد و منتظر Endpoint سلامت هرکدام می‌ماند. این فایل قبل از هر چیز `api/.env` و سپس `.env` ریشه را می‌خواند (همان ترتیب اولویت `api/prisma.config.ts`)، بنابراین اگر پورت‌ها را در `.env` تغییر داده باشید، E2E هم به همان استک وصل می‌شود و نیازی به Export دستی متغیرها نیست:
 
-| Project | سرویس | پورت |
-|---|---|---|
-| `api-chromium` | API | `3100` |
-| `web-chromium`، `mfe-chromium` | Hosted Auth UI (Vite) | `5180` |
-| `mf-chromium` | MFE Host | `5176` |
-| `bff-chromium` | نمونهٔ BFF (`examples/bff`) | `3200` |
+| Project                        | سرویس                       | پورت   |
+| ------------------------------ | --------------------------- | ------ |
+| `api-chromium`                 | API                         | `3100` |
+| `web-chromium`، `mfe-chromium` | Hosted Auth UI (Vite)       | `5180` |
+| `mf-chromium`                  | MFE Host                    | `5176` |
+| `bff-chromium`                 | نمونهٔ BFF (`examples/bff`) | `3200` |
 
-پروژهٔ `bff-chromium` سناریوی کامل ورود، Refresh و Logout را روی API واقعی (Postgres + Redis) اجرا
-می‌کند. برای آن، پیش از بالا آمدن BFF یک Fixture یکتا ساخته می‌شود:
+پروژهٔ `bff-chromium` سناریوی کامل ورود، Refresh و Logout را روی API واقعی (Postgres + Redis) اجرا می‌کند.
+برای آن، قبل از بالا آمدن BFF یک Fixture یکتا ساخته می‌شود:
 
 ```powershell
 pnpm --filter @idpn/api run seed:e2e
@@ -230,17 +230,21 @@ pnpm --filter @idpn/api run seed:e2e
 
 این اسکریپت `seedDatabase` را اجرا می‌کند و سپس کلاینت محرمانهٔ `sample-bff` (Redirect URI
 `http://127.0.0.1:3200/auth/callback`) و یک رمز برای کاربر `user@example.com` می‌سازد. مقادیر از
-`E2E_BFF_CLIENT_SECRET` و `E2E_USER_PASSWORD` خوانده می‌شوند؛ مقدار پیش‌فرض فقط برای CI و محیط توسعه
-است و هرگز نباید روی پایگاه دادهٔ Production اجرا شود.
+`E2E_BFF_CLIENT_SECRET` و `E2E_USER_PASSWORD` خوانده می‌شوند و مقدار پیش‌فرض فقط برای محیط CI/توسعه است؛
+هرگز روی پایگاه دادهٔ Production اجرا نشود.
+
+اگر API روی پورت دیگری اجرا می‌شود، `DATABASE_URL` و `REDIS_URL` را در محیط Playwright ست کنید تا هم
+API و هم Fixture به همان سرور وصل شوند.
 
 ### Coverage Gate
-| پکیج | حداقل (Lines/Statements/Functions) | Branches |
-|---|---|---|
-| `packages/config` | 95% | 85% |
-| `packages/contracts` | 90% | 85% |
-| `web` | 90% | 85% |
-| `api` | 80% | 70% |
-| `examples/bff` | 80% | 75% |
+
+| پکیج                 | حداقل (Lines/Statements/Functions) | Branches |
+| -------------------- | ---------------------------------- | -------- |
+| `packages/config`    | 95%                                | 85%      |
+| `packages/contracts` | 90%                                | 85%      |
+| `web`                | 90%                                | 85%      |
+| `api`                | 80%                                | 70%      |
+| `examples/bff`       | 80%                                | 75%      |
 
 Coverage پایین‌تر از حد، فرمان را با خطا متوقف می‌کند.
 
@@ -254,8 +258,8 @@ Coverage پایین‌تر از حد، فرمان را با خطا متوقف م
 
 `.github/workflows/ci.yml` روی هر PR پنج Job اجرا می‌کند: `static` (Lint، Typecheck، Contract، Build)،
 `unit` (Coverage)، `integration` (Testcontainers)، `supply-chain` (Audit، Pin، SBOM) و `e2e`
-(Chromium: API، Hosted UI، MFE و BFF روی سرویس‌های `postgres:16` و `redis:7`). قبل از انتقال هر کارت
-به مرحلهٔ Review، همین مجموعه به‌صورت محلی هم اجرا می‌شود.
+(Chromium: API، Hosted UI، MFE و BFF روی سرویس‌های `postgres:16` و `redis:7`). قبل از انتقال هر کارت به
+مرحلهٔ Review، همین مجموعه به‌صورت محلی هم اجرا می‌شود.
 
 ### زنجیره تأمین
 

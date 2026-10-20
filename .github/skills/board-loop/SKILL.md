@@ -26,9 +26,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .github/agents/board.ps1 cou
 powershell -NoProfile -ExecutionPolicy Bypass -File .github/agents/board.ps1 ready
 powershell -NoProfile -ExecutionPolicy Bypass -File .github/agents/board.ps1 backlog
 powershell -NoProfile -ExecutionPolicy Bypass -File .github/agents/board.ps1 inprogress
+powershell -NoProfile -ExecutionPolicy Bypass -File .github/agents/board.ps1 inreview 5
 powershell -NoProfile -ExecutionPolicy Bypass -File .github/agents/board.ps1 fill 5
 powershell -NoProfile -ExecutionPolicy Bypass -File .github/agents/board.ps1 claim 8
 powershell -NoProfile -ExecutionPolicy Bypass -File .github/agents/board.ps1 review 8
+powershell -NoProfile -ExecutionPolicy Bypass -File .github/agents/board.ps1 approve 8
+powershell -NoProfile -ExecutionPolicy Bypass -File .github/agents/board.ps1 reject 8
 ```
 
 It prints one compact line per card and hides Epics. Raw `gh project item-list` JSON costs
@@ -51,7 +54,9 @@ thousands of tokens per call — avoid it.
 
 7. **Report on the issue** (`gh issue comment <n> -R on4net/on4net-idpn --body-file …`): what changed, the commit, **actual** test counts, what is verified vs unverified and why, and which acceptance boxes are still unticked. Tick only boxes that are true.
 
-8. **Move the card to `In review`** — `board.ps1 review <issue>` — never to `Done`. `Done` is the project owner's gate. If the move fails, say so in the report and record it in the session notes.
+8. **Move the card to `In review`** — `board.ps1 review <issue>`. Never `Done` yourself: the
+   `idpn-reviewer` agent reviews the card and routes it (`PASS` → `approve` → Done,
+   `FAIL` → `reject` → Ready). If you are the one who ran the review, see `idpn-reviewer`.
 
 9. **Take the next card.** Do not stop between cards, do not ask whether to continue, and do not report until the board is drained or the user interrupts.
 
@@ -91,8 +96,8 @@ Do not stall the loop and do not invent an answer to a product question:
 | Backlog | not yet chosen | promote to Ready in batches of five |
 | Ready | next up, unclaimed | claim it to In progress |
 | In progress | claimed — someone is on it | work it if it is yours; otherwise leave it |
-| In review | done, at the gate | nothing to do: never move it to Done |
-| Done | accepted | nothing |
+| In review | done, at the gate | nothing to do — `idpn-reviewer` routes it |
+| Done | accepted (review PASS) | nothing |
 
 ## If a turn ends mid-loop
 

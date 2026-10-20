@@ -99,21 +99,38 @@ root.style.setProperty("--radius", config.theme.radius);
 - هیچ اپی کامپوننت‌ها را Fork نمی‌کند؛ فقط Theme می‌دهد.
 - تست کنتراست برای هر Theme الزامی است.
 
+### 5.1 Theme به‌ازای Login Context
+
+- هر Context می‌تواند `branding` خودش (لوگو، عنوان، رنگ اصلی) را داشته باشد.
+- ترتیب اعمال: Theme پایه اپ ← Theme همان Context.
+- تغییر Context در صفحه ورود، Theme را بدون Reload عوض می‌کند.
+- کنتراست برای ترکیب هر Context با هر Theme تست می‌شود.
+
 ## 6. RTL و i18n
+
+> مرجع کامل رفتار چندزبانه: [localization.md](./localization.md).
 
 ### الزامات
 
 - `DirectionProvider` از Radix در ریشه MFE و Hosted UI.
-- `dir="rtl"` برای فارسی و `dir="ltr"` برای انگلیسی.
+- `dir` بر اساس Locale فعال تنظیم می‌شود (`fa-IR`/`ar-SA` → rtl، `en-US` → ltr).
 - استفاده از Utilityهای Logical:
   - `ps-*` / `pe-*` به‌جای `pl-*` / `pr-*`
   - `ms-*` / `me-*` به‌جای `ml-*` / `mr-*`
   - `start-*` / `end-*` به‌جای `left-*` / `right-*`
   - `text-start` / `text-end` به‌جای `text-left` / `text-right`
 - آیکون‌های جهت‌دار (Chevron، Arrow) در RTL چرخانده شوند (`rtl:rotate-180`).
-- فونت فارسی: `Vazirmatn` یا فونت برند؛ با `font-display: swap`.
-- اعداد، تاریخ و واحد پول با Locale فارسی؛ تست ترکیب فارسی/انگلیسی.
+- فونت به‌ازای Locale: `Vazirmatn` برای `fa-IR`، `Inter` برای `en-US`؛ با `font-display: swap`.
+- اعداد، تاریخ و واحد پول با `Intl` و Locale فعال؛ تست ترکیب فارسی/انگلیسی.
 - فرم‌ها، پیام‌های خطا و Placeholderها در RTL تست شوند.
+
+### متن‌ها
+
+- هیچ متن ثابتی در کامپوننت نوشته نمی‌شود؛ همه از کلیدهای بسته پایه می‌آید.
+- کلیدهای پایه در `packages/i18n/messages/{locale}.json` نگهداری می‌شوند.
+- Override هر اپ و هر Context فقط از API می‌آید و در زمان رندر خوانده می‌شود.
+- Placeholder مجاز: `{name}`, `{appName}`, `{supportEmail}`؛ HTML مجاز نیست.
+- تغییر Locale بدون Reload صفحه و بدون از دست رفتن State.
 
 ### Audit الزامی
 
@@ -126,6 +143,7 @@ root.style.setProperty("--radius", config.theme.radius);
 - Animationهای `slide-in-from-left/right`
 - Iconهای جهت‌دار
 - Portal و Dialog در RTL
+- متن Hardcoded به‌جای کلید ترجمه
 
 هر Patch در `UPSTREAM.md` ثبت شود. مرجع: `https://ui.shadcn.com/docs/rtl`
 
@@ -228,6 +246,9 @@ Tailwind v4 و CSS گلوبال shadcn می‌توانند با Host تداخل 
 - [ ] توکن‌های `--idpn-*` تعریف و مستند شده‌اند.
 - [ ] Theme هر اپ از Public Config اعمال می‌شود.
 - [ ] RTL همه کامپوننت‌های مصرفی Audit و Patch شده است.
+- [ ] هیچ متن Hardcoded در کامپوننت‌ها نیست؛ همه از کلید ترجمه می‌آید.
+- [ ] Locale و فونت هر اپ از Public Config اعمال می‌شود.
+- [ ] Theme هر Login Context درست روی Theme اپ اعمال می‌شود.
 - [ ] ایزولاسیون MFE در Host با Tailwind مستقل تست شده است.
 - [ ] Radix Portalها داخل ریشه MFE رندر می‌شوند.
 - [ ] axe بدون خطای Critical/Serious است.

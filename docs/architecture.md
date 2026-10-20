@@ -130,6 +130,20 @@ sequenceDiagram
 - Callback اختصاصی: `/oauth2/social/{clientId}/{provider}/callback` (باید در کنسول Provider همان اپ ثبت شود).
 - جریان کامل در [auth-flows.md](./auth-flows.md#9-ورود-اجتماعی-social-login).
 
+### Login Context (چند مدل ورود در یک اپ)
+
+- هر کلاینت می‌تواند چند **Context** داشته باشد: `customer-admin`، `customer-team`، `platform-admin` و…
+- Context روی نقش‌های مجاز، روش‌های ورود، MFA، ثبت‌نام و ظاهر صفحه اثر می‌گذارد.
+- `/authorize` پارامتر `login_context` می‌گیرد و توکن Claim `login_context` دارد.
+- عضویت در سطح `(client, context, user)` است.
+- جزئیات: [login-contexts.md](./login-contexts.md).
+
+### Localization (چندزبانه per-app)
+
+- زبان، جهت متن، فونت و متن‌های هر اپ از تنظیمات همان کلاینت می‌آید.
+- Hosted UI و MFE هر دو از یک بسته پایه + Override همان اپ استفاده می‌کنند.
+- جزئیات: [localization.md](./localization.md).
+
 ## 3. جریان SSO بین پلتفرم‌ها
 
 ```mermaid
