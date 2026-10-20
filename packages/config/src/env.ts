@@ -114,6 +114,13 @@ export const serverEnvSchema = z.object({
    * lifetime (max 3600 s) so tokens issued before a rotation stay verifiable until expiry.
    */
   KEY_RETIRED_RETENTION_SECONDS: z.coerce.number().int().min(60).max(86_400).default(3600),
+  /**
+   * In-process cache TTL for the signing-key store and the published JWKS (seconds). The
+   * JWKS is served with `Cache-Control: max-age=300`; keeping the cache at or below that
+   * keeps an out-of-process rotation visible to clients within the header's own window.
+   * `0` disables caching (useful for capacity comparisons).
+   */
+  KEY_CACHE_TTL_SECONDS: z.coerce.number().int().min(0).max(300).default(30),
   MFE_PUBLIC_URL: optionalUrl(),
   /**
    * Additional browser origins allowed to complete a WebAuthn ceremony. `APP_URL` is always

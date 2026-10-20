@@ -79,6 +79,7 @@ const keys = new SigningKeyManager(
       env.KEY_ROTATION_INTERVAL_DAYS > 0
         ? env.KEY_ROTATION_INTERVAL_DAYS
         : DEFAULT_ROTATION_DUE_DAYS,
+    keyCacheTtlSeconds: env.KEY_CACHE_TTL_SECONDS,
     onWarning: (message) => console.warn(`signing key: ${message}`),
   },
 );

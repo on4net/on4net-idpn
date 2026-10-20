@@ -16,4 +16,6 @@ test('serves a contract-valid health response in Chromium', async ({ page, reque
 
   const apiResponse = await request.get('/healthz');
   expect(apiResponse.ok()).toBe(true);
+  expect(apiResponse.headers()['x-content-type-options']).toBe('nosniff');
+  expect(apiResponse.headers()['referrer-policy']).toBe('no-referrer');
 });

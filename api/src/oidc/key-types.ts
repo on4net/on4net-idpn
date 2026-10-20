@@ -64,6 +64,14 @@ export interface SigningKeyManagerOptions {
   retiredRetentionSeconds?: number;
   /** Age in days at which `rotationDue` is reported; 0 disables the flag. */
   rotationDueAfterDays?: number;
+  /**
+   * In-process cache TTL for the key list and the published JWKS. Production key stores are
+   * remote (KMS/Vault), so re-reading them on every JWKS, signing and verification request is
+   * pure latency; the published document already carries `Cache-Control: max-age=300`. The
+   * manager invalidates the cache on its own rotation/revocation, so an out-of-process
+   * rotation is visible after at most this TTL. 0 disables caching.
+   */
+  keyCacheTtlSeconds?: number;
   /** Optional sink for lifecycle warnings (never receives key material). */
   onWarning?: (message: string) => void;
 }

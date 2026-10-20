@@ -132,6 +132,103 @@ jobs:
           path: artifacts/sbom.cdx.json
           if-no-files-found: error
 
+  mfe-security:
+    name: MFE security (CSP, CORS allowlist, source scan)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Security tests (header policy, origin allowlist, forbidden patterns)
+        run: pnpm test:security
+
+  perf-smoke:
+    # Short k6 profile with the documented SLO thresholds (docs/performance-baseline.md).
+    # Not a soak: 15s of measured traffic per scenario plus 5s warmup.
+    name: Load smoke (k6 SLO thresholds)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: idpn
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d idpn"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/idpn
+      REDIS_URL: redis://127.0.0.1:6379
+      SESSION_SECRET: ci-perf-session-secret-at-least-32-characters
+      APP_URL: http://127.0.0.1:3100
+      HOSTED_UI_URL: http://127.0.0.1:3100
+      HOST: 127.0.0.1
+      PORT: '3100'
+      ADMIN_CLIENT_ID: perf-admin
+      SESSION_MAX_CONCURRENT: '0'
+      KEY_ROTATION_INTERVAL_DAYS: '0'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply database migrations
+        run: pnpm --filter @idpn/api run db:deploy
+
+      - name: Seed benchmark fixtures
+        run: pnpm perf:seed
+
+      - name: Start API
+        run: |
+          pnpm --filter @idpn/api start > api-perf.log 2>&1 &
+          echo $! > api-perf.pid
+
+      - name: k6 smoke with SLO thresholds
+        run: pnpm perf:load:smoke
+
+      - name: API log on failure
+        if: failure()
+        run: cat api-perf.log
+
+      - name: Upload performance summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-smoke-summary
+          path: artifacts/perf
+          if-no-files-found: warn
+
   ui-a11y:
     name: UI accessibility (axe Critical/Serious)
     runs-on: ubuntu-latest
@@ -194,7 +291,7 @@ jobs:
           if-no-files-found: ignore
 
   e2e:
-    name: E2E (Chromium: API, Hosted UI, MFE, BFF)
+    name: 'E2E (Chromium: API, Hosted UI, MFE, BFF)'
     runs-on: ubuntu-latest
     services:
       postgres:

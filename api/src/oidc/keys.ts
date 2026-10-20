@@ -24,6 +24,11 @@ import type {
 
 export const SIGNING_ALG = 'ES256' as const;
 
+/** Default in-process cache window for the key list and the published JWKS (seconds). */
+export const DEFAULT_KEY_CACHE_TTL_SECONDS = 30;
+
+type LocalJwkSet = ReturnType<typeof createLocalJWKSet>;
+
 /**
  * Default retention for retired keys: the longest access-token lifetime the Admin API
  * allows (`MAX_ACCESS_TOKEN_TTL` in admin/clients/client-validation.ts), i.e. one hour.
@@ -62,6 +67,13 @@ export class SigningKeyManager {
   private readonly retiredRetentionMs: number;
   private readonly rotationDueAfterDays: number;
   private readonly onWarning: ((message: string) => void) | undefined;
+  private readonly cacheTtlMs: number;
+  /** Bumped on every lifecycle write so an in-flight list cannot repopulate stale state. */
+  private generation = 0;
+  private keysCache: { keys: StoredSigningKey[]; expiresAt: number } | null = null;
+  private keyListRequest: Promise<StoredSigningKey[]> | null = null;
+  private ensureKeyRequest: Promise<StoredSigningKey> | null = null;
+  private localCache: { signature: string; local: LocalJwkSet } | null = null;
 
   constructor(
     private readonly repository: SigningKeyRepository,
@@ -71,18 +83,74 @@ export class SigningKeyManager {
     this.retiredRetentionMs =
       (options.retiredRetentionSeconds ?? DEFAULT_RETIRED_RETENTION_SECONDS) * 1000;
     this.rotationDueAfterDays = options.rotationDueAfterDays ?? DEFAULT_ROTATION_DUE_DAYS;
+    this.cacheTtlMs = (options.keyCacheTtlSeconds ?? DEFAULT_KEY_CACHE_TTL_SECONDS) * 1000;
     this.onWarning = options.onWarning;
+  }
+
+  /**
+   * Reads the key store through a short-lived cache. Concurrent callers share one request,
+   * so a cold JWKS burst does not multiply KMS reads.
+   */
+  private async loadKeys(): Promise<StoredSigningKey[]> {
+    const now = this.now().getTime();
+    if (this.keysCache !== null && now < this.keysCache.expiresAt) {
+      return this.keysCache.keys;
+    }
+    if (this.keyListRequest !== null) {
+      return this.keyListRequest;
+    }
+    const generation = this.generation;
+    const request = this.repository.list().then((keys) => {
+      if (generation === this.generation) {
+        this.keysCache = { keys, expiresAt: this.now().getTime() + this.cacheTtlMs };
+      }
+      return keys;
+    });
+    this.keyListRequest = request;
+    try {
+      return await request;
+    } finally {
+      if (this.keyListRequest === request) {
+        this.keyListRequest = null;
+      }
+    }
+  }
+
+  /** Drops the key/JWKS cache after a lifecycle write (rotation, revocation, first key). */
+  private invalidate(): void {
+    this.generation += 1;
+    this.keysCache = null;
+    this.localCache = null;
+    this.keyListRequest = null;
   }
 
   /** Creates and persists a first active key when the store is empty. */
   async ensureKey(): Promise<StoredSigningKey> {
-    const keys = await this.repository.list();
+    // Concurrent cold-start requests share one provisioning attempt; otherwise two of them
+    // could each observe an empty store and persist a second active key.
+    if (this.ensureKeyRequest !== null) {
+      return this.ensureKeyRequest;
+    }
+    const request = this.resolveActiveKey();
+    this.ensureKeyRequest = request;
+    try {
+      return await request;
+    } finally {
+      if (this.ensureKeyRequest === request) {
+        this.ensureKeyRequest = null;
+      }
+    }
+  }
+
+  private async resolveActiveKey(): Promise<StoredSigningKey> {
+    const keys = await this.loadKeys();
     const active = keys.find((key) => key.status === 'active');
     if (active !== undefined) {
       return active;
     }
     const created = await generateSigningKey('active', this.now());
     await this.repository.save(created);
+    this.invalidate();
     return created;
   }
 
@@ -93,8 +161,12 @@ export class SigningKeyManager {
   /** Publishes active and retired keys so tokens issued before a rotation stay verifiable. */
   async jwks(): Promise<JwksDocument> {
     await this.ensureKey();
-    const keys = await this.repository.list();
+    const keys = await this.loadKeys();
     const now = this.now();
+    // The published set changes with time (a retired key drops out of the JWKS when its
+    // tokens can no longer be valid), so the filtered document is rebuilt from the cached
+    // key list. The expensive part — importing the public keys for verification — is cached
+    // separately and only rebuilt when the set of published kids changes.
     return {
       keys: keys
         .filter((key) => this.isPublished(key, now))
@@ -103,10 +175,19 @@ export class SigningKeyManager {
     };
   }
 
+  /** Returns a local verification key set for exactly these published keys. */
+  private localFor(document: JwksDocument): LocalJwkSet {
+    const signature = document.keys.map((key) => key.kid).join(',');
+    if (this.localCache === null || this.localCache.signature !== signature) {
+      this.localCache = { signature, local: createLocalJWKSet(document) };
+    }
+    return this.localCache.local;
+  }
+
   /** Public metadata and rotation health for operators (`GET /api/v1/keys`). */
   async inspect(): Promise<SigningKeyHealth> {
     await this.ensureKey();
-    const keys = await this.repository.list();
+    const keys = await this.loadKeys();
     const now = this.now();
     const active = keys.find((key) => key.status === 'active') ?? null;
     const ageDays =
@@ -154,7 +235,7 @@ export class SigningKeyManager {
   async rotate(options: { revokePrevious?: boolean } = {}): Promise<KeyRotationResult> {
     await this.ensureKey();
     const now = this.now();
-    const keys = await this.repository.list();
+    const keys = await this.loadKeys();
     const previous = keys.filter((key) => key.status === 'active');
     const revokePrevious = options.revokePrevious === true;
     for (const key of previous) {
@@ -162,6 +243,7 @@ export class SigningKeyManager {
     }
     const created = await generateSigningKey('active', now);
     await this.repository.save(created);
+    this.invalidate();
     return {
       active: created,
       previousKid: previous[0]?.kid ?? null,
@@ -175,12 +257,15 @@ export class SigningKeyManager {
    */
   async revoke(kid: string): Promise<boolean> {
     await this.ensureKey();
-    const keys = await this.repository.list();
+    const keys = await this.loadKeys();
     const target = keys.find((key) => key.kid === kid);
     if (target === undefined) {
       return false;
     }
     await this.repository.updateStatus(kid, 'revoked', this.now());
+    // Invalidate before provisioning a replacement, otherwise the cached active key would
+    // be the revoked one and `ensureKey` would hand it out again.
+    this.invalidate();
     if (target.status === 'active') {
       await this.ensureKey();
     }
@@ -214,9 +299,10 @@ export class SigningKeyManager {
    * not published, and a token that names one fails with an explicit error.
    */
   async verify(token: string, options: VerifyOptions): Promise<JWTVerifyResult['payload']> {
-    const jwks = await this.jwks();
+    const document = await this.jwks();
+    const local = this.localFor(document);
     try {
-      const result = await jwtVerify(token, createLocalJWKSet(jwks), {
+      const result = await jwtVerify(token, local, {
         issuer: options.issuer,
         audience: options.audience,
         algorithms: [SIGNING_ALG],
@@ -229,7 +315,7 @@ export class SigningKeyManager {
       // Name the real cause when the token explicitly references a revoked key.
       const kid = readKid(token);
       if (kid !== null) {
-        const keys = await this.repository.list();
+        const keys = await this.loadKeys();
         if (keys.some((key) => key.kid === kid && key.status === 'revoked')) {
           throw new Error('token was signed by a revoked signing key', { cause: error });
         }

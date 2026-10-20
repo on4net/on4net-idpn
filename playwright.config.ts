@@ -83,7 +83,7 @@ export default defineConfig({
     },
     {
       name: 'web-chromium',
-      testMatch: ['web/login.spec.ts', 'web/rtl.spec.ts'],
+      testMatch: ['web/login.spec.ts', 'web/rtl.spec.ts', 'web/security-headers.spec.ts'],
       use: { ...devices['Desktop Chrome'], baseURL: webURL },
     },
     {

@@ -1,0 +1,54 @@
+# CSP و هدرهای امنیتی — نمونه Caddy
+#
+# الگوی مرجع؛ دامنه‌ها و Origin را جایگزین کنید. منبع واحد سیاست:
+# `web/src/security/headers.ts`. برای پیش‌نیاز TLS خودکار Caddy، دامنه‌ها باید عمومی باشند.
+
+# ---------------------------------------------------------------- Hosted Auth UI
+auth.example.com {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		X-Frame-Options "DENY"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		Cross-Origin-Opener-Policy "same-origin"
+		Cross-Origin-Resource-Policy "same-origin"
+		Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https://auth.example.com; worker-src 'self' blob:; manifest-src 'self'; upgrade-insecure-requests"
+		# مرحله ۱ Trusted Types: فقط گزارش. پس از بازه تمیز، به CSP اصلی منتقل شود.
+		Content-Security-Policy-Report-Only "require-trusted-types-for 'script'; trusted-types idpn 'allow-duplicates'"
+		Reporting-Endpoints `csp="https://auth.example.com/csp-report"`
+	}
+
+	reverse_proxy /api/* idpn-api:3000
+	reverse_proxy /oauth2/* idpn-api:3000
+	reverse_proxy /.well-known/* idpn-api:3000
+	root * /srv/idpn/web
+	try_files {path} /index.html
+	file_server
+}
+
+# ---------------------------------------------------------------- MFE CDN / Remote
+cdn.example.com {
+	@mfe path /idpn-mfe/*
+	header @mfe {
+		Access-Control-Allow-Origin "https://app.example.com"
+		Access-Control-Allow-Methods "GET, HEAD, OPTIONS"
+		Vary "Origin"
+		Cross-Origin-Resource-Policy "cross-origin"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'none'"
+		# مسیر نسخه‌دار Immutable: /idpn-mfe/1.4.0/remoteEntry.js
+		Cache-Control "public, max-age=31536000, immutable"
+	}
+
+	@manifest path /idpn-mfe/manifest.json
+	header @manifest {
+		Access-Control-Allow-Origin "https://app.example.com"
+		Vary "Origin"
+		Cache-Control "public, max-age=300"
+	}
+
+	root * /srv/idpn-mfe
+	file_server
+}

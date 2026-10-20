@@ -6,6 +6,17 @@ import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
 import { idpnScopeUtilities } from './src/styles/scope-utilities.ts';
+import { buildSecurityHeaders } from './src/security/headers.ts';
+import { parseOrigins, remoteCorsPlugin } from './src/security/remote-cors.ts';
+
+/**
+ * Hosts allowed to import `remoteEntry.js`. Never `*`: the remote executes with the host's
+ * privileges, so only the documented host origins may load it (docs/mfe-security.md).
+ */
+const ALLOWED_ORIGINS = parseOrigins(process.env.MFE_ALLOWED_ORIGINS, [
+  'http://127.0.0.1:5176',
+  'http://localhost:5176',
+]);
 
 /** Module Federation remote exposing the authenticated MFE modules. */
 export default defineConfig({
@@ -14,6 +25,7 @@ export default defineConfig({
     tailwindcss(),
     // The remote CSS is injected into the host document; keep its utilities under `.idpn-root`.
     idpnScopeUtilities(),
+    remoteCorsPlugin(ALLOWED_ORIGINS),
     federation({
       name: 'idpnMfe',
       dts: false,
@@ -47,12 +59,16 @@ export default defineConfig({
     host: '127.0.0.1',
     port: 5174,
     strictPort: true,
-    cors: true,
+    // CORS is decided per request by `remoteCorsPlugin`; never enable Vite's wildcard CORS.
+    headers: buildSecurityHeaders({ profile: 'remote', dev: true }),
   },
   preview: {
     host: '127.0.0.1',
     port: 5174,
     strictPort: true,
-    headers: { 'Access-Control-Allow-Origin': '*' },
+    // The load suite reaches the preview server from the k6 container via this host alias.
+    // Production serves the remote from a CDN, which has no Vite host check.
+    allowedHosts: ['host.docker.internal'],
+    headers: buildSecurityHeaders({ profile: 'remote', dev: false }),
   },
 });

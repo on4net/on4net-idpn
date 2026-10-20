@@ -27,7 +27,11 @@
     "contract:check": "pnpm --filter @idpn/contracts run check",
     "supply-chain": "node tools/check-supply-chain.mjs --licenses",
     "audit:ci": "pnpm audit --audit-level=high",
-    "sbom": "node tools/sbom.mjs"
+    "sbom": "node tools/sbom.mjs",
+    "test:security": "pnpm --filter @idpn/web exec vitest run src/security",
+    "perf:seed": "pnpm --filter @idpn/api run db:seed:perf",
+    "perf:load:smoke": "node tools/perf/run-load.mjs --profile smoke",
+    "perf:load:full": "node tools/perf/run-load.mjs --profile full"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.14.0",

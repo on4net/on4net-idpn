@@ -1,0 +1,85 @@
+# CSP و هدرهای امنیتی — نمونه Nginx
+#
+# این فایل الگوی مرجع است، نه یک فایل فعال. مقادیر Origin و دامنه‌ها را جایگزین کنید.
+# منبع واحد سیاست در `web/src/security/headers.ts` است؛ هر تغییری در آن باید این‌جا و در
+# `Caddyfile.example` هم منعکس شود.
+#
+# نکته: Nginx مقدار `add_header` را از بلوک والد به ارث نمی‌برد اگر خودش `add_header`
+# داشته باشد؛ بنابراین هدرهای امنیتی در هر location حساس تکرار شده‌اند.
+
+# ---------------------------------------------------------------- Hosted Auth UI
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name auth.example.com;
+
+    # TLS termination ...
+
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "no-referrer" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+    add_header Cross-Origin-Opener-Policy "same-origin" always;
+    add_header Cross-Origin-Resource-Policy "same-origin" always;
+    add_header Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https://auth.example.com; worker-src 'self' blob:; manifest-src 'self'; upgrade-insecure-requests" always;
+
+    # مرحله ۱ Trusted Types: فقط گزارش. پس از یک بازه بدون نقض، این هدر را حذف و
+    # `require-trusted-types-for 'script'; trusted-types idpn 'allow-duplicates'` را به
+    # Content-Security-Policy بالا اضافه کنید.
+    add_header Content-Security-Policy-Report-Only "require-trusted-types-for 'script'; trusted-types idpn 'allow-duplicates'" always;
+    add_header Reporting-Endpoints 'csp="https://auth.example.com/csp-report"' always;
+
+    location / {
+        root /srv/idpn/web;
+        try_files $uri /index.html;
+    }
+
+    # با Hosted UI هم‌مبدأ است؛ اگر API دامنه جدا دارد، origin آن را به connect-src اضافه کنید.
+    location /api/ {
+        proxy_pass http://idpn-api:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+# ---------------------------------------------------------------- MFE CDN / Remote
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name cdn.example.com;
+
+    # فقط Originهای میزبان مجاز؛ هرگز `*`.
+    set $mfe_allowed_origin "https://app.example.com";
+
+    location /idpn-mfe/ {
+        if ($http_origin != $mfe_allowed_origin) {
+            return 403;
+        }
+
+        root /srv/idpn-mfe;
+        try_files $uri =404;
+
+        add_header Access-Control-Allow-Origin $mfe_allowed_origin always;
+        add_header Access-Control-Allow-Methods "GET, HEAD, OPTIONS" always;
+        add_header Vary "Origin" always;
+        add_header Cross-Origin-Resource-Policy "cross-origin" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "no-referrer" always;
+        add_header Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'none'" always;
+
+        # مسیر نسخه‌دار و Immutable: هر انتشار یک دایرکتوری جدید است.
+        # /idpn-mfe/1.4.0/remoteEntry.js
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        expires 1y;
+    }
+
+    # manifest.json کوتاه‌عمر است تا کشف نسخه سازگار سریع باشد.
+    location = /idpn-mfe/manifest.json {
+        root /srv/idpn-mfe;
+        add_header Cache-Control "public, max-age=300" always;
+        add_header Access-Control-Allow-Origin $mfe_allowed_origin always;
+        add_header Vary "Origin" always;
+    }
+}

@@ -1,10 +1,20 @@
 import { decodeProtectedHeader } from 'jose';
 import { describe, expect, it } from 'vitest';
 
-import { MemorySigningKeyRepository, SigningKeyManager } from './keys.js';
+import { generateSigningKey, MemorySigningKeyRepository, SigningKeyManager } from './keys.js';
 
 const issuer = 'https://auth.example.com';
 const audience = 'app-a';
+
+/** Counts store reads so cache behavior is asserted instead of assumed. */
+class CountingKeyRepository extends MemorySigningKeyRepository {
+  listCalls = 0;
+
+  override async list() {
+    this.listCalls += 1;
+    return super.list();
+  }
+}
 
 const createManager = (options: {
   now: () => Date;
@@ -138,5 +148,73 @@ describe('signing key lifecycle', () => {
     expect(due.activeKey?.ageDays).toBe(90);
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain(active.kid);
+  });
+
+  it('serves repeated JWKS and verification requests without re-reading the key store', async () => {
+    const repository = new CountingKeyRepository();
+    const manager = new SigningKeyManager(repository, () => new Date('2026-10-19T00:00:00Z'));
+    const active = await manager.ensureKey();
+    const token = await sign(manager);
+    const readsAfterSetup = repository.listCalls;
+
+    for (let index = 0; index < 25; index += 1) {
+      expect((await manager.jwks()).keys.map((key) => key.kid)).toEqual([active.kid]);
+      await expect(
+        manager.verify(token, {
+          issuer,
+          audience,
+          currentDate: new Date('2026-10-19T00:00:00Z'),
+        }),
+      ).resolves.toMatchObject({ sub: 'user-1' });
+    }
+
+    // A cold cache reads once (plus the first `ensureKey`); 25 JWKS + 25 verifications
+    // must not multiply that by the number of requests.
+    expect(repository.listCalls).toBe(readsAfterSetup);
+  });
+
+  it('sees an out-of-process rotation after the cache TTL', async () => {
+    let now = new Date('2026-10-19T00:00:00Z');
+    const repository = new CountingKeyRepository();
+    const manager = new SigningKeyManager(repository, () => now, { keyCacheTtlSeconds: 10 });
+    const first = await manager.ensureKey();
+    expect((await manager.jwks()).keys.map((key) => key.kid)).toEqual([first.kid]);
+
+    // Another instance rotates: this manager's cache is intentionally stale until its TTL.
+    await repository.updateStatus(first.kid, 'retired', now);
+    const rotated = await generateSigningKey('active', now);
+    await repository.save(rotated);
+    expect((await manager.jwks()).keys.map((key) => key.kid)).toEqual([first.kid]);
+
+    now = new Date(now.getTime() + 11_000);
+    expect((await manager.jwks()).keys.map((key) => key.kid).sort()).toEqual(
+      [first.kid, rotated.kid].sort(),
+    );
+  });
+
+  it('provisions exactly one active key when a cold burst hits an empty store', async () => {
+    const repository = new CountingKeyRepository();
+    const manager = new SigningKeyManager(repository, () => new Date('2026-10-19T00:00:00Z'));
+
+    const documents = await Promise.all(Array.from({ length: 20 }, () => manager.jwks()));
+
+    expect(documents.every((document) => document.keys.length === 1)).toBe(true);
+    expect(await repository.list()).toHaveLength(1);
+  });
+
+  it('invalidates the cache immediately on its own rotation and revocation', async () => {
+    const repository = new CountingKeyRepository();
+    const manager = new SigningKeyManager(repository, () => new Date('2026-10-19T00:00:00Z'));
+    const first = await manager.ensureKey();
+    await manager.jwks();
+
+    const rotated = await manager.rotate();
+    expect((await manager.jwks()).keys.map((key) => key.kid)).toEqual([
+      first.kid,
+      rotated.active.kid,
+    ]);
+
+    await manager.revoke(first.kid);
+    expect((await manager.jwks()).keys.map((key) => key.kid)).toEqual([rotated.active.kid]);
   });
 });
