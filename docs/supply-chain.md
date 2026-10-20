@@ -54,7 +54,7 @@ pnpm sbom            # artifacts/sbom.cdx.json (CycloneDX 1.5)
 - ورودی: `pnpm-lock.yaml` (همه نسخه‌ها + `integrity` به‌صورت SHA-512) و `pnpm licenses list --json` (لایسنس).
 - خروجی: یک Component برای هر `name@version` با `purl` (`pkg:npm/...`)، هش و لایسنس؛ به‌صورت الفبایی مرتب.
 - `artifacts/` در Git نیست؛ در CI به‌صورت Artifact آپلود می‌شود.
-- تعداد Component در آخرین اجرا: **786**.
+- تعداد Component در آخرین اجرا (Release Gate #49، HEAD `a1a47da`): **820**.
 
 ## 4. لایسنس‌ها
 

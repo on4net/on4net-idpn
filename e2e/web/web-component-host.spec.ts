@@ -159,8 +159,16 @@ test.describe('vanilla host + Web Component', () => {
     expect(surface.cookies).toBe('');
     expect(surface.attributes).toHaveLength(2);
     for (const names of surface.attributes) {
-      expect(names).toEqual(['api-base', 'client-id', 'data-idpn-mfe', 'dir', 'locale']);
+      // `lang` is the documented a11y mirror of the resolved locale on the element itself
+      // (web/src/mfe/web-component.tsx); every other attribute is configuration only.
+      expect(names).toEqual(['api-base', 'client-id', 'data-idpn-mfe', 'dir', 'lang', 'locale']);
     }
+    const surfaceLanguages = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('[data-idpn-mfe]')).map((element) =>
+        element.getAttribute('lang'),
+      ),
+    );
+    expect(surfaceLanguages).toEqual(['fa-IR', 'fa-IR']);
     expect(surface.html).not.toMatch(/bearer\s|access.?token|eyJ[A-Za-z0-9_-]{8,}\./i);
 
     expect(consoleErrors).toEqual([]);

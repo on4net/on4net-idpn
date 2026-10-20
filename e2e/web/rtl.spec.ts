@@ -237,7 +237,8 @@ test.describe('MFE direction parity', () => {
     await expect(root).toHaveAttribute('dir', 'ltr');
     await expect(root).toHaveAttribute('lang', 'en-US');
 
-    const heading = hostElement.locator('h2', { hasText: 'مدیریت کاربران' }).first();
+    // The module renders in the requested locale: en-US labels, not the fa-IR base text.
+    const heading = hostElement.locator('h2', { hasText: 'Member management' }).first();
     const client = hostElement.locator('p', { hasText: 'app-a' }).first();
     const headingBox = await textBox(heading);
     const clientBox = await textBox(client);
@@ -246,7 +247,7 @@ test.describe('MFE direction parity', () => {
     const emailCell = hostElement.locator('td bdi[dir="ltr"]').first();
     await expect(emailCell).toHaveText('negar@example.com');
 
-    await hostElement.getByRole('button', { name: 'دعوت کاربر' }).click();
+    await hostElement.getByRole('button', { name: 'Invite member' }).click();
     const dialog = hostElement.locator('[role="dialog"]');
     await expect(dialog).toBeVisible();
 
@@ -259,7 +260,7 @@ test.describe('MFE direction parity', () => {
     await page.keyboard.press('Escape');
     await expect(dialog).toBeHidden();
 
-    await hostElement.getByRole('combobox', { name: 'وضعیت عضویت' }).click();
+    await hostElement.getByRole('combobox', { name: 'Membership status' }).click();
     const listbox = hostElement.locator('[role="listbox"]');
     await expect(listbox).toHaveAttribute('dir', 'ltr');
 

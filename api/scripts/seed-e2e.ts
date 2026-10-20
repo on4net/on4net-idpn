@@ -115,6 +115,44 @@ async function seedE2eFixtures(prisma: PrismaClient): Promise<void> {
     },
   });
 
+  /**
+   * `/oauth2/authorize` fails closed for a client with active login contexts when the user
+   * holds no active membership for the requested scope (CTX-003, `api/src/oidc/authorize-route.ts`).
+   * The Hosted UI binds the context it resolved (`withLoginContext`), so the fixture needs an
+   * active membership in the client's default context; the client-wide row keeps the unbound
+   * authorize path covered as well. Idempotent.
+   */
+  for (const clientId of [E2E_CLIENT_ID, E2E_SECOND_CLIENT_ID]) {
+    const seededClient = await prisma.client.findUniqueOrThrow({ where: { clientId } });
+    const defaultContext = await prisma.clientLoginContext.findFirst({
+      where: { clientId: seededClient.id, isDefault: true },
+      select: { id: true },
+    });
+    const scopes: (string | null)[] = defaultContext === null ? [null] : [null, defaultContext.id];
+    for (const loginContextId of scopes) {
+      const membership = await prisma.clientMembership.findFirst({
+        where: { clientId: seededClient.id, userId: user.id, loginContextId },
+      });
+      if (membership === null) {
+        await prisma.clientMembership.create({
+          data: {
+            clientId: seededClient.id,
+            userId: user.id,
+            loginContextId,
+            status: 'active',
+            joinedAt: new Date(),
+            invitedAt: new Date(),
+          },
+        });
+      } else if (membership.status !== 'active') {
+        await prisma.clientMembership.update({
+          where: { id: membership.id },
+          data: { status: 'active' },
+        });
+      }
+    }
+  }
+
   console.log(
     `E2E fixtures ready: client ${E2E_CLIENT_ID} -> ${E2E_REDIRECT_URI}, user ${E2E_USER_IDENTIFIER}.`,
   );

@@ -6,6 +6,11 @@
 > Card: #46 — "Run security review, penetration test and OIDC conformance".
 > Date: 2026-10-19. Reviewer: developer agent (security-review skill), evidence in `artifacts/security/`.
 
+> **Release gate re-verification (#49):** this report was re-validated on branch `a-main`
+> HEAD `a1a47da` on 2026-10-20 after the login-context, session, localization, MFE-hardening and
+> operations cards landed. See §10 for the final status, fresh-audit result and new evidence.
+> `docs/release-readiness.md` holds the release go/no-go.
+
 ## 1. Executive summary
 
 | Severity | Found | Fixed | Accepted / owner decision | Open |
@@ -387,3 +392,77 @@ docker run --rm -v "${PWD}\artifacts\security:/zap/wrk:rw" ghcr.io/zaproxy/zapro
 
 Evidence artifacts (`artifacts/` is git-ignored): `zap-baseline.{html,json,md}`,
 `oidc-conformance.txt`, `zap-plan.yaml`.
+
+## 10. Release-gate re-verification (#49, HEAD `a1a47da`, 2026-10-20)
+
+A fresh audit (security-review skill) was run against the current HEAD, covering the code that
+landed after #46: context-enforced `/authorize`/`/token`/role resolution (#62), context admin
+API and delegated scoping (#64), context-aware sessions and step-up (#65), hosted login-context
+selector (#63), per-client localization (#59, #66) and the MFE/JWKS/operations work (#47, #56,
+#57, ops).
+
+### 10.1 Findings status on HEAD
+
+| ID | Severity | Status on HEAD | Evidence |
+|---|---|---|---|
+| H1 | High | **Fixed** | `sanitizeReturnTo` only accepts rooted paths or the IdP origin (`api/src/login/login-types.ts:50-73`); the UI never falls back to the raw query (`web/src/app/hosted-login.tsx:423-437, 776, 800`); regression tests in `web/src/app/hosted-login.test.tsx`. |
+| H2 | High | **Fixed** | Policy re-evaluated at code issuance for password, social and SSO sessions, including `acr_values` (`api/src/oidc/authorize-route.ts:300-331`, `authorize-enforcement.ts:24-42`); `api/test/authorize-route.test.ts`. |
+| H3 | High | **Fixed** | `login_context` persisted on codes and refresh tokens (`prisma-code-repository.ts:20-55`, `prisma-refresh-repository.ts:20-68`), taken only from the stored row (`token-route.ts:185-213, 306-311, 358-382`); cross-client RBAC integration test. |
+| H4 | High | **Partially fixed — accepted (owner)** | Context-scoped and context-less-request paths fail closed (`authorize-route.ts:255-291`, `effective-access.ts:118-135`); clients without active contexts keep the legacy membership-free path. Owner action §7.1. |
+| M1 | Medium | **Open — accepted** | `/api/v1/login` has no origin check (`api/src/login/routes.ts:90`); owner action §7.2. |
+| M2 | Medium | **Open — accepted** | Signing store hard-coded to `FileSigningKeyRepository('.idpn-keys.json')` (`api/src/index.ts:133`); `SIGNING_KEY_REF` unused. Owner action §7.3. |
+| M3 | Medium | **Fixed** | `invalid_client` + 401 + `WWW-Authenticate: Basic` (`token-route.ts:134-140`); `api/test/token-route.test.ts`. |
+| L1 | Low | **Fixed** | Non-active accounts rejected after password verification (`login/routes.ts:144-150`). |
+| L2 | Low | **Open — accepted** | `PASSWORD_PEPPER`, Argon2 tuning and `TRUSTED_PROXY_CIDRS` still unapplied. Owner action §7.7. |
+| L3 | Low | **Fixed** | `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer` on every response (`api/src/server.ts:161-166`); `api/test/health.test.ts`. |
+| I1–I3 | Info | **Accepted** | Consent default, per-IP limits and MFE SRI remain owner decisions (§7.6, §7.7, §7.5). |
+
+**Fresh-audit verdict: no new Critical, High or credible Medium defect on HEAD.** Server-side
+authorization was verified on every new id-based admin route: the path `clientId` is compared to
+the token `client_id` claim (`api/src/admin/authorize.ts:201-225`), and context routes re-check
+`adminContextScope` (`api/src/admin/members/routes.ts:132-183`). No IDOR/BOLA bypass was found in
+context member ids, session revocation or `return_to` handling. Two below-threshold design
+observations are recorded for the owner: `isDefault` is not part of the step-up field set for a
+context update (`api/src/admin/login-contexts/routes.ts:34, 291`), and a role shared between two
+contexts makes context role edits global by design of the user-level assignment model
+(`api/src/admin/members/prisma-member-repository.ts:303, 487, 667`).
+
+### 10.2 `docs/security.md` §13 final mapping
+
+**32 of 40 items are verified in code and tests.** The other eight are deployment/owner items,
+not code defects: two are not implemented in the repository — KMS/Vault signing-key storage (17)
+and CSP/HSTS at the edge (18) — and six are partial: per-IP rate limiting (9), login CSRF (12),
+admin step-up (14), external resource-server `login_context` enforcement (35, out of
+repository), step-up for context/translation changes (39) and for social/sensitive-role changes
+(40). Items 20 (backup/restore tested) and 21 (incident runbook and contacts) moved from ❌ to ✅
+with the operations work (`docs/monitoring.md` §6, `docs/runbooks/incidents.md`). Accepted risks
+and owner actions are in `docs/release-readiness.md` §6–§7.
+
+### 10.3 Dynamic checks on HEAD
+
+| Check | Result |
+|---|---|
+| ZAP baseline (`zap-baseline.py`, local API on `127.0.0.1:3100`) | **0 FAIL**, 1 WARN (storable 404 for `/`, `/robots.txt`, `/sitemap.xml`), 66 PASS — `artifacts/security/zap-baseline-49.{html,json}` |
+| ZAP automation plan (discovery, JWKS, public config, valid/invalid authorize redirect, userinfo, `/api/v1/me`, `/metrics`, token) | **0 alerts**, "Automation plan succeeded", exit 0 — `artifacts/security/zap-automation-49.json`, plan `zap-plan-49.yaml` |
+| OIDC conformance-style checks | **23/23 pass** — `artifacts/oidc-conformance-49.txt` |
+| Secret scan (tracked files) | no real secret; only test fixtures and skill reference docs |
+| `pnpm audit:ci` | "No known vulnerabilities found" |
+| `pnpm supply-chain` | passed (14 pinned packages, React 19.3.1) |
+| `pnpm sbom` | CycloneDX 1.5, 820 components |
+
+OpenID Conformance Suite full run remains an owner action (§6.3): it needs a MongoDB sidecar and
+browser-driven plan configuration, which this environment does not provide.
+
+### 10.4 Release gate changes that touch security-relevant fixtures
+
+- `api/prisma/seed.ts`: `admin-panel` now declares `supported: ['fa-IR','en-US']` so the Hosted
+  UI honours `ui_locales` as documented. No security control changed.
+- `api/scripts/seed-e2e.ts`: seeds idempotent active memberships (client-wide and default
+  login context) for the E2E user, matching the fail-closed `/authorize` rule. This closes a
+  fixture gap that had made the BFF SSO/logout E2E flow return `access_denied`.
+
+### 10.5 Final security verdict
+
+**PASS — no open Critical or High.** The accepted Medium/Low/Info items are documented with
+named owner actions; none blocks a staging release candidate.
+

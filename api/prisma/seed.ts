@@ -131,6 +131,14 @@ const ADMIN_CLIENT = {
   scopes: ['openid', 'profile', 'email', 'idp.admin'],
   mfaPolicy: 'required_all' as const,
   registrationPolicy: 'disabled' as const,
+  // The Hosted UI (and the admin panel it serves) ships the fa-IR/en-US base bundles
+  // (docs/localization.md 5). Without an explicit allowlist the public config exposes only
+  // `fa-IR`, so an `ui_locales=en-US` request would silently fall back to Persian.
+  locales: {
+    default: 'fa-IR',
+    supported: ['fa-IR', 'en-US'],
+    dir: { 'fa-IR': 'rtl', 'en-US': 'ltr' },
+  },
 };
 
 /**

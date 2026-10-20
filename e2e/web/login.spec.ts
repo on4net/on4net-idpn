@@ -1,8 +1,13 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
 
+/**
+ * Persian is requested explicitly: the documented locale chain puts `ui_locales` first and
+ * the browser's `Accept-Language` second, so without it the run would depend on the test
+ * browser's language once a client enables more than one locale (docs/localization.md 3).
+ */
 const loginUrl =
-  '/?client_id=admin-panel&return_to=%2Foauth2%2Fauthorize%3Fclient_id%3Dadmin-panel';
+  '/?client_id=admin-panel&ui_locales=fa-IR&return_to=%2Foauth2%2Fauthorize%3Fclient_id%3Dadmin-panel';
 
 test.describe('hosted login', () => {
   test('renders an RTL Persian form without critical accessibility violations', async ({
