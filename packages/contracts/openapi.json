@@ -148,55 +148,68 @@
             "properties": {
               "background": {
                 "type": "string",
-                "maxLength": 80
+                "maxLength": 80,
+                "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
               },
               "foreground": {
                 "type": "string",
-                "maxLength": 80
+                "maxLength": 80,
+                "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
               },
               "card": {
                 "type": "string",
-                "maxLength": 80
+                "maxLength": 80,
+                "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
               },
               "primary": {
                 "type": "string",
-                "maxLength": 80
+                "maxLength": 80,
+                "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
               },
               "primaryForeground": {
                 "type": "string",
-                "maxLength": 80
+                "maxLength": 80,
+                "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
               },
               "secondary": {
                 "type": "string",
-                "maxLength": 80
+                "maxLength": 80,
+                "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
               },
               "muted": {
                 "type": "string",
-                "maxLength": 80
+                "maxLength": 80,
+                "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
               },
               "accent": {
                 "type": "string",
-                "maxLength": 80
+                "maxLength": 80,
+                "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
               },
               "destructive": {
                 "type": "string",
-                "maxLength": 80
+                "maxLength": 80,
+                "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
               },
               "border": {
                 "type": "string",
-                "maxLength": 80
+                "maxLength": 80,
+                "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
               },
               "input": {
                 "type": "string",
-                "maxLength": 80
+                "maxLength": 80,
+                "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
               },
               "ring": {
                 "type": "string",
-                "maxLength": 80
+                "maxLength": 80,
+                "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
               },
               "radius": {
                 "type": "string",
-                "maxLength": 16
+                "maxLength": 16,
+                "pattern": "^(?:0|(?:\\d{1,4})(?:\\.\\d{1,4})?(?:px|rem|em|%))$"
               },
               "fontFamily": {
                 "type": "object",
@@ -218,64 +231,76 @@
                     ]
                   }
                 },
-                "additionalProperties": false
+                "additionalProperties": {}
               },
               "dark": {
                 "type": "object",
                 "properties": {
                   "background": {
                     "type": "string",
-                    "maxLength": 80
+                    "maxLength": 80,
+                    "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
                   },
                   "foreground": {
                     "type": "string",
-                    "maxLength": 80
+                    "maxLength": 80,
+                    "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
                   },
                   "card": {
                     "type": "string",
-                    "maxLength": 80
+                    "maxLength": 80,
+                    "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
                   },
                   "primary": {
                     "type": "string",
-                    "maxLength": 80
+                    "maxLength": 80,
+                    "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
                   },
                   "primaryForeground": {
                     "type": "string",
-                    "maxLength": 80
+                    "maxLength": 80,
+                    "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
                   },
                   "secondary": {
                     "type": "string",
-                    "maxLength": 80
+                    "maxLength": 80,
+                    "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
                   },
                   "muted": {
                     "type": "string",
-                    "maxLength": 80
+                    "maxLength": 80,
+                    "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
                   },
                   "accent": {
                     "type": "string",
-                    "maxLength": 80
+                    "maxLength": 80,
+                    "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
                   },
                   "destructive": {
                     "type": "string",
-                    "maxLength": 80
+                    "maxLength": 80,
+                    "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
                   },
                   "border": {
                     "type": "string",
-                    "maxLength": 80
+                    "maxLength": 80,
+                    "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
                   },
                   "input": {
                     "type": "string",
-                    "maxLength": 80
+                    "maxLength": 80,
+                    "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
                   },
                   "ring": {
                     "type": "string",
-                    "maxLength": 80
+                    "maxLength": 80,
+                    "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
                   }
                 },
-                "additionalProperties": false
+                "additionalProperties": {}
               }
             },
-            "additionalProperties": false
+            "additionalProperties": {}
           },
           "registrationPolicy": {
             "type": "string",
@@ -357,55 +382,68 @@
                       "properties": {
                         "background": {
                           "type": "string",
-                          "maxLength": 80
+                          "maxLength": 80,
+                          "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
                         },
                         "foreground": {
                           "type": "string",
-                          "maxLength": 80
+                          "maxLength": 80,
+                          "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
                         },
                         "card": {
                           "type": "string",
-                          "maxLength": 80
+                          "maxLength": 80,
+                          "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
                         },
                         "primary": {
                           "type": "string",
-                          "maxLength": 80
+                          "maxLength": 80,
+                          "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
                         },
                         "primaryForeground": {
                           "type": "string",
-                          "maxLength": 80
+                          "maxLength": 80,
+                          "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
                         },
                         "secondary": {
                           "type": "string",
-                          "maxLength": 80
+                          "maxLength": 80,
+                          "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
                         },
                         "muted": {
                           "type": "string",
-                          "maxLength": 80
+                          "maxLength": 80,
+                          "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
                         },
                         "accent": {
                           "type": "string",
-                          "maxLength": 80
+                          "maxLength": 80,
+                          "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
                         },
                         "destructive": {
                           "type": "string",
-                          "maxLength": 80
+                          "maxLength": 80,
+                          "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
                         },
                         "border": {
                           "type": "string",
-                          "maxLength": 80
+                          "maxLength": 80,
+                          "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
                         },
                         "input": {
                           "type": "string",
-                          "maxLength": 80
+                          "maxLength": 80,
+                          "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
                         },
                         "ring": {
                           "type": "string",
-                          "maxLength": 80
+                          "maxLength": 80,
+                          "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
                         },
                         "radius": {
                           "type": "string",
-                          "maxLength": 16
+                          "maxLength": 16,
+                          "pattern": "^(?:0|(?:\\d{1,4})(?:\\.\\d{1,4})?(?:px|rem|em|%))$"
                         },
                         "fontFamily": {
                           "type": "object",
@@ -427,64 +465,76 @@
                               ]
                             }
                           },
-                          "additionalProperties": false
+                          "additionalProperties": {}
                         },
                         "dark": {
                           "type": "object",
                           "properties": {
                             "background": {
                               "type": "string",
-                              "maxLength": 80
+                              "maxLength": 80,
+                              "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
                             },
                             "foreground": {
                               "type": "string",
-                              "maxLength": 80
+                              "maxLength": 80,
+                              "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
                             },
                             "card": {
                               "type": "string",
-                              "maxLength": 80
+                              "maxLength": 80,
+                              "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
                             },
                             "primary": {
                               "type": "string",
-                              "maxLength": 80
+                              "maxLength": 80,
+                              "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
                             },
                             "primaryForeground": {
                               "type": "string",
-                              "maxLength": 80
+                              "maxLength": 80,
+                              "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
                             },
                             "secondary": {
                               "type": "string",
-                              "maxLength": 80
+                              "maxLength": 80,
+                              "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
                             },
                             "muted": {
                               "type": "string",
-                              "maxLength": 80
+                              "maxLength": 80,
+                              "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
                             },
                             "accent": {
                               "type": "string",
-                              "maxLength": 80
+                              "maxLength": 80,
+                              "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
                             },
                             "destructive": {
                               "type": "string",
-                              "maxLength": 80
+                              "maxLength": 80,
+                              "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
                             },
                             "border": {
                               "type": "string",
-                              "maxLength": 80
+                              "maxLength": 80,
+                              "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
                             },
                             "input": {
                               "type": "string",
-                              "maxLength": 80
+                              "maxLength": 80,
+                              "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
                             },
                             "ring": {
                               "type": "string",
-                              "maxLength": 80
+                              "maxLength": 80,
+                              "pattern": "^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\\(.*\\)|[hH][sS][lL][aA]?\\(.*\\)|[oO][kK][lL][cC][hH]\\(.*\\)|transparent|black|white|currentcolor)$"
                             }
                           },
-                          "additionalProperties": false
+                          "additionalProperties": {}
                         }
                       },
-                      "additionalProperties": false
+                      "additionalProperties": {}
                     }
                   },
                   "additionalProperties": false

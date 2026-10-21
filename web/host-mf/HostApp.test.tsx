@@ -37,7 +37,7 @@ const erroringLoaders: Record<IdpnMfeModule, RemoteLoader> = {
 const config = parseHostConfig({
   VITE_IDPN_CLIENT_ID: 'app-a',
   VITE_IDPN_LOGIN_CONTEXT: 'admin',
-  VITE_IDPN_THEME: '{"brand":"#0057b8"}',
+  VITE_IDPN_THEME: '{"primary":"#0057b8"}',
 });
 
 afterEach(() => {

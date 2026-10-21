@@ -84,6 +84,40 @@ async function submitPasswordStep(page: Page, locale: 'fa-IR' | 'en-US'): Promis
   await page.getByRole('button', { name: submit, exact: true }).click();
 }
 
+test.describe('per-client themes', () => {
+  // Two clients, two different themes, no code difference: the only varying input is the
+  // public-config `theme` object (docs/design-system.md 5, card #53 acceptance).
+  const THEME_A = { primary: '#0057b8', radius: '8px' };
+  const THEME_B = { primary: '#0f766e', radius: '0rem', background: '#f8fafc', foreground: '#0f172a' };
+
+  for (const [label, theme] of [
+    ['a', THEME_A],
+    ['b', THEME_B],
+  ] as const) {
+    test(`login themed client ${label} — fa-IR RTL / light`, async ({ page }) => {
+      await installUiFixtures(page, { theme });
+      await page.goto(hosted('fa-IR'));
+      const card = await waitForLogin(page, 'fa-IR');
+      await expect(card).toHaveScreenshot(`login-theme-${label}-fa-light.png`, SCREENSHOT);
+    });
+  }
+
+  test('a hostile theme falls back to the accessible palette', async ({ page }) => {
+    // White text on a white background cannot reach AA; the contract drops the pair so the
+    // built-in foreground is painted instead of invisible text.
+    await installUiFixtures(page, { theme: { background: '#ffffff', foreground: '#ffffff' } });
+    await page.goto(hosted('fa-IR'));
+    const card = await waitForLogin(page, 'fa-IR');
+
+    const colours = await card.evaluate((element) => {
+      const styles = getComputedStyle(element);
+      return { color: styles.color, background: styles.backgroundColor };
+    });
+    expect(colours.color).not.toBe(colours.background);
+    await expect(card).toHaveScreenshot('login-theme-fallback-fa-light.png', SCREENSHOT);
+  });
+});
+
 test.describe('hosted auth UI', () => {
   test('login — fa-IR RTL / light', async ({ page }) => {
     await installUiFixtures(page);

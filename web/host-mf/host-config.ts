@@ -1,3 +1,8 @@
+import {
+  IDPN_THEME_COLOR_KEYS,
+  idpnThemeSchema,
+  sanitizeIdpnTheme,
+} from '@idpn/contracts/theme';
 import { z } from 'zod';
 import type {
   IdpnDirection,
@@ -26,7 +31,6 @@ export const DEFAULT_LOGIN_CONTEXT = 'default';
 const CLIENT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
 const LOGIN_CONTEXT_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const LOCALE_PATTERN = /^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$/;
-const THEME_TOKEN_PATTERN = /^[a-z][a-z0-9-]{0,63}$/;
 
 /**
  * Redirect targets and API bases must be an absolute http(s) URL or a same-origin path.
@@ -169,6 +173,17 @@ const THEME_ISSUE: HostConfigIssue = {
   message: 'must be a JSON object whose values are CSS token strings',
 };
 
+/** Keys the theme contract accepts; anything else is a host configuration mistake. */
+const THEME_KEYS = new Set<string>([...IDPN_THEME_COLOR_KEYS, 'radius', 'fontFamily', 'dark']);
+
+/**
+ * Validates `VITE_IDPN_THEME` against the shared theme contract (`docs/mfe-sdk.md` 8).
+ *
+ * The host used to accept arbitrary token names and pass them on, but the contract has a
+ * closed `IdpnTheme` shape since v2: an unknown key such as the old `{ "brand": "#0057b8" }`
+ * would be dropped at render time and the host would boot unthemed without any signal. It is
+ * rejected here instead.
+ */
 function parseThemeTokens(raw: string | undefined): ThemeResult {
   if (raw === undefined || raw === '') {
     return { ok: true, tokens: {} };
@@ -182,20 +197,29 @@ function parseThemeTokens(raw: string | undefined): ThemeResult {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return { ok: false, issue: THEME_ISSUE };
   }
-  const tokens: Record<string, string> = {};
-  for (const [name, token] of Object.entries(value)) {
-    if (!THEME_TOKEN_PATTERN.test(name) || typeof token !== 'string' || token.length > 200) {
+
+  for (const name of Object.keys(value)) {
+    if (!THEME_KEYS.has(name)) {
       return {
         ok: false,
         issue: {
           key: THEME_ISSUE.key,
-          message: `token "${name}" must have a CSS token name and a string value`,
+          message: `token "${name}" is not part of the theme contract`,
         },
       };
     }
-    tokens[name] = token;
   }
-  return { ok: true, tokens };
+
+  const parsed = idpnThemeSchema.safeParse(value);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      issue: { key: THEME_ISSUE.key, message: 'must contain valid CSS colour and radius values' },
+    };
+  }
+  // The schema allows extra keys for client rows; the effective theme is the sanitized one
+  // (grammar + WCAG AA contrast, see `sanitizeIdpnTheme`).
+  return { ok: true, tokens: sanitizeIdpnTheme(parsed.data) };
 }
 
 function describeIssue(issue: { readonly code: string; readonly message: string }): string {

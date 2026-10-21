@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  IDPN_BASE_THEME,
   IDPN_THEME_COLOR_KEYS,
   IDPN_THEME_FONT_KEYS,
+  MIN_CONTRAST_RATIO,
+  contrastRatio,
   idpnThemeSchema,
   idpnThemeToCssVariables,
   sanitizeIdpnColor,
@@ -194,16 +197,19 @@ describe('idpnThemeToCssVariables', () => {
 });
 
 describe('idpnThemeSchema', () => {
-  it('accepts the documented public shape and strips unknown fields', () => {
-    expect(
-      idpnThemeSchema.parse({
-        primary: '#0f766e',
-        radius: '8px',
-        fontFamily: { rtl: 'vazirmatn', ltr: 'inter' },
-        dark: { background: '#0a0a0a' },
-        brand: '#123456',
-      }),
-    ).toEqual({
+  it('accepts the documented public shape and sanitizes unknown fields away', () => {
+    const parsed = idpnThemeSchema.parse({
+      primary: '#0f766e',
+      radius: '8px',
+      fontFamily: { rtl: 'vazirmatn', ltr: 'inter' },
+      dark: { background: '#0a0a0a' },
+      brand: '#123456',
+    });
+
+    // The schema tolerates extra keys (a branding row may carry them); the sanitizer is the
+    // boundary that produces the theme the renderer sees.
+    expect(parsed).toMatchObject({ brand: '#123456' });
+    expect(sanitizeIdpnTheme(parsed)).toEqual({
       primary: '#0f766e',
       radius: '8px',
       fontFamily: { rtl: 'vazirmatn', ltr: 'inter' },
@@ -215,5 +221,62 @@ describe('idpnThemeSchema', () => {
     expect(idpnThemeSchema.safeParse({ primary: 'url(javascript:alert(1))' }).success).toBe(false);
     expect(idpnThemeSchema.safeParse({ radius: '8px; color: red' }).success).toBe(false);
     expect(idpnThemeSchema.safeParse({ fontFamily: { rtl: 'Arial' } }).success).toBe(false);
+  });
+
+  it('allows unknown keys so client rows keep their extra branding', () => {
+    const parsed = idpnThemeSchema.parse({ primary: '#0f766e', brand: 'acme' });
+    expect(parsed).toMatchObject({ primary: '#0f766e', brand: 'acme' });
+    // The renderer only ever sees the sanitized shape.
+    expect(sanitizeIdpnTheme(parsed)).toEqual({ primary: '#0f766e' });
+  });
+});
+
+describe('theme contrast guard', () => {
+  it('measures WCAG contrast ratios', () => {
+    expect(contrastRatio('#000000', '#ffffff')).toBeCloseTo(21, 5);
+    expect(contrastRatio('#ffffff', '#ffffff')).toBeCloseTo(1, 5);
+    // #767676 on white is the classic 4.54:1 boundary value for AA.
+    expect(contrastRatio('#767676', '#ffffff')).toBeGreaterThanOrEqual(MIN_CONTRAST_RATIO);
+    expect(contrastRatio('#999999', '#ffffff')).toBeLessThan(MIN_CONTRAST_RATIO);
+    // OKLCH (the palette format used by globals.css) resolves through OKLab.
+    expect(contrastRatio('oklch(0.145 0 0)', 'oklch(1 0 0)')).toBeGreaterThan(15);
+    expect(contrastRatio('hsl(0 0% 0%)', 'rgb(255, 255, 255)')).toBeCloseTo(21, 5);
+    expect(contrastRatio('transparent', '#ffffff')).toBeNull();
+  });
+
+  it('drops a client foreground that is invisible on its background', () => {
+    // The exact example from the review: white text on a white background.
+    expect(sanitizeIdpnTheme({ background: '#ffffff', foreground: '#ffffff' })).toEqual({});
+    // Also when only the foreground is supplied and the built-in background is white.
+    expect(sanitizeIdpnTheme({ foreground: '#ffffff' })).toEqual({});
+  });
+
+  it('drops a failing primary pair on the primary token', () => {
+    expect(sanitizeIdpnTheme({ primary: '#ffffff', primaryForeground: '#ffffff' })).toEqual({});
+  });
+
+  it('keeps an accessible pair untouched', () => {
+    const theme = { background: '#0b1020', foreground: '#f8fafc', primary: '#0f766e' };
+    expect(sanitizeIdpnTheme(theme)).toEqual(theme);
+  });
+
+  it('applies the guard to dark-mode overrides against the dark palette', () => {
+    expect(
+      sanitizeIdpnTheme({ dark: { background: '#111111', foreground: '#0d0d0d' } }),
+    ).toEqual({});
+    const accessible = { dark: { background: '#111111', foreground: '#f5f5f5' } };
+    expect(sanitizeIdpnTheme(accessible)).toEqual(accessible);
+  });
+
+  it('keeps the built-in palette above AA in both modes', () => {
+    for (const mode of ['light', 'dark'] as const) {
+      const base = IDPN_BASE_THEME[mode];
+      expect(contrastRatio(base.foreground, base.background)).toBeGreaterThanOrEqual(
+        MIN_CONTRAST_RATIO,
+      );
+      expect(contrastRatio(base.primaryForeground, base.primary)).toBeGreaterThanOrEqual(
+        MIN_CONTRAST_RATIO,
+      );
+    }
   });
 });

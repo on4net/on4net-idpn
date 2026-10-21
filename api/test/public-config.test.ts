@@ -111,7 +111,9 @@ describe('buildPublicClientConfig', () => {
 
     expect(config.loginContexts[0]?.branding?.title).toBeUndefined();
     expect(config.loginContexts[0]?.branding?.logoUrl).toBeUndefined();
-    expect(config.loginContexts[0]?.branding?.theme).toEqual({ background: '#111111' });
+    // The palette value is valid on its own but leaves the built-in foreground below AA on
+    // #111111, so the contrast guard drops the pair as well (docs/design-system.md 4).
+    expect(config.loginContexts[0]?.branding?.theme).toBeUndefined();
     const serialized = JSON.stringify(config).toLowerCase();
     for (const forbidden of ['javascript', 'allowedroles', 'rawcss', 'display']) {
       expect(serialized).not.toContain(forbidden);

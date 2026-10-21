@@ -122,7 +122,7 @@ export interface IdpnMfeConfig {
     dir: Record<string, 'rtl' | 'ltr'>;
   };
   loginContext?: string;       // مدل ورود فعال همان اپ
-  theme?: IdpnThemeTokens;     // CSS Variables
+  theme?: IdpnThemeTokens;     // ۱۲ کلید رنگ + radius + fontFamily + dark (docs/design-system.md 4)
   module: 'account' | 'user-management';
   basename?: string;
   features?: {

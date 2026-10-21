@@ -54,7 +54,7 @@ describe('parseHostConfig', () => {
       VITE_IDPN_LOCALE: 'en-US',
       VITE_IDPN_DIR: 'auto',
       VITE_IDPN_MODULE: 'account',
-      VITE_IDPN_THEME: '{"brand":"#0057b8","radius":"0.75rem"}',
+      VITE_IDPN_THEME: '{"primary":"#0057b8","radius":"0.75rem"}',
     });
 
     expect(config.mode).toBe('spa');
@@ -64,7 +64,7 @@ describe('parseHostConfig', () => {
     expect(config.locale).toBe('en-US');
     expect(config.dir).toBe('ltr');
     expect(config.modules).toEqual(['account']);
-    expect(config.theme).toEqual({ brand: '#0057b8', radius: '0.75rem' });
+    expect(config.theme).toEqual({ primary: '#0057b8', radius: '0.75rem' });
   });
 
   it('resolves the module selection without duplicating a module', () => {
@@ -138,8 +138,9 @@ describe('parseHostConfig', () => {
   it.each([
     ['not-json', /must be a JSON object/],
     ['[1,2,3]', /must be a JSON object/],
-    ['{"brand":42}', /token "brand"/],
-    ['{"--brand":"red"}', /token "--brand"/],
+    ['{"brand":"#0057b8"}', /token "brand" is not part of the theme contract/],
+    ['{"primary":"not-a-color"}', /valid CSS colour and radius/],
+    ['{"primary":"#0057b8","radius":"huge"}', /valid CSS colour and radius/],
   ])('rejects an invalid theme (%s)', (theme, message) => {
     const issues = issuesOf({ ...baseEnv, VITE_IDPN_THEME: theme });
     expect(issues).toHaveLength(1);

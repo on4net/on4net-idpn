@@ -6,7 +6,7 @@
 > تعریف شده و این سند نحوهٔ استفادهٔ عملی از آن است.
 
 - نسخه SDK: `0.1.0`
-- نسخه قرارداد Config/Event: `1` (`MFE_SCHEMA_VERSION`)
+- نسخه قرارداد Config/Event: `2` (`MFE_SCHEMA_VERSION`)
 - ماژول‌ها: `user-management` و `account` (ماژول `admin` و `hosted-auth` داخل اپ Mount نمی‌شوند.)
 
 ## 1. نصب
@@ -636,10 +636,18 @@ pnpm --filter @idpn/web run build:wc    # dist-wc/web-component.js
 
 1. `IDPN_MFE_SDK_VERSION` و `package.json` هم‌زمان Bump شوند (`version.test.ts`).
 2. اگر Config/Event تغییر کرده، `MFE_SCHEMA_VERSION` و
-   `IDPN_MFE_CONTRACT_VERSION` هم‌زمان Bump شوند.
+   `IDPN_MFE_CONTRACT_VERSION` هم‌زمان Bump شوند. مقدار منتشرشده در `contract.test.ts`
+   پین شده است، پس Bump باید آگاهانه همراه با یادداشت مهاجرت باشد.
 3. `pnpm --filter @idpn/mfe-sdk run test` و `pnpm contract:check` سبز باشند؛
    تست `contract.test.ts` هر ناسازگاری بین SDK و `@idpn/contracts` را می‌شکند.
 4. Buildهای `build:mfe` و `build:wc` منتشر و نسخهٔ قبلی برای Rollback نگه داشته شود.
+
+### تاریخچه نسخه قرارداد
+
+| نسخه | تغییر | مهاجرت میزبان |
+| ---- | ----- | -------------- |
+| 2 | `theme` از `Record<string, string>` به شیء بسته `IdpnTheme` تبدیل شد (۱۲ کلید رنگ + `radius` + `fontFamily` + `dark`، `docs/design-system.md` 4) | کلیدهای دلخواه مثل `{ "brand": "#0057b8" }` دیگر رندر نمی‌شوند. مقدار را به کلید Semantic موجود نگاشت کنید (مثلاً `{ "primary": "#0057b8" }`). میزبان Module Federation حالا `VITE_IDPN_THEME` را با `idpnThemeSchema` اعتبارسنجی می‌کند و با کلید ناشناخته بالا نمی‌آید. |
+| 1 | نسخه اولیه Config/Event | — |
 
 ## 9. عیب‌یابی
 

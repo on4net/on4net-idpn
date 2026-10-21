@@ -263,7 +263,9 @@ export function buildPublicClientConfig(
     ...(dependencies.translationsUrl === undefined
       ? {}
       : { translationsUrl: dependencies.translationsUrl }),
-    theme,
+    // Extra branding keys are tolerated by the loose schema; the sanitized `IdpnTheme` is
+    // what the browser receives.
+    theme: theme as PublicClientConfig['theme'],
     registrationPolicy: client.registrationPolicy,
     mfaPolicy: client.mfaPolicy,
     loginContexts,

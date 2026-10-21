@@ -10,4 +10,4 @@
 export const IDPN_MFE_SDK_VERSION = '0.1.0';
 
 /** Version of the config/event contract (docs/micro-frontend.md 10). */
-export const IDPN_MFE_CONTRACT_VERSION = 1;
+export const IDPN_MFE_CONTRACT_VERSION = 2;

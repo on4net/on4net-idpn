@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://idpn.example.com/contracts/mfe-event.schema.json",
   "title": "IdpnEvent",
-  "description": "Micro-frontend event contract, schema version 1.",
+  "description": "Micro-frontend event contract, schema version 2.",
   "oneOf": [
     {
       "type": "object",

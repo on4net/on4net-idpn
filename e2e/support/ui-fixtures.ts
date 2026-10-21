@@ -22,7 +22,16 @@ export interface UiFixtureOptions {
    * branding so the selector/branding suite has a deterministic two-context client.
    */
   contexts?: 'single' | 'multi';
+  /**
+   * Theme returned by the public config (docs/design-system.md 4). Defaults to the shared
+   * blue token set; pass a different object to prove a client renders its own theme without
+   * any code change, or a hostile one to prove the contrast guard falls back.
+   */
+  theme?: Record<string, unknown>;
 }
+
+/** Default per-client theme used by every UI suite unless a test overrides it. */
+export const DEFAULT_UI_THEME = { primary: '#0057b8', radius: '8px' } as const;
 
 /** Branded context pair used by the two-context suite (docs/login-contexts.md 7.1). */
 const MULTI_CONTEXTS = [
@@ -126,7 +135,7 @@ export async function installUiFixtures(page: Page, options: UiFixtureOptions = 
             dir: { 'fa-IR': 'rtl', 'en-US': 'ltr' },
           },
           translationsUrl: '/api/v1/clients/admin-panel/translations/bundle',
-          theme: { primary: '#0057b8', radius: '8px' },
+          theme: options.theme ?? DEFAULT_UI_THEME,
           loginContexts: multi ? MULTI_CONTEXTS : [{ key: 'default', methods: ['password'] }],
           ...(multi
             ? {

@@ -129,6 +129,222 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const numeric = (value: string): number => Number.parseFloat(value);
 
+interface Rgb {
+  /** sRGB channels in 0..1. */
+  r: number;
+  g: number;
+  b: number;
+}
+
+const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
+
+/** sRGB transfer function (IEC 61966-2-1) to relative luminance. */
+const linearize = (channel: number): number =>
+  channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+
+const fromLinear = (channel: number): number =>
+  channel <= 0.0031308 ? 12.92 * channel : 1.055 * channel ** (1 / 2.4) - 0.055;
+
+const hueToRgb = (p: number, q: number, rawT: number): number => {
+  let t = rawT;
+  if (t < 0) t += 1;
+  if (t > 1) t -= 1;
+  if (t < 1 / 6) return p + (q - p) * 6 * t;
+  if (t < 1 / 2) return q;
+  if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+  return p;
+};
+
+function hueToRadians(raw: string): number {
+  const value = numeric(raw);
+  if (raw.endsWith('turn')) return value * 2 * Math.PI;
+  if (raw.endsWith('grad')) return (value * Math.PI) / 200;
+  if (raw.endsWith('rad')) return value;
+  return (value * Math.PI) / 180;
+}
+
+/** Channel value as a 0..1 fraction; `%` is interpreted against 255 for rgb channels. */
+function rgbChannel(raw: string | undefined): number | null {
+  if (raw === undefined) return null;
+  const value = numeric(raw);
+  if (!Number.isFinite(value)) return null;
+  return clamp01(raw.endsWith('%') ? value / 100 : value / 255);
+}
+
+/**
+ * Resolves a theme colour to sRGB so the contrast guard can measure it.
+ * Returns `null` for values whose rendered colour is unknown (`transparent`,
+ * `currentcolor`) or out of the supported grammar.
+ */
+export function resolveThemeColor(value: string): Rgb | null {
+  const candidate = typeof value === 'string' ? value.trim() : '';
+  const lower = candidate.toLowerCase();
+  if (lower === 'white') return { r: 1, g: 1, b: 1 };
+  if (lower === 'black') return { r: 0, g: 0, b: 0 };
+
+  const hex = /^#([0-9a-f]{3,8})$/i.exec(candidate);
+  if (hex !== null) {
+    const digits = hex[1] ?? '';
+    const expand = (part: string): number => Number.parseInt(part.repeat(2), 16) / 255;
+    if (digits.length === 3 || digits.length === 4) {
+      return {
+        r: expand(digits[0] ?? ''),
+        g: expand(digits[1] ?? ''),
+        b: expand(digits[2] ?? ''),
+      };
+    }
+    if (digits.length === 6 || digits.length === 8) {
+      return {
+        r: Number.parseInt(digits.slice(0, 2), 16) / 255,
+        g: Number.parseInt(digits.slice(2, 4), 16) / 255,
+        b: Number.parseInt(digits.slice(4, 6), 16) / 255,
+      };
+    }
+    return null;
+  }
+
+  const rgb = RGB_COLOR.exec(candidate);
+  if (rgb !== null) {
+    const red = rgbChannel(rgb[1]);
+    const green = rgbChannel(rgb[2]);
+    const blue = rgbChannel(rgb[3]);
+    if (red === null || green === null || blue === null) return null;
+    return { r: red, g: green, b: blue };
+  }
+
+  const hsl = HSL_COLOR.exec(candidate);
+  if (hsl !== null) {
+    const hue = greyHue(hsl[1]);
+    const saturation = Math.min(1, Math.max(0, numeric(hsl[2] ?? '0') / 100));
+    const lightness = Math.min(1, Math.max(0, numeric(hsl[3] ?? '0') / 100));
+    if (hue === null || saturation === 0) {
+      return { r: lightness, g: lightness, b: lightness };
+    }
+    const q =
+      lightness < 0.5
+        ? lightness * (1 + saturation)
+        : lightness + saturation - lightness * saturation;
+    const p = 2 * lightness - q;
+    const hueTurn = hue / (2 * Math.PI);
+    return {
+      r: hueToRgb(p, q, hueTurn + 1 / 3),
+      g: hueToRgb(p, q, hueTurn),
+      b: hueToRgb(p, q, hueTurn - 1 / 3),
+    };
+  }
+
+  const oklch = OKLCH_COLOR.exec(candidate);
+  if (oklch !== null) {
+    const rawLightness = oklch[1] ?? '';
+    const rawChroma = oklch[2] ?? '';
+    const lightness = rawLightness.endsWith('%')
+      ? numeric(rawLightness) / 100
+      : numeric(rawLightness);
+    const chroma = rawChroma.endsWith('%') ? numeric(rawChroma) / 100 : numeric(rawChroma);
+    const hue = hueToRadians(oklch[3] ?? '0');
+    // OKLab -> linear sRGB (Björn Ottosson's matrices), then gamma encode.
+    const a = chroma * Math.cos(hue);
+    const b = chroma * Math.sin(hue);
+    const lPrime = lightness + 0.3963377774 * a + 0.2158037573 * b;
+    const mPrime = lightness - 0.1055613458 * a - 0.0638541728 * b;
+    const sPrime = lightness - 0.0894841775 * a - 1.291485548 * b;
+    const l = lPrime ** 3;
+    const m = mPrime ** 3;
+    const s = sPrime ** 3;
+    return {
+      r: clamp01(fromLinear(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s)),
+      g: clamp01(fromLinear(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s)),
+      b: clamp01(fromLinear(-0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s)),
+    };
+  }
+
+  return null;
+}
+
+function greyHue(raw: string | undefined): number | null {
+  if (raw === undefined) return null;
+  const value = hueToRadians(raw);
+  return Number.isFinite(value) ? value : null;
+}
+
+/** WCAG 2.x relative luminance of an sRGB colour. */
+export function relativeLuminance(color: Rgb): number {
+  return 0.2126 * linearize(color.r) + 0.7152 * linearize(color.g) + 0.0722 * linearize(color.b);
+}
+
+/**
+ * WCAG contrast ratio between two theme colours, or `null` when either value cannot be
+ * measured (`transparent`, `currentcolor`, an unknown colour space).
+ */
+export function contrastRatio(foreground: string, background: string): number | null {
+  const front = resolveThemeColor(foreground);
+  const back = resolveThemeColor(background);
+  if (front === null || back === null) {
+    return null;
+  }
+  const a = relativeLuminance(front);
+  const b = relativeLuminance(back);
+  const lighter = Math.max(a, b);
+  const darker = Math.min(a, b);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+/** WCAG AA for normal text (`docs/design-system.md` 4). */
+export const MIN_CONTRAST_RATIO = 4.5;
+
+/**
+ * Built-in palette (`web/src/styles/globals.css`). Only the pairs the contrast guard has to
+ * evaluate are mirrored here; `globals.css` remains the source of truth for rendering.
+ */
+export const IDPN_BASE_THEME = {
+  light: {
+    background: 'oklch(1 0 0)',
+    foreground: 'oklch(0.145 0 0)',
+    primary: 'oklch(0.48 0.11 190)',
+    primaryForeground: 'oklch(0.99 0 0)',
+  },
+  dark: {
+    background: 'oklch(0.145 0 0)',
+    foreground: 'oklch(0.985 0 0)',
+    primary: 'oklch(0.72 0.12 190)',
+    primaryForeground: 'oklch(0.205 0 0)',
+  },
+} as const;
+
+type ContrastBase = {
+  readonly foreground: string;
+  readonly background: string;
+  readonly primary: string;
+  readonly primaryForeground: string;
+};
+
+const CONTRAST_PAIRS = [
+  ['foreground', 'background'],
+  ['primaryForeground', 'primary'],
+] as const;
+
+/**
+ * Drops a client colour pair that cannot reach WCAG AA so the built-in palette applies
+ * instead of rendering unreadable text (`docs/design-system.md` 4, card #53). A pair fails
+ * when either member is client-supplied and the effective ratio is below
+ * {@link MIN_CONTRAST_RATIO}; both members are removed so the fallback pair stays coherent.
+ */
+function enforceContrast(colors: IdpnThemeColors, base: ContrastBase): IdpnThemeColors {
+  const result: IdpnThemeColors = { ...colors };
+  for (const [foregroundKey, backgroundKey] of CONTRAST_PAIRS) {
+    const foreground = result[foregroundKey] ?? base[foregroundKey];
+    const background = result[backgroundKey] ?? base[backgroundKey];
+    const ratio = contrastRatio(foreground, background);
+    if (ratio === null || ratio >= MIN_CONTRAST_RATIO) {
+      continue;
+    }
+    delete result[foregroundKey];
+    delete result[backgroundKey];
+  }
+  return result;
+}
+
+
 const parseChannel = (raw: string, max: number): boolean => {
   const value = numeric(raw);
   if (!Number.isFinite(value) || value < 0) return false;
@@ -258,19 +474,20 @@ const sanitizeFontFamily = (input: unknown): IdpnThemeFontFamily => {
 
 /**
  * Field-level sanitizer for client branding. Invalid values and unknown keys are dropped,
- * so the caller can always fall back to the stylesheet defaults. Never throws.
+ * and a colour pair that cannot reach WCAG AA is removed so the caller always falls back to
+ * the accessible built-in palette. Never throws.
  */
 export function sanitizeIdpnTheme(input: unknown): IdpnTheme {
   if (!isRecord(input)) return {};
 
-  const theme: IdpnTheme = { ...sanitizeColors(input) };
+  const theme: IdpnTheme = { ...enforceContrast(sanitizeColors(input), IDPN_BASE_THEME.light) };
   const radius = sanitizeIdpnRadius(input.radius);
   if (radius !== undefined) theme.radius = radius;
 
   const family = sanitizeFontFamily(input.fontFamily);
   if (Object.keys(family).length > 0) theme.fontFamily = family;
 
-  const dark = sanitizeColors(input.dark);
+  const dark = enforceContrast(sanitizeColors(input.dark), IDPN_BASE_THEME.dark);
   if (Object.keys(dark).length > 0) theme.dark = dark;
 
   return theme;
@@ -337,9 +554,18 @@ export function idpnThemeToCssVariables(
   return variables;
 }
 
+/**
+ * Shape hints emitted into the generated JSON Schema (`contract:check`). They only describe
+ * the grammar family; `sanitizeIdpnColor`/`sanitizeIdpnRadius` remain the authoritative
+ * validators at runtime.
+ */
+const COLOR_SHAPE =
+  /^(?:#[0-9a-fA-F]{3,8}|[rR][gG][bB][aA]?\(.*\)|[hH][sS][lL][aA]?\(.*\)|[oO][kK][lL][cC][hH]\(.*\)|transparent|black|white|currentcolor)$/;
+
 const colorSchema = z
   .string()
   .max(MAX_COLOR_LENGTH)
+  .regex(COLOR_SHAPE, 'Invalid CSS color format')
   .refine((value) => sanitizeIdpnColor(value) !== undefined, 'Invalid CSS color value');
 
 const colorFields = {
@@ -360,21 +586,29 @@ const colorFields = {
 const fontSchema = z.enum(IDPN_THEME_FONT_KEYS);
 
 /**
- * Public theme payload. Unknown fields are stripped (a client may store extra branding in
- * its row), values must already be canonical — `sanitizeIdpnTheme` is the input boundary.
+ * Public theme payload. Unknown fields are allowed and stripped by `sanitizeIdpnTheme` (a
+ * client may store extra branding in its row); values must already be canonical — the
+ * sanitizer is the input boundary.
  */
-export const idpnThemeSchema = z.object({
+/**
+ * Public theme payload. Unknown fields are allowed and stripped by `sanitizeIdpnTheme` (a
+ * client may store extra branding in its row); values must already be canonical — the
+ * sanitizer is the input boundary. Kept as a plain (untransformed) schema so the generated
+ * JSON artifacts stay representable.
+ */
+export const idpnThemeSchema = z.looseObject({
   ...colorFields,
   radius: z
     .string()
     .max(MAX_RADIUS_LENGTH)
+    .regex(RADIUS, 'Invalid CSS radius format')
     .refine((value) => sanitizeIdpnRadius(value) !== undefined, 'Invalid CSS radius value')
     .optional(),
   fontFamily: z
-    .object({
+    .looseObject({
       rtl: fontSchema.optional(),
       ltr: fontSchema.optional(),
     })
     .optional(),
-  dark: z.object(colorFields).optional(),
+  dark: z.looseObject(colorFields).optional(),
 });

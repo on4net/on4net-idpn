@@ -45,6 +45,13 @@ describe('@idpn/mfe-sdk contract parity', () => {
     expect(IDPN_MFE_CONTRACT_VERSION).toBe(MFE_SCHEMA_VERSION);
   });
 
+  it('pins the published contract version', () => {
+    // Bumping this is a deliberate act: docs/mfe-sdk.md 8 requires a migration note and a
+    // new SDK major, so an accidental shape change cannot ride along silently.
+    expect(MFE_SCHEMA_VERSION).toBe(2);
+    expect(IDPN_MFE_CONTRACT_VERSION).toBe(2);
+  });
+
   it('exposes exactly the documented event types', () => {
     expect([...IDPN_MFE_EVENT_TYPES].sort()).toEqual([...mfeEventTypeSchema.options].sort());
     expect(new Set(events.map((event) => event.type))).toEqual(new Set(IDPN_MFE_EVENT_TYPES));

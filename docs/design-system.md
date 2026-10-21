@@ -61,50 +61,84 @@ packages/ui/                  # یا web/src/components/ui
 سه لایه:
 
 1. **Primitive:** پالت OKLCH در `globals.css` (shadcn).
-2. **Semantic:** متغیرهای shadcn (`--background`, `--foreground`, `--primary`, ...) و لایه `--idpn-*` برای برند.
-3. **Component:** متغیرهای محلی کامپوننت در صورت نیاز.
+2. **Semantic:** متغیرهای shadcn (`--background`, `--foreground`, `--primary`, ...) که در
+   `globals.css` از لایه برند مقدار می‌گیرند: `--background: var(--idpn-background)`.
+3. **Brand:** لایه `--idpn-*` که تنها لایه‌ای است که از Public Config نوشته می‌شود. مقدار
+   پیش‌فرض هر توکن روی `.idpn-root` اعلام می‌شود، پس تم کلاینت همیشه بر آن اولویت دارد و
+   `.idpn-root` هرگز `:root` میزبان را تغییر نمی‌دهد.
 
 ```css
-:root {
-  --idpn-bg: var(--background);
-  --idpn-fg: var(--foreground);
-  --idpn-primary: var(--primary);
-  --idpn-primary-fg: var(--primary-foreground);
-  --idpn-border: var(--border);
-  --idpn-radius: var(--radius);
-  --idpn-font-sans: "Vazirmatn", system-ui, sans-serif;
+/* globals.css — جهت نگاشت؛ در کد واقعی هر پالت روی .idpn-root اعلام می‌شود */
+.idpn-root {
+  --idpn-background: oklch(1 0 0);
+  --idpn-foreground: oklch(0.145 0 0);
+  --idpn-primary: oklch(0.48 0.11 190);
+  --idpn-primary-foreground: oklch(0.99 0 0);
+  --idpn-radius: 0.625rem;
+
+  --background: var(--idpn-background);
+  --foreground: var(--idpn-foreground);
+  --primary: var(--idpn-primary);
+  --primary-foreground: var(--idpn-primary-foreground);
+  --radius: var(--idpn-radius);
 }
 ```
+
+`IdpnRoot` فقط توکن‌های `--idpn-*` را می‌نویسد (`idpnThemeToCssVariables` در
+`@idpn/contracts`)، هرگز `--primary` یا سایر متغیرهای Semantic را مستقیماً.
+
+### کلیدهای مجاز تم
+
+| گروه | کلیدها |
+| --- | --- |
+| رنگ (۱۲ کلید) | `background`، `foreground`، `card`، `primary`، `primaryForeground`، `secondary`، `muted`، `accent`، `destructive`، `border`، `input`، `ring` |
+| شکل | `radius` (یک طول غیرمنفی: `0`، `8px`، `0.625rem`، `50%`) |
+| فونت | `fontFamily.rtl` / `fontFamily.ltr` از فهرست مجاز `vazirmatn`، `inter`، `system` |
+| حالت تاریک | `dark` با همان ۱۲ کلید رنگ (`--idpn-dark-*`) |
+
+هر کلید رنگ به `--idpn-<kebab-case>` نگاشت می‌شود (`primaryForeground` →
+`--idpn-primary-foreground`) و بازنویسی تاریک به `--idpn-dark-<kebab-case>`.
 
 ### قواعد رنگ
 
 - استفاده از رنگ‌های پیش‌فرض Tailwind (`bg-red-500`, `text-slate-500`) ممنوع است.
 - فقط توکن‌های shadcn یا `--idpn-*` استفاده شود.
-- کنتراست حداقل WCAG AA رعایت شود.
-- Dark Mode از طریق کلاس `.dark` و توکن‌های Semantic.
+- **کنتراست WCAG AA (۴٫۵:۱) اجباری است.** `sanitizeIdpnTheme` جفت‌های
+  `foreground`/`background` و `primaryForeground`/`primary` (و معادل‌های `dark`) را با
+  `contrastRatio` می‌سنجد؛ جفتی که به ۴٫۵:۱ نرسد کنار گذاشته می‌شود و پالت داخلی
+  (`IDPN_BASE_THEME`) اعمال می‌شود. پالت داخلی در هر دو حالت روشن و تاریک با تست واحد
+  تأیید می‌شود.
+- Dark Mode از طریق کلاس `.dark` و توکن‌های Semantic؛ بازنویسی هر کلاینت زیر `dark` می‌آید.
 
 ## 5. تم هر اپلیکیشن
 
-- `Client.branding` در IdP شامل `logoUrl`، `primaryColor`، `radius` و در صورت نیاز فونت است.
-- Public Config این مقادیر را به MFE می‌دهد.
-- MFE آن‌ها را به CSS Variables روی ریشه خودش Map می‌کند:
+- `Client.branding` در IdP شامل `logoUrl`، `title` و `theme` (ساختار ۱۲ کلید رنگ + `radius` +
+  `fontFamily` + `dark`، بخش ۴) است.
+- Public Config همان شیء را به MFE و Hosted UI می‌دهد؛ قرارداد آن `idpnThemeSchema` در
+  `@idpn/contracts` است.
+- اپ آن را با `idpnThemeToCssVariables` به CSS Variables روی ریشه خودش Map می‌کند (فقط
+  `--idpn-*`)؛ هیچ کلیدی از تم به `:root` میزبان نمی‌رسد.
 
 ```ts
-root.style.setProperty("--primary", config.theme.primary);
-root.style.setProperty("--idpn-primary", config.theme.primary);
-root.style.setProperty("--radius", config.theme.radius);
+// همان کاری که IdpnRoot انجام می‌دهد
+for (const [name, value] of Object.entries(idpnThemeToCssVariables(config.theme, { locale }))) {
+  root.style.setProperty(name, value);
+}
 ```
 
-- Fallback امن برای همه مقادیر.
+- Fallback امن برای همه مقادیر: مقدار نامعتبر، کلید ناشناخته یا جفت کم‌کنتراست کنار گذاشته
+  می‌شود و پالت داخلی می‌ماند.
 - هیچ اپی کامپوننت‌ها را Fork نمی‌کند؛ فقط Theme می‌دهد.
-- تست کنتراست برای هر Theme الزامی است.
+- تست کنتراست برای هر Theme الزامی است (تست واحد `contrastRatio` + تست axe روی تم کلاینت و
+  تست Visual برای دو تم متفاوت).
 
 ### 5.1 Theme به‌ازای Login Context
 
 - هر Context می‌تواند `branding` خودش (لوگو، عنوان، رنگ اصلی) را داشته باشد.
 - ترتیب اعمال: Theme پایه اپ ← Theme همان Context.
 - تغییر Context در صفحه ورود، Theme را بدون Reload عوض می‌کند.
-- کنتراست برای ترکیب هر Context با هر Theme تست می‌شود.
+- کنتراست برای ترکیب هر Context با هر Theme تست می‌شود (همان `sanitizeIdpnTheme` روی
+  ترکیب نهایی اجرا می‌شود).
 
 ## 6. RTL و i18n
 

@@ -93,6 +93,30 @@ test.describe('hosted auth UI', () => {
     await expectNoBlockingViolations(page);
   });
 
+  test('a per-client theme keeps WCAG AA contrast', async ({ page }) => {
+    // A client theme reaches the page through the public config only (no code change).
+    await installUiFixtures(page, {
+      theme: { primary: '#0f766e', radius: '0rem', background: '#f8fafc', foreground: '#0f172a' },
+    });
+    await page.goto(hosted('fa-IR'));
+    await expect(page.getByTestId('idpn-root')).toHaveCSS('--idpn-primary', '#0f766e');
+    await expectNoBlockingViolations(page);
+  });
+
+  test('an inaccessible client theme falls back instead of rendering invisibly', async ({ page }) => {
+    // White on white cannot reach 4.5:1: `sanitizeIdpnTheme` drops the pair, so the built-in
+    // palette is painted and the surface still passes the axe colour-contrast rule.
+    await installUiFixtures(page, {
+      theme: { background: '#ffffff', foreground: '#ffffff' },
+    });
+    await page.goto(hosted('fa-IR'));
+
+    const root = page.getByTestId('idpn-root');
+    await expect(root).toHaveCSS('--idpn-foreground', 'oklch(0.145 0 0)');
+    await expect(root).toHaveCSS('--idpn-background', 'oklch(1 0 0)');
+    await expectNoBlockingViolations(page);
+  });
+
   test('applies per-client translated overrides over the base bundle', async ({ page }) => {
     await installUiFixtures(page, {
       translations: {

@@ -11,8 +11,12 @@ import { idpnThemeSchema } from './theme.js';
 /**
  * Version of the MFE config/event contract. Bump it for every breaking change and
  * keep the previous version in this file until all hosts have migrated.
+ *
+ * v2: `theme` is a closed `IdpnTheme` object instead of `Record<string, string>`
+ * (docs/mfe-sdk.md 8). A host that still sends `{ brand: '#0057b8' }` is now told so by
+ * the version mismatch instead of silently rendering unthemed.
  */
-export const MFE_SCHEMA_VERSION = 1;
+export const MFE_SCHEMA_VERSION = 2;
 
 export const publicUserSchema = z
   .object({
