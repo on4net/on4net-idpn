@@ -218,11 +218,34 @@ const selectedThresholds = Object.fromEntries(
   }),
 );
 
+/**
+ * k6 provisions a scenario's VUs when it starts. With every arrival scenario starting at the
+ * same instant, a shared CI runner occasionally cannot initialise ~90 VUs fast enough and the
+ * arrival executor drops a single iteration — a client-side artefact that fails the
+ * `dropped_iterations == 0` SLO without any server-side degradation. Staggering the starts by
+ * 250 ms removes that spike; rates, durations and thresholds are untouched.
+ */
+const SCENARIO_STAGGER_SECONDS = 0.25;
+
+const staggerScenarios = () =>
+  Object.fromEntries(
+    selectedScenarios.map((name, index) => {
+      const scenario = ALL_SCENARIOS[name];
+      if (name === 'warmup' || index === 0) {
+        return [name, scenario];
+      }
+      return [
+        name,
+        { ...scenario, startTime: `${WARMUP_SECONDS + (index - 1) * SCENARIO_STAGGER_SECONDS}s` },
+      ];
+    }),
+  );
+
 export const options = {
   // k6 clears the VU cookie jar between iterations by default; a session must survive so the
   // authorize/SSO scenarios exercise a real SSO session instead of a fresh login.
   noCookiesReset: true,
-  scenarios: Object.fromEntries(selectedScenarios.map((name) => [name, ALL_SCENARIOS[name]])),
+  scenarios: staggerScenarios(),
   thresholds: selectedThresholds,
   summaryTrendStats: ['avg', 'min', 'med', 'p(90)', 'p(95)', 'p(99)', 'max'],
 };

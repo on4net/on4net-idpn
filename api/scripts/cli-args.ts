@@ -5,7 +5,9 @@ import { dirname } from 'node:path';
  * Minimal argument parser for the onboarding scripts.
  *
  * Flags are boolean; `--name value` and `--name=value` both bind a value. A repeated flag
- * accumulates (used for `--client`).
+ * accumulates (used for `--client`). A leading `--` separator is ignored: `pnpm run x -- --flag`
+ * forwards the separator itself to the script, unlike npm, and every documented invocation in
+ * docs/setup.md uses that form.
  */
 export interface CliArgs {
   command: string;
@@ -16,10 +18,16 @@ export interface CliArgs {
 export function parseArgs(argv: string[]): CliArgs {
   const values = new Map<string, string[]>();
   const positionals: string[] = [];
+  let separatorSeen = false;
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
     if (token === undefined) {
       break;
+    }
+    if (token === '--' && !separatorSeen) {
+      // pnpm keeps the separator in argv; it marks the start of the script's own arguments.
+      separatorSeen = true;
+      continue;
     }
     if (!token.startsWith('--')) {
       positionals.push(token);

@@ -185,12 +185,16 @@ function results(files: readonly BackupFileRecord[], createdAt: string): string 
   ].join('; ');
 }
 
-function parseArguments(argv: readonly string[]): { options: BackupOptions; help: boolean } {
+export function parseArguments(argv: readonly string[]): { options: BackupOptions; help: boolean } {
   const values = new Map<string, string>();
   let help = false;
   let noRedis = false;
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
+    if (argument === '--' && index === 0) {
+      // pnpm forwards the separator that precedes the script's own arguments.
+      continue;
+    }
     if (argument === '--help' || argument === '-h') {
       help = true;
       continue;

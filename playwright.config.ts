@@ -61,35 +61,11 @@ export default defineConfig({
   },
   // Baselines are per platform because font rasterisation differs between operating systems.
   snapshotPathTemplate: '{testDir}/visual/__screenshots__/{platform}/{arg}{ext}',
+  // The a11y and visual suites live in `playwright.ui.config.ts` only: their baselines are
+  // platform-specific and they need no database or API, so the dedicated `ui-a11y` (ubuntu)
+  // and `ui-visual` (windows, the committed baselines) CI jobs own them. Registering them here
+  // as well made the ubuntu E2E job compare against `linux` baselines that cannot exist.
   projects: [
-    {
-      name: 'a11y-chromium',
-      testMatch: 'a11y/*.spec.ts',
-      use: {
-        ...devices['Desktop Chrome'],
-        baseURL: webURL,
-        viewport: { width: 1280, height: 800 },
-        deviceScaleFactor: 1,
-        colorScheme: 'light',
-        reducedMotion: 'reduce',
-        timezoneId: 'UTC',
-        locale: 'fa-IR',
-      },
-    },
-    {
-      name: 'visual-chromium',
-      testMatch: 'visual/*.spec.ts',
-      use: {
-        ...devices['Desktop Chrome'],
-        baseURL: webURL,
-        viewport: { width: 1280, height: 800 },
-        deviceScaleFactor: 1,
-        colorScheme: 'light',
-        reducedMotion: 'reduce',
-        timezoneId: 'UTC',
-        locale: 'fa-IR',
-      },
-    },
     {
       name: 'api-chromium',
       testMatch: ['health.spec.ts', 'admin/*.spec.ts'],

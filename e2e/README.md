@@ -22,8 +22,10 @@ pnpm test:visual
 pnpm test:visual:update
 ```
 
-The same projects are registered in `playwright.config.ts`, so `pnpm test:e2e` runs them
-with the rest of the E2E suite.
+The projects live in `playwright.ui.config.ts` only — `pnpm test:e2e` runs the functional
+suites, while `pnpm test:a11y` and `pnpm test:visual` run these. Screenshot baselines are
+committed per platform (`__screenshots__/<platform>/`), so the visual project is gated on a
+runner whose platform has baselines instead of being replicated in the Linux E2E job.
 
 CI runs two dedicated jobs in `.github/workflows/ci.yml`: `ui-a11y` on `ubuntu-latest`
 (platform-independent axe gate) and `ui-visual` on `windows-latest` (the committed

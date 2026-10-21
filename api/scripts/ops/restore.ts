@@ -251,11 +251,15 @@ interface ParsedArguments {
   redisBackup?: string;
 }
 
-function parseArguments(argv: readonly string[]): ParsedArguments {
+export function parseArguments(argv: readonly string[]): ParsedArguments {
   const values = new Map<string, string>();
   const flags = new Set<string>();
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
+    if (argument === '--' && index === 0) {
+      // pnpm forwards the separator that precedes the script's own arguments.
+      continue;
+    }
     if (argument === '--help' || argument === '-h') {
       flags.add('help');
       continue;

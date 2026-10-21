@@ -5,6 +5,8 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { hasFlag, parseArgs } from '../scripts/cli-args.js';
+import { parseArguments as parseBackupArguments } from '../scripts/ops/backup.js';
 import {
   backupFileNames,
   detectPostgresAccess,
@@ -18,6 +20,7 @@ import {
   verifyChecksum,
   writeChecksum,
 } from '../scripts/ops/ops-lib.js';
+import { parseArguments as parseRestoreArguments } from '../scripts/ops/restore.js';
 import { readBackupStatus } from '../src/observability/backup-status.js';
 
 let directory: string;
@@ -28,6 +31,52 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await rm(directory, { recursive: true, force: true });
+});
+
+describe('command line parsing', () => {
+  // pnpm forwards the separator that follows the script name, so every documented
+  // invocation (`pnpm --filter @idpn/api db:rollback -- --yes`) reaches the script with a
+  // leading `--`. The CI backup/restore drill failed on exactly that token.
+  const DATABASE_URL = 'postgresql://idpn:secret@127.0.0.1:5432/idpn';
+
+  it('ignores a leading -- separator in the ops backup CLI', () => {
+    const { options, help } = parseBackupArguments([
+      '--',
+      '--database-url',
+      DATABASE_URL,
+      '--output-dir',
+      '/tmp/backups',
+      '--no-redis',
+    ]);
+    expect(help).toBe(false);
+    expect(options.databaseUrl).toBe(DATABASE_URL);
+    expect(options.outputDirectory).toBe('/tmp/backups');
+    expect(options.redisUrl).toBeUndefined();
+  });
+
+  it('ignores a leading -- separator in the ops restore CLI', () => {
+    const parsed = parseRestoreArguments([
+      '--',
+      '--backup',
+      '/tmp/backups/idpn.dump',
+      '--drill',
+      '--source-url',
+      DATABASE_URL,
+      '--json',
+    ]);
+    expect(parsed.options.backupFile).toBe('/tmp/backups/idpn.dump');
+    expect(parsed.options.drill).toBe(true);
+    expect(parsed.options.sourceUrl).toBe(DATABASE_URL);
+    expect(parsed.json).toBe(true);
+  });
+
+  it('ignores a leading -- separator and still binds flags with values', () => {
+    const args = parseArgs(['--', 'onboard', '--client', 'app-a', '--yes']);
+    expect(args.command).toBe('onboard');
+    expect(args.positionals).toEqual([]);
+    expect(args.values.get('client')).toEqual(['app-a']);
+    expect(hasFlag(args, 'yes')).toBe(true);
+  });
 });
 
 describe('parseDatabaseUrl', () => {
