@@ -42,7 +42,13 @@ async function expectNoHorizontalOverflow(page: Page): Promise<void> {
   expect(overflow).toBeLessThanOrEqual(1);
 }
 
-/** The resolved stack is applied inside `.idpn-root` only, never on `:root`. */
+/**
+ * The resolved stack is applied inside `.idpn-root` only, never on `:root`.
+ *
+ * This asserts the *declared* stack: the repository ships no webfont, so no browser can
+ * actually rasterise Vazirmatn/Inter here and asserting `document.fonts.check` would fail
+ * everywhere (card #56 finding 6). A real webfont is a separate, asset-bearing change.
+ */
 async function expectScopedFont(page: Page, family: 'Vazirmatn' | 'Inter'): Promise<void> {
   const rootFont = await page
     .getByTestId('idpn-root')
@@ -52,6 +58,11 @@ async function expectScopedFont(page: Page, family: 'Vazirmatn' | 'Inter'): Prom
   );
   expect(rootFont).toContain(family);
   expect(documentFont).not.toContain(family);
+  // The token the stack comes from is scoped to the same root.
+  const token = await page
+    .getByTestId('idpn-root')
+    .evaluate((element) => getComputedStyle(element).getPropertyValue('--idpn-font-sans'));
+  expect(token).toContain(family);
 }
 
 async function submitPasswordStep(page: Page, locale: 'fa-IR' | 'en-US'): Promise<void> {

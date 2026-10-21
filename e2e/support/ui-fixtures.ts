@@ -437,4 +437,11 @@ export async function expectNoBlockingViolations(page: Page): Promise<void> {
     (violation) => violation.impact === 'critical' || violation.impact === 'serious',
   );
   expect(blocking, formatViolations(blocking)).toEqual([]);
+
+  // `results.incomplete` is deliberately not a failure: axe 4.14 cannot evaluate the
+  // `oklch()` palette and reports every text node as an unverified `color-contrast` node, so
+  // failing here would fail the whole suite on a tool limitation. Contrast is enforced where
+  // it can be measured — `contrastRatio` in `@idpn/contracts` drops client theme pairs below
+  // WCAG AA and asserts the built-in palette in both modes (card #53), and the surfaces are
+  // covered by the visual gate.
 }

@@ -36,11 +36,15 @@ export default defineConfig({
   use: { trace: 'off', screenshot: 'off', video: 'off' },
   expect: {
     timeout: 15_000,
+    // `maxDiffPixelRatio` stays at 1 %: on this host a freshly generated baseline differs from
+    // its own re-run by ~1 % of pixels (system font fallback, no webfont is shipped), so a
+    // tighter budget is flaky rather than stricter. The per-pixel colour tolerance is halved
+    // to 0.1 so a token/colour change is still caught inside that budget (card #56 finding 3).
     toHaveScreenshot: {
       animations: 'disabled',
       caret: 'hide',
       maxDiffPixelRatio: 0.01,
-      threshold: 0.2,
+      threshold: 0.1,
     },
   },
   snapshotPathTemplate: '{testDir}/visual/__screenshots__/{platform}/{arg}{ext}',

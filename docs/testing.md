@@ -201,10 +201,10 @@ flowchart TB
 | Isolation | Visual/Computed Style | عدم نشت CSS به Host |
 | Web Component | Playwright + HTML Fixture | `<on4net-auth>` در Vue/Angular |
 | Fallback | Playwright Route Interception | مسدودکردن Remote و انتظار Redirect |
-| A11y | axe-core | فرم‌ها و جدول کاربران |
+| A11y | axe-core | فرم‌ها و جدول کاربران؛ گیت Critical/Serious با `pnpm test:a11y` |
 | shadcn/ui | Vitest + RTL + Playwright | Button/Input/Form/Dialog/Select/Table |
 | RTL | Playwright Screenshot | fa-IR، ترکیب فارسی/انگلیسی |
-| Visual | Playwright Screenshot | Light/Dark و RTL/LTR |
+| Visual | Playwright Screenshot | Light/Dark و RTL/LTR با `pnpm test:visual` (Baseline به‌ازای Platform در `e2e/visual/__screenshots__/<platform>/`) |
 | Version | Matrix | دو نسخه Host در برابر دو نسخه Remote |
 
 ## 9. تست امنیتی
@@ -261,6 +261,8 @@ flowchart TB
 | Integration | هر PR | Testcontainers (Postgres/Redis) |
 | Contract | هر PR | OpenAPI diff + Schema |
 | E2E Smoke | هر PR | همه پروژه‌های Playwright روی Chromium: API، Hosted UI، MFE (Isolation، Web Component، Module Federation) و BFF |
+| UI Accessibility | هر PR | `pnpm test:a11y` — axe Critical/Serious روی همه سطوح shadcn، بدون نیاز به دیتابیس |
+| UI Visual | هر PR | `pnpm test:visual` روی `windows-latest` با Baselineهای `win32` |
 | E2E Full | Main/Nightly | همه سناریوها + Firefox/WebKit |
 | Security | Nightly/Release | Audit، Trivy، ZAP Baseline |
 | Load | Release | k6 |

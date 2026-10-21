@@ -57,10 +57,21 @@ export const SelectContent = React.forwardRef<
     if (typeof document === 'undefined' || target === null) {
       return;
     }
+    /**
+     * Only our own island may be touched: `.idpn-root` owns its subtree, the host page owns
+     * everything else (`ui-components.instructions.md` rule 4). Stripping document-wide also
+     * left unrelated nodes exposed after the popup closed (card #56 finding 2).
+     */
+    const scopeRoot: ParentNode = target.closest('.idpn-root') ?? target;
+    const stripped = new Map<Element, string>();
     const strip = (): void => {
-      for (const element of document.querySelectorAll<HTMLElement>(
+      for (const element of scopeRoot.querySelectorAll(
         '[data-aria-hidden="true"][aria-hidden="true"]',
       )) {
+        const value = element.getAttribute('aria-hidden');
+        if (value !== null && !stripped.has(element)) {
+          stripped.set(element, value);
+        }
         element.removeAttribute('aria-hidden');
       }
     };
@@ -68,12 +79,20 @@ export const SelectContent = React.forwardRef<
     // Radix applies the marker in a layout/passive effect of the portalled content, which
     // can commit after this effect; observe and strip until the popup closes.
     const observer = new MutationObserver(strip);
-    observer.observe(document.body, {
+    observer.observe(scopeRoot instanceof Node ? scopeRoot : document.body, {
       subtree: true,
       attributes: true,
       attributeFilter: ['aria-hidden'],
     });
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      // Put back exactly what this patch removed, so a later Radix cycle sees the truth.
+      for (const [element, value] of stripped) {
+        if (element.isConnected && !element.hasAttribute('aria-hidden')) {
+          element.setAttribute('aria-hidden', value);
+        }
+      }
+    };
   }, [target]);
 
   if (target === null) {
