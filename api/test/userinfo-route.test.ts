@@ -53,20 +53,42 @@ async function build(accessSource?: EffectiveAccessSource) {
   return app;
 }
 
-const token = (extra: Record<string, unknown> = {}) =>
+const token = (extra: Record<string, unknown> = {}, audience = 'app-a') =>
   keys.signAccessToken(
     {
       iss: issuer,
       sub: userId,
-      aud: 'app-a',
+      aud: audience,
       client_id: 'app-a',
+      // The real access-token builder always sets this (see `buildAccessTokenClaims`).
+      token_use: 'access',
       iat: Math.floor(Date.now() / 1000),
       exp: Math.floor(Date.now() / 1000) + 300,
       scope: 'openid profile',
       ...extra,
     },
-    { issuer, audience: 'app-a', subject: userId, expiresInSeconds: 300 },
+    { issuer, audience, subject: userId, expiresInSeconds: 300 },
   );
+
+describe('GET /oauth2/userinfo token binding', () => {
+  it('rejects an ID token, which carries no token_use', async () => {
+    const app = await build();
+    await request(app.server)
+      .get('/oauth2/userinfo')
+      .set('Authorization', 'Bearer ' + (await token({ token_use: undefined })))
+      .expect(401);
+    await app.close();
+  });
+
+  it('rejects a token whose audience is another client', async () => {
+    const app = await build();
+    await request(app.server)
+      .get('/oauth2/userinfo')
+      .set('Authorization', 'Bearer ' + (await token({}, 'app-b')))
+      .expect(401);
+    await app.close();
+  });
+});
 
 describe('GET /oauth2/userinfo role fallback', () => {
   it('adds roles and permissions when the token points to userinfo', async () => {

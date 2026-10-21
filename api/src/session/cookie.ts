@@ -72,7 +72,13 @@ export function parseCookieHeader(header: string | undefined): Record<string, st
     const name = part.slice(0, index).trim();
     const value = part.slice(index + 1).trim();
     if (name !== '') {
-      cookies[name] = decodeURIComponent(value);
+      // A malformed escape (`idpn_session=%`) must make the request anonymous, not throw a
+      // URIError out of the session reader (card #70 finding 5).
+      try {
+        cookies[name] = decodeURIComponent(value);
+      } catch {
+        continue;
+      }
     }
   }
   return cookies;

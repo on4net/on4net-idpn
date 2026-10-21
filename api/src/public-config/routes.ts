@@ -42,10 +42,15 @@ export function registerPublicConfigRoute(
   app.get('/api/v1/clients/:clientId/public-config', async (request, reply) => {
     const { clientId } = request.params as { clientId: string };
     const ip = request.ip;
-    const bucketKey = `${ip}:${clientId}`;
-    if (!consume(buckets, bucketKey, limit, nowMs())) {
+    // Key on the client address only: `clientId` is the value being enumerated, so folding it
+    // into the key let a probe over distinct ids bypass the window entirely and grew the map
+    // without bound (card #70 finding 11).
+    const at = nowMs();
+    pruneExpired(buckets, at);
+    const decision = consume(buckets, ip, limit, at);
+    if (!decision.allowed) {
       return problem(reply, 429, 'Too many requests', {
-        'Retry-After': String(limit.windowSeconds),
+        'Retry-After': String(decision.retryAfterSeconds),
       });
     }
 
@@ -87,22 +92,35 @@ export function registerPublicConfigRoute(
   });
 }
 
+function pruneExpired(buckets: Map<string, Bucket>, now: number): void {
+  for (const [key, bucket] of buckets) {
+    if (bucket.resetAt <= now) {
+      buckets.delete(key);
+    }
+  }
+}
+
 function consume(
   buckets: Map<string, Bucket>,
   key: string,
   limit: { windowSeconds: number; max: number },
   now: number,
-): boolean {
+): { allowed: boolean; retryAfterSeconds: number } {
   const bucket = buckets.get(key);
   if (bucket === undefined || bucket.resetAt <= now) {
     buckets.set(key, { count: 1, resetAt: now + limit.windowSeconds * 1000 });
-    return true;
+    return { allowed: true, retryAfterSeconds: limit.windowSeconds };
   }
   if (bucket.count >= limit.max) {
-    return false;
+    // Report the remaining window, not the full one: a client that is one second away from a
+    // reset must not be told to wait a minute.
+    return {
+      allowed: false,
+      retryAfterSeconds: Math.max(1, Math.ceil((bucket.resetAt - now) / 1000)),
+    };
   }
   bucket.count += 1;
-  return true;
+  return { allowed: true, retryAfterSeconds: limit.windowSeconds };
 }
 
 function applyCors(request: FastifyRequest, reply: FastifyReply, allowed: string[]): void {

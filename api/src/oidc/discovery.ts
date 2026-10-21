@@ -77,7 +77,7 @@ export function buildOpenIdConfiguration({ issuer }: DiscoveryOptions): OpenIdCo
     subject_types_supported: ['public'],
     id_token_signing_alg_values_supported: ['ES256'],
     scopes_supported: [...SUPPORTED_SCOPES],
-    token_endpoint_auth_methods_supported: ['client_secret_basic', 'none'],
+    token_endpoint_auth_methods_supported: ['client_secret_basic', 'client_secret_post', 'none'],
     code_challenge_methods_supported: ['S256'],
     claims_supported: [...SUPPORTED_CLAIMS],
     backchannel_logout_supported: true,

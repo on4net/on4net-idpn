@@ -805,4 +805,21 @@ describe('POST /oauth2/token — client_credentials', () => {
 
     await app.close();
   });
+
+  it('refuses the grant for a public client that only has a published client_id', async () => {
+    const { app } = await harness();
+    // A public (SPA) client authenticates with `none`, so anyone who reads the client_id from
+    // the public config could otherwise mint a machine token (card #70 finding 10).
+    const response = await request(app.server)
+      .post('/oauth2/token')
+      .send({
+        grant_type: 'client_credentials',
+        client_id: 'spa-app',
+        scope: 'reports:read',
+      })
+      .expect(400);
+
+    expect(response.body.error).toBe('unauthorized_client');
+    await app.close();
+  });
 });

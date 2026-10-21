@@ -187,6 +187,32 @@ describe('GET /api/v1/clients/:clientId/public-config', () => {
     await request(app.server).get('/api/v1/clients/app-a/public-config').expect(200);
     await app.close();
   });
+
+  it('throttles enumeration across client ids from one address', async () => {
+    let now = 0;
+    const app: FastifyInstance = Fastify({ logger: false });
+    registerPublicConfigRoute(app, {
+      repository: { findPublicClient: async () => null },
+      allowedOrigins: async () => [],
+      dependencies: deps,
+      rateLimit: { windowSeconds: 60, max: 2 },
+      now: () => now,
+    });
+    await app.ready();
+
+    // A distinct client id per request must not reset the window (card #70 finding 11).
+    await request(app.server).get('/api/v1/clients/probe-1/public-config').expect(404);
+    await request(app.server).get('/api/v1/clients/probe-2/public-config').expect(404);
+    await request(app.server).get('/api/v1/clients/probe-3/public-config').expect(429);
+
+    now = 30_000;
+    const partial = await request(app.server)
+      .get('/api/v1/clients/probe-4/public-config')
+      .expect(429);
+    // The caller is told the remaining window, not the whole one.
+    expect(partial.headers['retry-after']).toBe('30');
+    await app.close();
+  });
 });
 
 function userInfoApp() {
@@ -222,7 +248,7 @@ describe('GET /oauth2/userinfo', () => {
     await app.ready();
 
     const token = await keys.signAccessToken(
-      { sub: 'user-1', scope: 'openid profile email' },
+      { sub: 'user-1', client_id: 'app-a', token_use: 'access', scope: 'openid profile email' },
       { issuer, audience: 'app-a', subject: 'user-1', expiresInSeconds: 600 },
     );
 
@@ -250,7 +276,7 @@ describe('GET /oauth2/userinfo', () => {
     await app.ready();
 
     const token = await keys.signAccessToken(
-      { sub: 'user-1', scope: 'openid' },
+      { sub: 'user-1', client_id: 'app-a', token_use: 'access', scope: 'openid' },
       { issuer, audience: 'app-a', subject: 'user-1', expiresInSeconds: 600 },
     );
 
@@ -275,7 +301,7 @@ describe('GET /oauth2/userinfo', () => {
 
     const otherKeys = new SigningKeyManager(new MemorySigningKeyRepository());
     const foreign = await otherKeys.signAccessToken(
-      { sub: 'user-1', scope: 'openid' },
+      { sub: 'user-1', client_id: 'app-a', token_use: 'access', scope: 'openid' },
       {
         issuer: 'https://evil.example',
         audience: 'app-a',

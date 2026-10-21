@@ -66,4 +66,11 @@ describe('cookie parsing', () => {
   it('decodes URI-encoded values and ignores malformed pairs', () => {
     expect(parseCookieHeader('a=1; broken; b=hello%20world')).toEqual({ a: '1', b: 'hello world' });
   });
+
+  it('treats an undecodable value as absent instead of throwing', () => {
+    // `Cookie: idpn_session=%` used to raise a URIError out of the reader (card #70 finding 5).
+    expect(() => parseCookieHeader(`${SESSION_COOKIE_NAME}=%`)).not.toThrow();
+    expect(parseCookieHeader(`theme=dark; ${SESSION_COOKIE_NAME}=%`)).toEqual({ theme: 'dark' });
+    expect(readSessionId(`${SESSION_COOKIE_NAME}=%`)).toBeNull();
+  });
 });

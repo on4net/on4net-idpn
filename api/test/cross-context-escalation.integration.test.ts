@@ -1061,6 +1061,7 @@ describe('token and userinfo claims stay scoped to the context', () => {
         {
           scope: 'openid',
           client_id: 'app-a',
+          token_use: 'access',
           auth_time: nowSeconds(),
           login_context: loginContext,
           permissions_source: 'userinfo',
@@ -1100,6 +1101,7 @@ describe('token and userinfo claims stay scoped to the context', () => {
       {
         scope: 'openid',
         client_id: 'app-a',
+        token_use: 'access',
         auth_time: nowSeconds(),
         login_context: 'customer-admin',
         permissions_source: 'userinfo',

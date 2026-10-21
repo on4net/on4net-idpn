@@ -86,6 +86,8 @@ describe('RedisSessionStore', () => {
     expect(rotated).not.toBeNull();
     expect(rotated?.sid).not.toBe(original.sid);
     expect(rotated?.loginContext).toBe('customer-admin');
+    // The hard limit counts from the original authentication, not from the rotation.
+    expect(rotated?.absoluteExpiresAt).toBe(original.absoluteExpiresAt);
     expect(await store.read(original.sid)).toBeNull();
     expect(await store.read(rotated?.sid ?? '')).not.toBeNull();
   });

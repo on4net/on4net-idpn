@@ -57,6 +57,9 @@ export function buildAccessTokenClaims(input: AccessTokenClaimsInput): Record<st
     sub: input.profile.id,
     aud: input.clientId,
     client_id: input.clientId,
+    // Resource servers (including `/oauth2/userinfo`) must be able to tell an access token
+    // from an ID token; ID tokens carry no `token_use`.
+    token_use: 'access',
     iat: input.issuedAt,
     exp: input.issuedAt + input.expiresInSeconds,
     auth_time: Math.floor(input.code.authTime.getTime() / 1000),

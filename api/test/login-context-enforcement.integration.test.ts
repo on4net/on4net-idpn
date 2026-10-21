@@ -626,6 +626,7 @@ describe('token role resolution per context', () => {
         {
           scope: 'openid',
           client_id: 'app-a',
+          token_use: 'access',
           auth_time: at,
           login_context: loginContext,
           permissions_source: 'userinfo',

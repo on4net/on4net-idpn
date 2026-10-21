@@ -61,6 +61,18 @@ export function registerUserInfoRoute(app: FastifyInstance, options: UserInfoRou
         .send({ error: 'invalid_token' });
     }
 
+    // Bind the token to this endpoint: only our access tokens are accepted, and the audience
+    // must be the client that received the token. An ID token (no `token_use`) or a token
+    // minted for another audience is rejected (card #70 finding 13).
+    const clientId = claims.client_id;
+    if (claims.token_use !== 'access' || typeof clientId !== 'string' || claims.aud !== clientId) {
+      return reply
+        .code(401)
+        .header('WWW-Authenticate', 'Bearer error="invalid_token"')
+        .header('Cache-Control', 'no-store')
+        .send({ error: 'invalid_token' });
+    }
+
     const profile = await options.users.findUserInfoProfile(subject);
     if (profile === null) {
       return reply

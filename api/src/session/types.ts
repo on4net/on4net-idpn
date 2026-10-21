@@ -44,6 +44,11 @@ export interface CreateSessionInput {
   acr: string;
   /** Authentication time; defaults to now. Preserved across rotation. */
   authTime?: Date;
+  /**
+   * Absolute expiry to carry over when a session is rotated: the hard limit counts from the
+   * original authentication, so rotating must not restart it (card #70 finding 14).
+   */
+  absoluteExpiresAt?: Date;
 }
 
 export interface SessionPolicy {

@@ -54,9 +54,7 @@ export class RedisSessionStore implements ClientSessionRevoker {
       lastSeenAt: now.toISOString(),
       authTime: (input.authTime ?? now).toISOString(),
       idleExpiresAt: new Date(now.getTime() + this.policy.idleTtlSeconds * 1000).toISOString(),
-      absoluteExpiresAt: new Date(
-        now.getTime() + this.policy.absoluteTtlSeconds * 1000,
-      ).toISOString(),
+      absoluteExpiresAt: (input.absoluteExpiresAt ?? new Date(now.getTime() + this.policy.absoluteTtlSeconds * 1000)).toISOString(),
       ...definedOptional('ip', input.ip),
       ...definedOptional('userAgent', input.userAgent),
       amr: [...input.amr],
@@ -116,6 +114,8 @@ export class RedisSessionStore implements ClientSessionRevoker {
       amr: current.amr,
       acr: current.acr,
       authTime: new Date(current.authTime),
+      // The hard limit is measured from the original authentication, never from the rotation.
+      absoluteExpiresAt: new Date(current.absoluteExpiresAt),
     });
   }
 

@@ -403,6 +403,12 @@ async function clientCredentialsGrant(
   options: TokenRouteOptions,
   at: Date,
 ): Promise<FastifyReply> {
+  // A machine token must never be mintable with a published public `client_id`: only a
+  // confidential machine client (with a stored secret) may use this grant (card #70 finding 10).
+  if (client.type !== 'm2m') {
+    return tokenError(reply, oauthError('unauthorized_client', 'grant not allowed for this client'));
+  }
+
   const requested = (payload.scope ?? '').split(/\s+/).filter((scope) => scope !== '');
   if (requested.length === 0) {
     return tokenError(reply, oauthError('invalid_scope'));
