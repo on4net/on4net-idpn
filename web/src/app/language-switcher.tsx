@@ -14,6 +14,11 @@ export interface LanguageSwitcherProps {
   locale: Locale;
   /** Enabled locales with a shipped base bundle; at least two entries are required. */
   locales: readonly Locale[];
+  /**
+   * Direction resolved by the page (config `locales.dir` may override the language default),
+   * so the control aligns with the card instead of guessing from the locale (card #60).
+   */
+  dir?: 'rtl' | 'ltr';
   onChange(next: Locale): void;
 }
 
@@ -25,6 +30,7 @@ export interface LanguageSwitcherProps {
 export function LanguageSwitcher({
   locale,
   locales,
+  dir,
   onChange,
 }: LanguageSwitcherProps): React.ReactElement | null {
   const t = useTranslate(locale);
@@ -33,7 +39,7 @@ export function LanguageSwitcher({
   }
 
   return (
-    <div className="mb-3 flex justify-end" dir={directionOf(locale)}>
+    <div className="mb-3 flex justify-end" dir={dir ?? directionOf(locale)}>
       <Select
         value={locale}
         onValueChange={(next) => {

@@ -219,6 +219,22 @@ export function withLoginContext(
   if (returnTo === undefined || contextKey === undefined || contextKey.trim() === '') {
     return returnTo;
   }
+  return withAuthorizeParam(returnTo, 'login_context', contextKey);
+}
+
+/**
+ * Rewrites one parameter of an `/oauth2/authorize` URL so the choice survives the redirect
+ * back to the IdP (mirrors `withLoginContext`). Used for `ui_locales`: the language switch is
+ * then carried by the flow itself instead of being lost on submit (card #60).
+ */
+export function withAuthorizeParam(
+  returnTo: string | undefined,
+  name: string,
+  value: string | undefined,
+): string | undefined {
+  if (returnTo === undefined || value === undefined || value.trim() === '') {
+    return returnTo;
+  }
   const base =
     typeof window === 'undefined' || window.location.origin === 'null'
       ? 'http://localhost'
@@ -228,7 +244,7 @@ export function withLoginContext(
     if (!url.pathname.endsWith('/oauth2/authorize')) {
       return returnTo;
     }
-    url.searchParams.set('login_context', contextKey);
+    url.searchParams.set(name, value);
     return /^[a-z][a-z0-9+.-]*:\/\//i.test(returnTo)
       ? url.toString()
       : `${url.pathname}${url.search}${url.hash}`;
@@ -236,6 +252,10 @@ export function withLoginContext(
     return returnTo;
   }
 }
+
+/** Binds the chosen UI language into the preserved authorize request. */
+export const withUiLocales = (returnTo: string | undefined, locale: string): string | undefined =>
+  withAuthorizeParam(returnTo, 'ui_locales', locale);
 
 export interface ContextPresentation {
   title: string;

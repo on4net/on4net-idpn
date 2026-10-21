@@ -176,7 +176,10 @@ test.describe('hosted auth UI', () => {
 
     const url = new URL(page.url());
     expect(url.searchParams.get('ui_locales')).toBe('en-US');
-    expect(url.searchParams.get('return_to')).toBe('/oauth2/authorize?client_id=admin-panel');
+    // The choice is bound into the preserved authorize request as well (card #60).
+    expect(url.searchParams.get('return_to')).toBe(
+      '/oauth2/authorize?client_id=admin-panel&ui_locales=en-US',
+    );
     expect(await page.evaluate(() => localStorage.length + sessionStorage.length)).toBe(0);
     expect(remoteFonts).toEqual([]);
     await expectNoHorizontalOverflow(page);

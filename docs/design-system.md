@@ -155,6 +155,11 @@ for (const [name, value] of Object.entries(idpnThemeToCssVariables(config.theme,
   - `text-start` / `text-end` به‌جای `text-left` / `text-right`
 - آیکون‌های جهت‌دار (Chevron، Arrow) در RTL چرخانده شوند (`rtl:rotate-180`).
 - فونت به‌ازای Locale: `Vazirmatn` برای `fa-IR`، `Inter` برای `en-US`؛ با `font-display: swap`.
+  - **وضعیت فعلی:** هنوز هیچ فایل فونتی در مخزن منتشر نمی‌شود؛ لایه تم فقط *پشته فونت* را تعیین
+    می‌کند و مرورگر به فونت سیستمی برمی‌گردد. تصمیم آگاهانه است تا زمانی که فونت self-hosted
+    (woff2 زیرمجموعه‌شده با `font-display: swap` و لایسنس OFL) اضافه شود؛ افزودن آن یک تغییر
+    دارایی‌محور جداگانه است (کارت پیگیری ثبت شده). تا آن زمان تست a11y فقط پشته و توکن
+    `--idpn-font-sans` را تأیید می‌کند، نه رندر واقعی گلیف‌ها.
 - اعداد، تاریخ و واحد پول با `Intl` و Locale فعال؛ تست ترکیب فارسی/انگلیسی.
 - فرم‌ها، پیام‌های خطا و Placeholderها در RTL تست شوند.
 

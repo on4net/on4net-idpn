@@ -259,9 +259,12 @@ describe('Hosted login language switch', () => {
 
     const params = new URLSearchParams(window.location.search);
     expect(params.get('ui_locales')).toBe('en-US');
-    expect(params.get('return_to')).toBe('/oauth2/authorize?client_id=app-a');
+    // The choice is bound into the preserved authorize request, not just the page URL.
+    expect(params.get('return_to')).toBe('/oauth2/authorize?client_id=app-a&ui_locales=en-US');
     expect(params.get('login_request')).toBe('request-123');
     expect(window.location.pathname).toBe('/');
+    // The document title follows the language (tab + screen reader).
+    expect(document.title).toBe('Customer portal sign-in');
 
     expect(events).toContainEqual({ type: 'locale:changed', locale: 'en-US', dir: 'ltr' });
     expect(localStorage.length).toBe(0);

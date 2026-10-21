@@ -2,6 +2,7 @@ import * as React from 'react';
 
 import { sanitizeIdpnTheme, type IdpnTheme } from '@idpn/contracts/theme';
 import { IDPN_MFE_EVENT_NAME, type IdpnEvent } from '@idpn/mfe-sdk';
+import { translate } from '@idpn/i18n';
 
 import { IdpnRoot } from '@/app/idpn-root';
 import { HostedLoginSkeleton } from '@/app/hosted-login-skeleton';
@@ -19,6 +20,7 @@ import {
   resolveLoginContext,
   sanitizeLoginContexts,
   withLoginContext,
+  withUiLocales,
 } from '@/app/login-context';
 import {
   LoginContextMethodNotice,
@@ -687,7 +689,10 @@ export function HostedLoginPage({
     }
     document.documentElement.lang = locale;
     document.documentElement.dir = dir;
-  }, [locale, dir, configState]);
+    // The tab and a screen reader announce the document title, which must follow the page
+    // language rather than the hardcoded Persian title in index.html (card #60).
+    document.title = translate(locale, 'login.title', {}, { messages: translations });
+  }, [locale, dir, configState, translations]);
 
   /**
    * User-driven language change. The authorize request is preserved: only `ui_locales`
@@ -702,6 +707,12 @@ export function HostedLoginPage({
     if (typeof window !== 'undefined') {
       const url = new URL(window.location.href);
       url.searchParams.set('ui_locales', next);
+      // Bind the choice into the preserved authorize request too, so the IdP issues the token
+      // for the language the user actually picked instead of dropping it on submit (card #60).
+      const bound = withUiLocales(url.searchParams.get('return_to') ?? undefined, next);
+      if (bound !== undefined) {
+        url.searchParams.set('return_to', bound);
+      }
       window.history.replaceState(
         window.history.state,
         '',
@@ -931,7 +942,12 @@ export function HostedLoginPage({
       <TranslationProvider locale={locale} messages={translations}>
         <div className="w-full max-w-sm" data-login-context={activeContextKey}>
           {configState === 'ready' ? (
-            <LanguageSwitcher locale={locale} locales={enabledLocales} onChange={changeLocale} />
+            <LanguageSwitcher
+              locale={locale}
+              locales={enabledLocales}
+              dir={dir}
+              onChange={changeLocale}
+            />
           ) : null}
           {showSkeleton || flowView !== null ? null : (
             <>
