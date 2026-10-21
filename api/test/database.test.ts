@@ -306,6 +306,40 @@ describe('initial schema', () => {
     });
   });
 
+  it('enforces the assignment tuple for global assignments', async () => {
+    await inTransaction(async () => {
+      const tenantId = await insertTenant();
+      const userId = await insertUser(tenantId);
+      const { rows } = await client.query<{ id: string }>(
+        `INSERT INTO roles (key, name, description, updated_at)
+         VALUES ('app-a:global', 'App A Global', 'Global role', now())
+         RETURNING id`,
+      );
+      const role = rows[0];
+      if (role === undefined) {
+        throw new Error('failed to insert role');
+      }
+
+      const insertAssignment = () =>
+        client.query(
+          `INSERT INTO assignments
+             (subject_type, subject_id, role_id, scope_type, scope_id, assigned_by)
+           VALUES ('user', $1, $2, 'global', NULL, $1)`,
+          [userId, role.id],
+        );
+
+      await insertAssignment();
+      // scope_id IS NULL must not make two global assignments distinct (migration 0002).
+      await expectSqlError(
+        `INSERT INTO assignments
+           (subject_type, subject_id, role_id, scope_type, scope_id, assigned_by)
+         VALUES ('user', $1, $2, 'global', NULL, $1)`,
+        [userId, role.id],
+        '23505',
+      );
+    });
+  });
+
   it('restricts deleting a tenant that still owns users', async () => {
     await inTransaction(async () => {
       const tenantId = await insertTenant();
@@ -335,36 +369,60 @@ describe('initial schema', () => {
     });
   });
 
+  it('refuses to roll back without explicit confirmation', async () => {
+    await expect(rollbackLatestMigration({ connectionString })).rejects.toThrow(
+      /explicit confirmation/i,
+    );
+    const applied = await client.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM "_prisma_migrations" WHERE "rolled_back_at" IS NULL`,
+    );
+    expect(Number(applied.rows[0]?.count)).toBeGreaterThan(0);
+  });
+
   it('rolls back and re-applies the migrations', async () => {
-    const latest = await rollbackLatestMigration({ connectionString });
-    expect(latest).toBe('0009_session_login_context');
+    const latest = await rollbackLatestMigration({ connectionString, confirm: true });
+    expect(latest).toBe('0010_missing_fk_indexes');
+    const runtimeIndex = await client.query<{ indexname: string | null }>(
+      `SELECT to_regclass('public.refresh_tokens_client_id_idx') AS indexname`,
+    );
+    expect(runtimeIndex.rows[0]?.indexname).toBeNull();
+
+    const second = await rollbackLatestMigration({ connectionString, confirm: true });
+    expect(second).toBe('0009_session_login_context');
     const contextColumn = await client.query<{ column: string | null }>(
       `SELECT column_name AS "column" FROM information_schema.columns
         WHERE table_name = 'sessions' AND column_name = 'login_context'`,
     );
     expect(contextColumn.rows[0]?.column ?? null).toBeNull();
 
-    const second = await rollbackLatestMigration({ connectionString });
-    expect(second).toBe('0008_client_translations');
+    const third = await rollbackLatestMigration({ connectionString, confirm: true });
+    expect(third).toBe('0008_client_translations');
     const translationTable = await client.query<{ translations: string | null }>(
       `SELECT to_regclass('public.client_translations') AS translations`,
     );
     expect(translationTable.rows[0]?.translations).toBeNull();
 
-    const third = await rollbackLatestMigration({ connectionString });
-    expect(third).toBe('0007_login_context_binding');
-    const fourth = await rollbackLatestMigration({ connectionString });
-    expect(fourth).toBe('0006_webauthn_credentials');
-    const fifth = await rollbackLatestMigration({ connectionString });
-    expect(fifth).toBe('0005_account_tokens');
-    const sixth = await rollbackLatestMigration({ connectionString });
-    expect(sixth).toBe('0004_mfa_factors');
-    const seventh = await rollbackLatestMigration({ connectionString });
-    expect(seventh).toBe('0003_audit_events_append_only');
-    const eighth = await rollbackLatestMigration({ connectionString });
-    expect(eighth).toBe('0002_assignments_nulls_not_distinct');
-    const rolledBack = await rollbackLatestMigration({ connectionString });
+    const fourth = await rollbackLatestMigration({ connectionString, confirm: true });
+    expect(fourth).toBe('0007_login_context_binding');
+    const fifth = await rollbackLatestMigration({ connectionString, confirm: true });
+    expect(fifth).toBe('0006_webauthn_credentials');
+    const sixth = await rollbackLatestMigration({ connectionString, confirm: true });
+    expect(sixth).toBe('0005_account_tokens');
+    const seventh = await rollbackLatestMigration({ connectionString, confirm: true });
+    expect(seventh).toBe('0004_mfa_factors');
+    const eighth = await rollbackLatestMigration({ connectionString, confirm: true });
+    expect(eighth).toBe('0003_audit_events_append_only');
+    const ninth = await rollbackLatestMigration({ connectionString, confirm: true });
+    expect(ninth).toBe('0002_assignments_nulls_not_distinct');
+    const rolledBack = await rollbackLatestMigration({ connectionString, confirm: true });
     expect(rolledBack).toBe('0001_init');
+
+    // The history is kept: a rolled-back migration is marked, not deleted (finding 3).
+    const history = await client.query<{ migration_name: string; rolled_back_at: Date | null }>(
+      `SELECT "migration_name", "rolled_back_at" FROM "_prisma_migrations"`,
+    );
+    expect(history.rows).toHaveLength(10);
+    expect(history.rows.every((row) => row.rolled_back_at !== null)).toBe(true);
 
     const afterRollback = await client.query<{ users: string | null }>(
       `SELECT to_regclass('public.users') AS users`,

@@ -403,6 +403,8 @@ model ClientMembership {
   @@unique([clientId, loginContextId, userId])
   @@index([userId, status])
   @@index([clientId, status])
+  @@index([loginContextId])
+  @@index([invitedBy])
   @@map("client_memberships")
 }
 
@@ -524,6 +526,7 @@ model AuthorizationCode {
   @@index([userId])
   @@index([sessionId])
   @@index([expiresAt])
+  @@index([clientId])
   @@map("authorization_codes")
 }
 
@@ -553,6 +556,7 @@ model RefreshToken {
   @@index([userId, revokedAt])
   @@index([sessionId])
   @@index([expiresAt])
+  @@index([clientId])
   @@map("refresh_tokens")
 }
 

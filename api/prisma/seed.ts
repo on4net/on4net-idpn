@@ -5,6 +5,13 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { config as loadEnv } from 'dotenv';
 
 import { PrismaClient } from '../src/generated/prisma/client.js';
+import type { Prisma } from '../src/generated/prisma/client.js';
+
+/**
+ * The subset of the client the seed helpers need. They accept a transaction client so the
+ * whole seed either lands or leaves the catalog untouched (review finding 6).
+ */
+type SeedClient = Prisma.TransactionClient;
 
 const BASE_PERMISSIONS = [
   { key: 'idp:user:read', description: 'View users and their profiles' },
@@ -147,7 +154,7 @@ const ADMIN_CLIENT = {
  * first defined context and `clients.default_login_context_key` is kept in sync so the
  * public config always names a context that exists. Idempotent.
  */
-async function seedDefaultLoginContext(prisma: PrismaClient, clientId: string): Promise<void> {
+async function seedDefaultLoginContext(prisma: SeedClient, clientId: string): Promise<void> {
   const client = await prisma.client.findUniqueOrThrow({
     where: { clientId },
     select: {
@@ -218,7 +225,7 @@ async function seedDefaultLoginContext(prisma: PrismaClient, clientId: string): 
  * idempotent so the seed can run repeatedly.
  */
 async function seedClientRoles(
-  prisma: PrismaClient,
+  prisma: SeedClient,
   clientId: string,
   permissionIds: Map<string, string>,
 ): Promise<void> {
@@ -286,10 +293,15 @@ async function seedClientRoles(
 
 /**
  * Creates the default tenant, the admin client, the base permission/role catalog and the
- * test users. Every write is an upsert or a presence check, so running it repeatedly
- * converges to the same state without duplicating rows.
+ * test users. Every write is an upsert, a presence check or `ON CONFLICT DO NOTHING`, so
+ * running it repeatedly converges to the same state without duplicating rows, and the whole
+ * catalog is written in one transaction so a mid-run failure cannot leave it partial.
  */
 export async function seedDatabase(prisma: PrismaClient): Promise<void> {
+  await prisma.$transaction(async (tx) => seedCatalog(tx), { timeout: 120_000 });
+}
+
+async function seedCatalog(prisma: SeedClient): Promise<void> {
   const tenant = await prisma.tenant.upsert({
     where: { slug: 'default' },
     update: { name: 'Default tenant', status: 'active' },
@@ -372,26 +384,14 @@ export async function seedDatabase(prisma: PrismaClient): Promise<void> {
       if (roleId === undefined) {
         throw new Error(`User ${user.email} references unknown role ${roleKey}`);
       }
-      const existing = await prisma.assignment.findFirst({
-        where: {
-          subjectType: 'user',
-          subjectId: record.id,
-          roleId,
-          scopeType: 'global',
-          scopeId: null,
-        },
-      });
-      if (existing === null) {
-        await prisma.assignment.create({
-          data: {
-            subjectType: 'user',
-            subjectId: record.id,
-            roleId,
-            scopeType: 'global',
-            assignedBy: record.id,
-          },
-        });
-      }
+      // The unique tuple is enforced with NULLS NOT DISTINCT (migration 0002), so a single
+      // `ON CONFLICT DO NOTHING` replaces the previous check-then-insert race.
+      await prisma.$executeRaw`
+        INSERT INTO "assignments"
+          ("subject_type", "subject_id", "role_id", "scope_type", "scope_id", "assigned_by")
+        VALUES ('user', ${record.id}::uuid, ${roleId}::uuid, 'global', NULL, ${record.id}::uuid)
+        ON CONFLICT ("subject_type", "subject_id", "role_id", "scope_type", "scope_id") DO NOTHING
+      `;
     }
   }
 }

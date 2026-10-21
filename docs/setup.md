@@ -139,26 +139,34 @@ docker compose down -v        # حذف کامل همراه داده‌ها (تخ
 | Migrationها     | `api/prisma/migrations/<name>/migration.sql` و `down.sql`                |
 | Seed            | `api/prisma/seed.ts`                                                     |
 | Client تولیدشده | `api/src/generated/prisma` (در Git نیست؛ با `pnpm install` تولید می‌شود) |
-| تنظیم اتصال     | `api/prisma.config.ts` (از `DATABASE_URL` در `.env` ریشه استفاده می‌کند) |
+| تنظیم اتصال     | `api/prisma.config.ts` (`api/.env` را پیش از `.env` ریشه می‌خواند؛ بنابراین `api/.env` اولویت دارد) |
 
 ```powershell
 pnpm --filter @idpn/api db:generate   # تولید Client
 pnpm --filter @idpn/api db:deploy     # اعمال Migrationها (محیط توسعه و CI)
 pnpm --filter @idpn/api db:migrate -- --name add_x   # ساخت Migration جدید
-pnpm --filter @idpn/api db:rollback   # برگشت آخرین Migration
+pnpm --filter @idpn/api db:rollback -- --yes   # برگشت آخرین Migration (نیازمند تأیید صریح)
 pnpm --filter @idpn/api db:seed       # داده اولیه (Idempotent)
 ```
 
 - **Migration جدید:** Schema را تغییر دهید و `db:migrate -- --name <name>` را اجرا کنید. SQL تولیدشده را بازبینی کنید؛
   اگر تغییر نیاز به SQL دستی دارد (مثل محدودیت `CHECK` یا ایندکس Partial)، آن را به انتهای همان فایل اضافه کنید.
 - **Rollback:** برای هر Migration یک `down.sql` نگه‌داری می‌شود. `db:rollback` آخرین Migration اعمال‌شده را در یک
-  تراکنش برمی‌گرداند و رکورد آن را از `_prisma_migrations` حذف می‌کند. اگر `down.sql` موجود نباشد، فرمان با خطا متوقف می‌شود.
-- **Seed Idempotent:** Tenant پیش‌فرض (`default`)، کلاینت `admin-panel` (با MFA اجباری)، ۱۳ مجوز و ۳ نقش سراسری
+  تراکنش و زیر `pg_advisory_lock` برمی‌گرداند و رکورد آن را با `rolled_back_at` علامت می‌زند (نه حذف)، تا
+  `db:deploy` دوباره همان Migration را اعمال کند و تاریخچه قابل حسابرسی بماند. چون `down.sql` می‌تواند جدول حذف کند،
+  دستور بدون `--yes` اجرا نمی‌شود و روی `NODE_ENV=production` بدون `--force` متوقف می‌شود. اگر `down.sql` موجود نباشد،
+  فرمان با خطا متوقف می‌شود.
+- **Seed Idempotent:** Tenant پیش‌فرض (`default`)، کلاینت `admin-panel` (با MFA اجباری)، ۳۶ مجوز و ۳ نقش سراسری
   (`idp:superadmin`، `idp:security-admin`، `idp:support`) و کاربران تست `admin`، `support` و `user`.
-  کاربران تست عمداً **رمز عبور ندارند**؛ Credential در فاز ۱ (کارت #12) اضافه می‌شود.
+  کاربران تست عمداً **رمز عبور ندارند**؛ Credential در فاز ۱ (کارت #12) اضافه می‌شود. کل Seed در یک تراکنش اجرا
+  می‌شود و تخصیص نقش‌ها با `ON CONFLICT DO NOTHING` تکرارناپذیر است.
 - **قواعد سطح دیتابیس:** یکتایی `(tenant_id, email)` و `(tenant_id, username)`، اجباری‌بودن حروف کوچک ایمیل/نام کاربری،
-  یکتایی عضویت `(client_id, login_context_id, user_id)` با `NULLS NOT DISTINCT`، یک Context پیش‌فرض برای هر کلاینت،
-  سازگاری `scope_type`/`scope_id` در `Assignments` و `ON DELETE RESTRICT` روی FKها.
+  یکتایی عضویت `(client_id, login_context_id, user_id)` با `NULLS NOT DISTINCT`، یکتایی تخصیص
+  `(subject_type, subject_id, role_id, scope_type, scope_id)` با `NULLS NOT DISTINCT`، یک Context پیش‌فرض برای هر کلاینت،
+  سازگاری `scope_type`/`scope_id` در `Assignments`، `@@index` روی همه‌ی FKها و `ON DELETE RESTRICT` روی FKها.
+- **موجودیت‌های معوق:** `Scope` (بند ۲.۷ سند دامنه) جدول نیست؛ Scope یک مجموعه Claim است که روی `clients.scopes` و
+  نقش/مجوز مدل می‌شود. `Organization`، `Group` و `Service Account` طبق سند دامنه اختیاری‌اند و در فاز ۰ ساخته نشده‌اند؛
+  جدول‌های `MfaFactor` و `ClientTranslation` در Migrationهای `0004` و `0008` اضافه شده‌اند.
 - **تست:** `pnpm --filter @idpn/api test` با Testcontainers روی PostgreSQL واقعی اجرا می‌شود و Migration، Rollback،
   اعمال مجدد و Idempotency مربوط به Seed را بررسی می‌کند (Docker باید فعال باشد).
 
