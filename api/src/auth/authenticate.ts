@@ -61,6 +61,16 @@ export async function authenticateWithPassword(
   return { ok: true, userId: user.id };
 }
 
+/**
+ * Whether the account is locked right now.
+ *
+ * `lockedUntil` is honoured whether or not `status` was flipped, so a lock created by failed
+ * attempts expires on its own (`docs/security.md` 3.2: 15 minutes, escalating). A manual
+ * `status = 'locked'` without an expiry stays permanent until an administrator unlocks it.
+ */
 export function isLocked(user: AuthenticatableUser, now: Date = new Date()): boolean {
-  return user.status === 'locked' && (user.lockedUntil === null || user.lockedUntil > now);
+  if (user.lockedUntil !== null) {
+    return user.lockedUntil.getTime() > now.getTime();
+  }
+  return user.status === 'locked';
 }

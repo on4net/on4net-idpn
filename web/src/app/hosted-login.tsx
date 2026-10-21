@@ -63,7 +63,7 @@ interface PublicConfigLike {
 /** Outcome of the password step (`POST /api/v1/login`). */
 export type LoginSubmitResult =
   | { ok: true; redirectTo?: string }
-  | { ok: false; reason: 'invalid_credentials' | 'network' }
+  | { ok: false; reason: 'invalid_credentials' | 'network' | 'rate_limited' }
   | { ok: false; reason: 'mfa_required'; challengeToken: string; methods?: string[] }
   | { ok: false; reason: 'mfa_enrollment_required' };
 
@@ -169,6 +169,9 @@ async function defaultSubmit(
 
   if (response.status === 401) {
     return { ok: false, reason: 'invalid_credentials' };
+  }
+  if (response.status === 429) {
+    return { ok: false, reason: 'rate_limited' };
   }
   if (response.status === 403) {
     const problem = (await response.json().catch((): unknown => null)) as {
@@ -493,7 +496,7 @@ export function HostedLoginPage({
   const [theme, setTheme] = React.useState<IdpnTheme>(DEFAULT_THEME);
   const [submitting, setSubmitting] = React.useState(false);
   const [errorCode, setErrorCode] = React.useState<
-    'invalid_credentials' | 'network' | 'mfa_enrollment_required' | null
+    'invalid_credentials' | 'network' | 'rate_limited' | 'mfa_enrollment_required' | null
   >(null);
   /** Set once the password step returned an MFA challenge (single-use token). */
   const [challengeToken, setChallengeToken] = React.useState<string | null>(null);

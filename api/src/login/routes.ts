@@ -9,6 +9,7 @@ import type { MfaLoginDependencies, MfaPolicy } from '../mfa/mfa-types.js';
 import type { WebauthnServiceDependencies } from '../mfa/webauthn.js';
 import { serializeSessionCookie } from '../session/cookie.js';
 import type { RedisSessionStore } from '../session/store.js';
+import type { RateLimiter, RateLimitPolicy } from '../http/rate-limit.js';
 import {
   LOGIN_FAILED_CODE,
   LOGIN_FAILED_MESSAGE,
@@ -21,10 +22,21 @@ const MAX_FAILED_ATTEMPTS = 5;
 const LOCK_DURATION_MS = 15 * 60 * 1000;
 const ACR_PASSWORD = 'urn:on4net:acr:pwd';
 
+/**
+ * Credential attempts per client address and identifier (`docs/security.md` 3.2, T1).
+ * The per-account lockout alone leaves unknown identifiers unthrottled, and every attempt
+ * costs a full Argon2id verification.
+ */
+const LOGIN_RATE_LIMIT: RateLimitPolicy = { windowSeconds: 60, max: 10 };
+const LOGIN_THROTTLED_CODE = 'too_many_requests';
+const LOGIN_THROTTLED_MESSAGE = 'تعداد تلاش‌ها بیش از حد مجاز است؛ کمی بعد دوباره تلاش کنید.';
+
 export interface LoginRouteOptions {
   appUrl: string;
   users: LoginUserRepository;
-  sessions: Pick<RedisSessionStore, 'create'>;
+  sessions: Pick<RedisSessionStore, 'create'> & Partial<Pick<RedisSessionStore, 'revoke'>>;
+  /** Shared rate limiter for credential attempts; omitted only in tests. */
+  rateLimiter?: RateLimiter;
   /** Mirrors the session into PostgreSQL so tokens can reference it (FK). */
   persistSession(input: {
     sid: string;
@@ -99,21 +111,27 @@ export function registerLoginRoute(app: FastifyInstance, options: LoginRouteOpti
     }
 
     const normalized = normalizeIdentifier(identifier);
+
+    // Throttle before any hashing: unknown identifiers would otherwise be free to spray and
+    // every attempt would cost a full Argon2id verification (docs/security.md T1, T20).
+    if (options.rateLimiter !== undefined) {
+      const allowed = await options.rateLimiter.consume(
+        `login:${request.ip}:${normalized}`,
+        LOGIN_RATE_LIMIT,
+      );
+      if (!allowed) {
+        return reply
+          .code(429)
+          .header('Cache-Control', 'no-store')
+          .header('Retry-After', String(LOGIN_RATE_LIMIT.windowSeconds))
+          .send({ error: LOGIN_THROTTLED_CODE, message: LOGIN_THROTTLED_MESSAGE });
+      }
+    }
+
     const user = await options.users.findByIdentifier(normalized);
 
     if (user === null) {
-      // Constant-ish work for unknown identifiers: verify against a throwaway hash.
-      decoyHash ??= await hashPassword('idp-decoy-password-value');
-      await authenticateWithPassword(
-        {
-          id: 'decoy',
-          status: 'active',
-          passwordHash: decoyHash,
-          lockedUntil: null,
-          deletedAt: null,
-        },
-        password,
-      );
+      await burnPasswordVerification(password);
       return reject(reply, options, request, body, undefined, 'unknown_user');
     }
 
@@ -121,24 +139,23 @@ export function registerLoginRoute(app: FastifyInstance, options: LoginRouteOpti
     const at = now();
 
     if (!result.ok) {
-      const attempts = user.failedLoginCount + 1;
+      if (result.reason !== 'invalid_credentials') {
+        // Deleted, disabled, locked and passwordless accounts return before hashing; pay the
+        // same verification cost so the response time does not reveal the account state.
+        await burnPasswordVerification(password);
+      }
+      // A lock that already elapsed is a fresh window: the counter restarts so an attacker
+      // cannot keep the account locked with a single attempt per window.
+      const previousAttempts =
+        user.lockedUntil !== null && user.lockedUntil.getTime() <= at.getTime()
+          ? 0
+          : user.failedLoginCount;
+      const attempts = previousAttempts + 1;
       const lockedUntil =
         attempts >= MAX_FAILED_ATTEMPTS ? new Date(at.getTime() + LOCK_DURATION_MS) : null;
       await options.users.registerFailedAttempt(user.id, attempts, lockedUntil);
-      await options.audit.record({
-        actorType: 'anonymous',
-        action: 'user.login.failed',
-        targetType: 'user',
-        targetId: user.id,
-        ip: request.ip,
-        userAgent: request.headers['user-agent'] ?? null,
-        result: 'failure',
-        metadata: sanitizeAuditMetadata({
-          reason: result.reason,
-          identifier: maskEmail(user.email),
-        }),
-      });
-      return reject(reply, options, request, body, user.id, result.reason);
+      // One audit row per failure: `reject` records it with the masked identifier.
+      return reject(reply, options, request, body, user.id, result.reason, maskEmail(user.email));
     }
 
     if (user.status !== 'active') {
@@ -213,20 +230,27 @@ export function registerLoginRoute(app: FastifyInstance, options: LoginRouteOpti
       authTime: at,
     });
 
-    await options.persistSession({
-      sid: session.sid,
-      userId: user.id,
-      tenantId: user.tenantId,
-      ...(session.clientId === undefined ? {} : { clientId: session.clientId }),
-      ...(session.loginContext === undefined ? {} : { loginContext: session.loginContext }),
-      ...(session.ip === undefined ? {} : { ip: session.ip }),
-      ...(session.userAgent === undefined ? {} : { userAgent: session.userAgent }),
-      amr: session.amr,
-      acr: session.acr,
-      createdAt: new Date(session.createdAt),
-      idleExpiresAt: new Date(session.idleExpiresAt),
-      absoluteExpiresAt: new Date(session.absoluteExpiresAt),
-    });
+    try {
+      await options.persistSession({
+        sid: session.sid,
+        userId: user.id,
+        tenantId: user.tenantId,
+        ...(session.clientId === undefined ? {} : { clientId: session.clientId }),
+        ...(session.loginContext === undefined ? {} : { loginContext: session.loginContext }),
+        ...(session.ip === undefined ? {} : { ip: session.ip }),
+        ...(session.userAgent === undefined ? {} : { userAgent: session.userAgent }),
+        amr: session.amr,
+        acr: session.acr,
+        createdAt: new Date(session.createdAt),
+        idleExpiresAt: new Date(session.idleExpiresAt),
+        absoluteExpiresAt: new Date(session.absoluteExpiresAt),
+      });
+    } catch (error) {
+      // Without the PostgreSQL mirror no token path can reference the session, so the Redis
+      // session must not survive as an unreferenced, unaudited credential.
+      await options.sessions.revoke?.(session.sid, 'persist_failed').catch(() => undefined);
+      throw error;
+    }
 
     await options.users.registerSuccessfulLogin(user.id, at);
     await options.audit.record({
@@ -268,6 +292,7 @@ async function reject(
   body: LoginBody,
   userId: string | undefined,
   reason: string,
+  maskedIdentifier?: string,
 ): Promise<FastifyReply> {
   void body;
   await options.audit.record({
@@ -279,13 +304,34 @@ async function reject(
     ip: request.ip,
     userAgent: request.headers['user-agent'] ?? null,
     result: 'failure',
-    metadata: sanitizeAuditMetadata({ reason }),
+    metadata: sanitizeAuditMetadata({
+      reason,
+      ...(maskedIdentifier === undefined ? {} : { identifier: maskedIdentifier }),
+    }),
   });
 
   return reply
     .code(401)
     .header('Cache-Control', 'no-store')
     .send({ error: LOGIN_FAILED_CODE, message: LOGIN_FAILED_MESSAGE });
+}
+
+/**
+ * Verifies a throwaway hash so every rejected attempt costs one Argon2id verification,
+ * whether or not the account exists or is usable (`docs/security.md` T1, timing oracle).
+ */
+async function burnPasswordVerification(password: string): Promise<void> {
+  decoyHash ??= await hashPassword('idp-decoy-password-value');
+  await authenticateWithPassword(
+    {
+      id: 'decoy',
+      status: 'active',
+      passwordHash: decoyHash,
+      lockedUntil: null,
+      deletedAt: null,
+    },
+    password,
+  );
 }
 
 /** Client-side login context keys are short slugs (`docs/login-contexts.md` 3.1). */

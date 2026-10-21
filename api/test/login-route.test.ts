@@ -3,6 +3,7 @@ import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 
 import { hashPassword, type Argon2Params } from '../src/auth/password.js';
+import { createMemoryRateLimiter, type RateLimiter } from '../src/http/rate-limit.js';
 import { registerLoginRoute } from '../src/login/routes.js';
 import {
   normalizeIdentifier,
@@ -37,20 +38,30 @@ interface Harness {
   persisted: { sid: string; clientId?: string; loginContext?: string }[];
   audits: Parameters<LoginUserRepository['registerFailedAttempt']>[0][];
   failures: { userId: string; attempts: number; lockedUntil: Date | null }[];
+  revoked: { sid: string; reason: string }[];
+}
+
+interface HarnessOptions {
+  rateLimiter?: RateLimiter;
+  /** Makes the PostgreSQL mirror fail so the compensation path runs. */
+  failPersist?: boolean;
 }
 
 async function harness(
   currentUser: LoginUserRecord | null,
   now = new Date('2026-10-18T12:00:00Z'),
+  options: HarnessOptions = {},
 ) {
   const app = Fastify({ logger: false });
   const sessions: IdpSession[] = [];
   const persisted: { sid: string; clientId?: string; loginContext?: string }[] = [];
   const failures: { userId: string; attempts: number; lockedUntil: Date | null }[] = [];
+  const revoked: { sid: string; reason: string }[] = [];
   const audits: unknown[] = [];
 
   registerLoginRoute(app, {
     appUrl,
+    ...(options.rateLimiter === undefined ? {} : { rateLimiter: options.rateLimiter }),
     users: {
       async findByIdentifier() {
         return currentUser;
@@ -78,6 +89,10 @@ async function harness(
         sessions.push(session);
         return session;
       },
+      async revoke(sid, reason) {
+        revoked.push({ sid, reason });
+        return true;
+      },
     },
     audit: {
       async record(event) {
@@ -85,13 +100,16 @@ async function harness(
       },
     },
     persistSession: async (input) => {
+      if (options.failPersist === true) {
+        throw new Error('mirror unavailable');
+      }
       persisted.push(input);
     },
     cookie: { secure: true, idleTtlSeconds: 1800, absoluteTtlSeconds: 28800 },
     now: () => now,
   });
   await app.ready();
-  return { app, sessions, persisted, audits, failures } as unknown as Harness;
+  return { app, sessions, persisted, audits, failures, revoked } as unknown as Harness;
 }
 
 describe('POST /api/v1/login', () => {
@@ -151,6 +169,84 @@ describe('POST /api/v1/login', () => {
 
     expect(failures[0]).toMatchObject({ userId: 'user-1', attempts: 5 });
     expect(failures[0]?.lockedUntil).toBeInstanceOf(Date);
+    await app.close();
+  });
+
+  it('lets the lock expire and restarts the attempt counter', async () => {
+    // The lock elapsed: the account is usable again even though the counter is still at 5.
+    const { app, failures } = await harness(
+      await user({
+        status: 'active',
+        failedLoginCount: 5,
+        lockedUntil: new Date('2026-10-18T11:45:00Z'),
+      }),
+    );
+
+    const response = await request(app.server)
+      .post('/api/v1/login')
+      .send({ identifier: 'sara@example.com', password })
+      .expect(200);
+    expect(response.body.ok).toBe(true);
+
+    await request(app.server)
+      .post('/api/v1/login')
+      .send({ identifier: 'sara@example.com', password: 'wrong-password-1' })
+      .expect(401);
+    // One failure after the window closed: the counter restarted instead of re-locking.
+    expect(failures[0]).toMatchObject({ userId: 'user-1', attempts: 1, lockedUntil: null });
+    await app.close();
+  });
+
+  it('throttles credential attempts with a Redis-backed limiter', async () => {
+    const { app } = await harness(await user(), undefined, {
+      rateLimiter: createMemoryRateLimiter(),
+    });
+
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      await request(app.server)
+        .post('/api/v1/login')
+        .send({ identifier: 'sara@example.com', password: 'wrong-password-1' })
+        .expect(401);
+    }
+
+    const throttled = await request(app.server)
+      .post('/api/v1/login')
+      .send({ identifier: 'sara@example.com', password })
+      .expect(429);
+
+    expect(throttled.body.error).toBe('too_many_requests');
+    expect(throttled.headers['cache-control']).toBe('no-store');
+    expect(throttled.headers['retry-after']).toBe('60');
+    expect(String(throttled.headers['set-cookie'] ?? '')).not.toContain('idpn_session');
+    await app.close();
+  });
+
+  it('records exactly one audit event per failed credential attempt', async () => {
+    const { app, audits } = await harness(await user());
+
+    await request(app.server)
+      .post('/api/v1/login')
+      .send({ identifier: 'sara@example.com', password: 'wrong-password-1' })
+      .expect(401);
+
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({
+      action: 'user.login.failed',
+      result: 'failure',
+      metadata: { reason: 'invalid_credentials', identifier: 's***@example.com' },
+    });
+    await app.close();
+  });
+
+  it('revokes the session when the PostgreSQL mirror fails', async () => {
+    const { app, revoked } = await harness(await user(), undefined, { failPersist: true });
+
+    await request(app.server)
+      .post('/api/v1/login')
+      .send({ identifier: 'sara@example.com', password })
+      .expect(500);
+
+    expect(revoked).toEqual([{ sid: 'sid-1', reason: 'persist_failed' }]);
     await app.close();
   });
 

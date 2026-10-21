@@ -255,6 +255,7 @@
   "login.errorInvalid": "Incorrect username or password.",
   "login.errorNetwork": "Could not reach the server. Please try again.",
   "login.errorPasswordRequired": "Enter your password.",
+  "login.errorRateLimited": "Too many attempts. Wait a minute and try again.",
   "login.errorRequired": "Enter your email or username.",
   "login.errorSummary": "Sign-in failed",
   "login.forgot": "Forgot your password?",

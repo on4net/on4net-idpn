@@ -29,7 +29,9 @@ export type RevokeReason =
   | 'password_change'
   | 'rotated'
   | 'expired'
-  | 'concurrent_limit';
+  | 'concurrent_limit'
+  /** The session was created but its PostgreSQL mirror failed; it must not survive. */
+  | 'persist_failed';
 
 export interface CreateSessionInput {
   userId: string;

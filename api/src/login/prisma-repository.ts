@@ -50,11 +50,15 @@ export function createPrismaLoginRepository(prisma: PrismaClient): LoginUserRepo
     },
 
     async findByIdentifier(normalizedIdentifier): Promise<LoginUserRecord | null> {
-      const user = await prisma.user.findFirst({
+      // Users are unique per tenant, so the same identifier can exist in several tenants. The
+      // login form does not carry a tenant yet (single-tenant phase 1): resolve nothing rather
+      // than authenticate against an arbitrary tenant.
+      const users = await prisma.user.findMany({
         where: {
           deletedAt: null,
           OR: [{ email: normalizedIdentifier }, { username: normalizedIdentifier }],
         },
+        take: 2,
         select: {
           id: true,
           tenantId: true,
@@ -69,7 +73,7 @@ export function createPrismaLoginRepository(prisma: PrismaClient): LoginUserRepo
           deletedAt: true,
         },
       });
-      return user ?? null;
+      return users.length === 1 ? (users[0] ?? null) : null;
     },
 
     async registerFailedAttempt(userId, attempts, lockedUntil) {
@@ -77,7 +81,9 @@ export function createPrismaLoginRepository(prisma: PrismaClient): LoginUserRepo
         where: { id: userId },
         data: {
           failedLoginCount: attempts,
-          ...(lockedUntil === null ? {} : { lockedUntil, status: 'locked' }),
+          // The lock lives in `locked_until` only. Writing `status = 'locked'` made the lock
+          // permanent, because the login route refuses any non-active account.
+          ...(lockedUntil === null ? {} : { lockedUntil }),
         },
       });
     },

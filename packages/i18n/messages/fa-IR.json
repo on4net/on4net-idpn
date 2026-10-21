@@ -255,6 +255,7 @@
   "login.errorInvalid": "نام کاربری یا رمز عبور نادرست است.",
   "login.errorNetwork": "ارتباط با سرور برقرار نشد. دوباره تلاش کنید.",
   "login.errorPasswordRequired": "رمز عبور را وارد کنید.",
+  "login.errorRateLimited": "تعداد تلاش‌ها زیاد بود؛ یک دقیقه بعد دوباره تلاش کنید.",
   "login.errorRequired": "ایمیل یا نام کاربری را وارد کنید.",
   "login.errorSummary": "ورود انجام نشد",
   "login.forgot": "رمز عبور را فراموش کرده‌اید؟",

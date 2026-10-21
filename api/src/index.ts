@@ -194,7 +194,7 @@ const accountLifecycle = createAccountLifecycle({
   mailer,
   links: { uiBaseUrl: env.HOSTED_UI_URL ?? env.APP_URL },
 });
-/** Shared fixed-window counters for the account endpoints (docs/security.md 3.2). */
+/** Shared fixed-window counters for the account and credential endpoints (docs/security.md 3.2). */
 const accountRateLimiter = createRedisRateLimiter(redis);
 
 // Per-app social provider secrets are encrypted with AES-256-GCM. Production refuses to
@@ -350,6 +350,7 @@ const app = buildServer({
   login: {
     users: loginRepository,
     sessions,
+    rateLimiter: accountRateLimiter,
     persistSession: (input) => loginRepository.persistSession(input),
     audit: { record: (event) => loginRepository.record(event) },
     mfa: mfaDependencies,

@@ -99,6 +99,31 @@ describe('LoginForm', () => {
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeInTheDocument();
   });
 
+  it('toggles password visibility with an accessible button', async () => {
+    const user = userEvent.setup();
+    renderForm({ locale: 'en-US', dir: 'ltr' });
+
+    expect(screen.getByLabelText('Password')).toHaveAttribute('type', 'password');
+    const show = screen.getByRole('button', { name: 'Show password' });
+    expect(show).toHaveAttribute('aria-pressed', 'false');
+
+    await user.click(show);
+    expect(screen.getByLabelText('Password')).toHaveAttribute('type', 'text');
+    const hide = screen.getByRole('button', { name: 'Hide password' });
+    expect(hide).toHaveAttribute('aria-pressed', 'true');
+
+    await user.click(hide);
+    expect(screen.getByLabelText('Password')).toHaveAttribute('type', 'password');
+  });
+
+  it('explains a throttled credential attempt', () => {
+    renderForm({ locale: 'en-US', dir: 'ltr', errorCode: 'rate_limited' });
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Too many attempts. Wait a minute and try again.',
+    );
+  });
+
   it('validates empty fields and links the error to the input', async () => {
     const user = userEvent.setup();
     renderForm();
