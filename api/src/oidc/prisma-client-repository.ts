@@ -21,6 +21,7 @@ export function createPrismaClientRepository(
 
   const toOAuthClient = (row: NonNullable<Awaited<ReturnType<typeof load>>>): OAuthClient => {
     const locales = (row.locales ?? {}) as { supported?: string[] };
+    const contextKeys = row.loginContexts.map((context) => context.key);
     return {
       clientId: row.clientId,
       status: row.status,
@@ -32,7 +33,11 @@ export function createPrismaClientRepository(
       requirePkce: row.requirePkce,
       registrationPolicy: row.registrationPolicy,
       mfaPolicy: row.mfaPolicy,
-      loginContexts: row.loginContexts.map((context) => context.key),
+      loginContexts: contextKeys,
+      // The default only counts when it is an active context of this client.
+      ...(row.defaultLoginContextKey !== null && contextKeys.includes(row.defaultLoginContextKey)
+        ? { defaultLoginContext: row.defaultLoginContextKey }
+        : {}),
       locales: locales.supported ?? [],
     };
   };

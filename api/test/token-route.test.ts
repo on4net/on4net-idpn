@@ -338,6 +338,7 @@ describe('POST /oauth2/token — authorization_code', () => {
         client_id: 'spa-app',
       })
       .expect(400);
+    // A missing client-administration permission is an authorization denial, not a bad grant.
     expect(response.body).toMatchObject({ error: 'access_denied' });
     await denied.app.close();
 
@@ -651,7 +652,7 @@ describe('POST /oauth2/token — login context enforcement', () => {
       })
       .expect(400);
 
-    expect(response.body).toMatchObject({ error: 'access_denied' });
+    expect(response.body).toMatchObject({ error: 'invalid_grant' });
     expect(response.body.access_token).toBeUndefined();
     await app.close();
   });
@@ -677,7 +678,7 @@ describe('POST /oauth2/token — login context enforcement', () => {
       })
       .expect(400);
 
-    expect(response.body).toMatchObject({ error: 'access_denied' });
+    expect(response.body).toMatchObject({ error: 'invalid_grant' });
     expect(response.body.access_token).toBeUndefined();
     await app.close();
   });

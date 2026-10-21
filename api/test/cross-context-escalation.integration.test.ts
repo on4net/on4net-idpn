@@ -357,7 +357,7 @@ describe('context substitution and token reuse', () => {
     expect(claims.membership).toMatchObject({ context: 'customer-admin' });
   });
 
-  it('cannot upgrade an unbound code to a context by adding login_context', async () => {
+  it('cannot substitute a different context at the token endpoint', async () => {
     const location = await world.authorize({ clientId: 'app-a', sessionId: sessionMulti });
     const code = location.searchParams.get('code');
     expect(code).toEqual(expect.any(String));
@@ -369,13 +369,10 @@ describe('context substitution and token reuse', () => {
     });
     expect(response.status).toBe(200);
     const claims = await world.verify(response.body.access_token as string, 'app-a');
-    expect(claims.login_context).toBeUndefined();
-    expect(claims.membership).toEqual({
-      context: null,
-      status: 'active',
-      attributes: { legacy: true },
-    });
-    // Unbound requests follow the documented legacy path: no context attributes leak.
+    // The code was issued for the client's default context; a parameter on the token request
+    // must not move the grant to another context (card #62).
+    expect(claims.login_context).toBe('customer-admin');
+    expect(claims.membership).toMatchObject({ context: 'customer-admin', status: 'active' });
     expect(claims.membership).not.toMatchObject({ attributes: { teamId: 't-7' } });
   });
 
@@ -436,7 +433,8 @@ describe('context substitution and token reuse', () => {
     try {
       const response = await world.exchangeCode({ clientId: 'app-a', code });
       expectNoToken(response, 400);
-      expect(response.body.error).toBe('access_denied');
+      // The same documented code as the refresh path (RFC 6749 5.2).
+      expect(response.body.error).toBe('invalid_grant');
 
       const replay = await world.exchangeCode({ clientId: 'app-a', code });
       expectNoToken(replay, 400);
@@ -488,29 +486,23 @@ describe('context substitution and token reuse', () => {
     }
   });
 
-  it('follows the documented unbound path for a client-wide membership', async () => {
+  it('applies the client default context when login_context is omitted', async () => {
     const tokens = await world.issueTokens({ clientId: 'app-a', sessionId: sessionMulti });
     const claims = await world.verify(tokens.access_token, 'app-a');
-    expect(claims.login_context).toBeUndefined();
-    expect(claims.roles).toEqual([
-      'app-a:customer-admin',
-      'app-a:editor',
-      'app-a:manager',
-      'app-a:member',
-    ]);
-    expect(claims.membership).toEqual({
-      context: null,
-      status: 'active',
-      attributes: { legacy: true },
-    });
+    // Omitting the parameter is not a context-free grant: `app-a` defaults to
+    // `customer-admin`, so its `allowed_roles` narrow the token (card #62 finding 1).
+    expect(claims.login_context).toBe('customer-admin');
+    expect(claims.roles).toEqual(['app-a:customer-admin', 'app-a:editor']);
+    expect(claims.membership).toMatchObject({ context: 'customer-admin', status: 'active' });
   });
 
-  it('fails closed when login_context is omitted and no client-wide membership exists', async () => {
-    const location = await world.authorize({
-      clientId: 'app-a',
-      sessionId: sessionContextOnly,
-    });
-    expectOAuthError(location, 'access_denied');
+  it('resolves the default context for a user who only holds that membership', async () => {
+    // The user is a member of `customer-admin` (the client default) and of nothing else, so
+    // omitting the parameter is the documented default-context path, not a denial.
+    const tokens = await world.issueTokens({ clientId: 'app-a', sessionId: sessionContextOnly });
+    const claims = await world.verify(tokens.access_token, 'app-a');
+    expect(claims.login_context).toBe('customer-admin');
+    expect(claims.membership).toMatchObject({ context: 'customer-admin', status: 'active' });
   });
 
   it('cannot bypass a suspended context membership by omitting login_context', async () => {

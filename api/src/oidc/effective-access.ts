@@ -43,10 +43,10 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> =>
  * - A suspended membership yields no roles and no permissions.
  * - A requested Login Context requires an **active** membership for that exact context;
  *   a missing or invited membership yields no roles and no permissions (CTX-003).
- * - Omitting the context is the deterministic legacy path: the client-wide membership
- *   (`login_context_id IS NULL`) applies, roles are not narrowed and no `login_context`
- *   claim is issued. Apps with contexts must always send the parameter (see
- *   `docs/login-contexts.md` 4.1); the Hosted UI selector is tracked separately.
+ * - A client with active contexts always resolves one: the request's `login_context` or its
+ *   `is_default` context (`/authorize` fills the default in, docs/login-contexts.md 4.1), so
+ *   roles are always narrowed by `allowed_roles`. The unbound (client-wide) path remains only
+ *   for legacy clients that define no contexts.
  */
 export function createPrismaEffectiveAccessSource(
   prisma: PrismaClient,

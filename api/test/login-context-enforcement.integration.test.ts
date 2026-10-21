@@ -681,7 +681,7 @@ describe('token endpoint re-checks the context', () => {
     try {
       const response = await exchangeCode({ clientId: 'app-a', code });
       expect(response.status).toBe(400);
-      expect(response.body.error).toBe('access_denied');
+      expect(response.body.error).toBe('invalid_grant');
       expect(response.body.access_token).toBeUndefined();
 
       // The code is single-use even when the context check fails.
@@ -724,7 +724,7 @@ describe('token endpoint re-checks the context', () => {
     try {
       const response = await exchangeCode({ clientId: 'app-a', code });
       expect(response.status).toBe(400);
-      expect(response.body.error).toBe('access_denied');
+      expect(response.body.error).toBe('invalid_grant');
       expect(response.body.access_token).toBeUndefined();
     } finally {
       await prisma.clientMembership.update({
@@ -857,7 +857,7 @@ describe('token endpoint re-checks the context', () => {
         code_verifier: verifier,
       });
       expect(response.status).toBe(400);
-      expect(response.body.error).toBe('access_denied');
+      expect(response.body.error).toBe('invalid_grant');
       expect(response.body.access_token).toBeUndefined();
     } finally {
       await bare.close();

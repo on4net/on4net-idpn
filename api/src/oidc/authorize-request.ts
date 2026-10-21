@@ -125,9 +125,17 @@ export function validateAuthorizeRequest(
     maxAge = parsed;
   }
 
-  if (query.login_context !== undefined && query.login_context !== '') {
+  // Omitting `login_context` selects the client's default context, never a context-free
+  // grant: role narrowing, the membership requirement and the `login_context` claim all apply
+  // to the effective context (docs/login-contexts.md 4.1, card #62 finding 1).
+  const effectiveLoginContext =
+    query.login_context !== undefined && query.login_context !== ''
+      ? query.login_context
+      : client.defaultLoginContext;
+
+  if (effectiveLoginContext !== undefined) {
     const contexts = client.loginContexts ?? [];
-    if (!contexts.includes(query.login_context)) {
+    if (!contexts.includes(effectiveLoginContext)) {
       return fail(oauthError('invalid_request', 'login_context is not enabled for this client'));
     }
   }
@@ -149,9 +157,7 @@ export function validateAuthorizeRequest(
     ...(query.ui_locales === undefined || query.ui_locales === ''
       ? {}
       : { uiLocales: query.ui_locales }),
-    ...(query.login_context === undefined || query.login_context === ''
-      ? {}
-      : { loginContext: query.login_context }),
+    ...(effectiveLoginContext === undefined ? {} : { loginContext: effectiveLoginContext }),
   };
 
   return { ok: true, request };

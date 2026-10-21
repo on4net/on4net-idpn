@@ -194,7 +194,9 @@ async function authorizationCodeGrant(
       exchange.record.loginContext,
     );
     if (!decision.ok) {
-      return tokenError(reply, oauthError('access_denied', 'login context is not available'));
+      // RFC 6749 5.2 documents `invalid_grant` for a grant that is no longer usable; the
+      // refresh path already uses it for the same failure (card #62 finding 4).
+      return tokenError(reply, oauthError('invalid_grant', 'login context is not available'));
     }
   }
 
@@ -350,6 +352,8 @@ async function refreshTokenGrant(
       sub: profile.id,
       aud: client.clientId,
       client_id: client.clientId,
+      // Same marker as `buildAccessTokenClaims`: `/oauth2/userinfo` rejects ID tokens.
+      token_use: 'access',
       iat: issuedAt,
       exp: issuedAt + client.accessTokenTtl,
       auth_time: Math.floor(new Date(session?.authTime ?? at.toISOString()).getTime() / 1000),
@@ -427,6 +431,7 @@ async function clientCredentialsGrant(
       sub: client.clientId,
       aud: client.clientId,
       client_id: client.clientId,
+      token_use: 'access',
       iat: issuedAt,
       exp: issuedAt + client.accessTokenTtl,
       jti: randomUUID(),

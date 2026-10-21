@@ -14,6 +14,11 @@ export interface OAuthClient {
   mfaPolicy: 'optional' | 'required_admins' | 'required_all';
   /** Active login context keys, when the feature is in use. */
   loginContexts?: string[];
+  /**
+   * Key of the context marked `is_default` (docs/login-contexts.md 4.1). When the request omits
+   * `login_context`, this is the effective context — never a context-free grant.
+   */
+  defaultLoginContext?: string;
   /** Locales enabled for this client. */
   locales?: string[];
 }
