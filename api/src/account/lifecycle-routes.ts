@@ -3,7 +3,12 @@ import type { z } from 'zod';
 
 import type { AdminAudit } from '../admin/admin-types.js';
 import { maskEmail, normalizeEmail } from '../auth/normalize.js';
-import { hashPassword, verifyPassword, type Argon2Params } from '../auth/password.js';
+import {
+  DEFAULT_ARGON2_PARAMS,
+  hashPassword,
+  verifyPassword,
+  type Argon2Params,
+} from '../auth/password.js';
 import { validatePassword } from '../auth/password-policy.js';
 import { hashOpaqueToken } from '../auth/opaque-token.js';
 import type { RateLimiter, RateLimitPolicy } from '../http/rate-limit.js';
@@ -62,6 +67,8 @@ export interface AccountLifecycleRoutesOptions {
   rateLimit: RateLimiter;
   audit: AdminAudit;
   hash?: (password: string, params: Argon2Params) => Promise<string>;
+  /** Hashing policy from the validated environment; used for reuse checks and resets. */
+  passwordParams?: Argon2Params;
   now?: () => Date;
 }
 
@@ -225,7 +232,14 @@ export function registerAccountLifecycleRoutes(
 
     // Reuse is a validation failure too. Checking it here keeps the single-use link usable
     // for a corrected password instead of spending it on a change that cannot be applied.
-    if (user.passwordHash !== null && (await verifyPassword(user.passwordHash, input.password))) {
+    if (
+      user.passwordHash !== null &&
+      (await verifyPassword(
+        user.passwordHash,
+        input.password,
+        options.passwordParams ?? DEFAULT_ARGON2_PARAMS,
+      ))
+    ) {
       return sendProblem(
         reply,
         422,
@@ -250,6 +264,7 @@ export function registerAccountLifecycleRoutes(
       {
         userId: consumed.userId,
         newPassword: input.password,
+        ...(options.passwordParams === undefined ? {} : { params: options.passwordParams }),
         actorType: 'user',
         actorId: consumed.userId,
         ip: request.ip ?? null,

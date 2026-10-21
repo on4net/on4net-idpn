@@ -128,10 +128,21 @@ export function parseBasicAuthHeader(header: string | undefined): {
   if (separator === -1) {
     return null;
   }
-  return {
-    clientId: decodeURIComponent(decoded.slice(0, separator)),
-    clientSecret: decodeURIComponent(decoded.slice(separator + 1)),
-  };
+  const clientId = decodeBasicComponent(decoded.slice(0, separator));
+  const clientSecret = decodeBasicComponent(decoded.slice(separator + 1));
+  if (clientId === null || clientSecret === null) {
+    // A malformed percent escape is a bad credential, not a server fault (RFC 6749 2.3.1).
+    return null;
+  }
+  return { clientId, clientSecret };
+}
+
+function decodeBasicComponent(value: string): string | null {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return null;
+  }
 }
 
 function toAuthenticatedClient(client: ClientAuthClientRecord): AuthenticatedClient {

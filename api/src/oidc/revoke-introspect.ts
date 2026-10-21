@@ -17,6 +17,11 @@ export interface RevokeIntrospectOptions {
   clientSecrets?: ClientSecretService;
   refreshTokens: RefreshTokenRepository;
   keys: SigningKeyManager;
+  /**
+   * Session lookup. A refresh token whose session was revoked (global logout, admin action,
+   * password change) is inactive even though its own row is untouched.
+   */
+  sessions?: { read(sid: string): Promise<unknown | null> };
   now?: () => Date;
 }
 
@@ -120,11 +125,19 @@ export function registerRevokeIntrospectRoutes(
     }
 
     const record = await options.refreshTokens.findByHash(hashRefreshToken(payload.token));
+    const sessionAlive =
+      record !== null &&
+      (options.sessions === undefined ||
+        (await options.sessions.read(record.sessionId)) !== null);
     const active =
       record !== null &&
       record.clientId === client.clientId &&
       record.revokedAt === null &&
-      record.expiresAt > at;
+      // A rotated token is spent: reporting it as active would let a client believe its old
+      // token still works (and hides reuse).
+      record.rotatedAt === null &&
+      record.expiresAt > at &&
+      sessionAlive;
 
     if (!active || record === null) {
       return noStore(reply).send({ active: false });

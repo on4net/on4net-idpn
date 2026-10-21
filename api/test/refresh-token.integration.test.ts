@@ -137,6 +137,27 @@ describe('Prisma refresh token repository', () => {
     });
     expect(next.id).toBe(old.replacedBy);
     expect(next.familyId).toBe(old.familyId);
+
+    // Exactly one successor row: rotation returns the token it wrote, so no orphan stays
+    // behind and `replacedBy` points at the token the client actually holds (card #70).
+    if (rotation.ok) {
+      expect(rotation.successor.record.id).toBe(old.replacedBy);
+      expect(rotation.successor.token).not.toBe(issued.token);
+      const familyRows = await prisma.refreshToken.count({ where: { familyId: old.familyId } });
+      expect(familyRows).toBe(2);
+    }
+
+    // The returned successor is the one that can be rotated next.
+    if (rotation.ok) {
+      const chained = await rotateRefreshToken(repository, {
+        token: rotation.successor.token,
+        clientId,
+        ttlSeconds: 3600,
+        now: new Date('2026-10-18T10:06:00Z'),
+      });
+      expect(chained.ok).toBe(true);
+      expect(await prisma.refreshToken.count({ where: { familyId: old.familyId } })).toBe(3);
+    }
   }, 60_000);
 
   it('detects reuse and revokes the whole family', async () => {

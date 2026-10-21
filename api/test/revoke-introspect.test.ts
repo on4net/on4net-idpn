@@ -64,9 +64,10 @@ function memoryRefreshTokens() {
   return repository;
 }
 
-async function harness() {
+async function harness(options: { liveSessions?: Set<string> } = {}) {
   const app = Fastify({ logger: false });
   const refreshTokens = memoryRefreshTokens();
+  const liveSessions = options.liveSessions ?? new Set(['session-1']);
   const keys = new SigningKeyManager(new MemorySigningKeyRepository());
   const client: ClientAuthClientRecord = {
     clientId: 'web-app',
@@ -90,10 +91,15 @@ async function harness() {
     clientSecrets,
     refreshTokens,
     keys,
+    sessions: {
+      async read(sid) {
+        return liveSessions.has(sid) ? { sid } : null;
+      },
+    },
     now: () => new Date('2026-10-18T12:00:00Z'),
   });
   await app.ready();
-  return { app, refreshTokens, keys, clientId: client.clientId };
+  return { app, refreshTokens, keys, liveSessions, clientId: client.clientId };
 }
 
 const basic = (id: string, pass: string) =>
@@ -151,6 +157,49 @@ describe('POST /oauth2/introspect', () => {
       .expect(200);
     expect(unknown.body).toEqual({ active: false });
 
+    await app.close();
+  });
+
+  it('reports a refresh token as inactive once its session is revoked', async () => {
+    const { app, refreshTokens, liveSessions, clientId } = await harness();
+    const issued = await issueRefreshToken(refreshTokens, {
+      clientId,
+      userId: 'user-1',
+      sessionId: 'session-1',
+      scope: ['openid'],
+      ttlSeconds: 3600,
+      now: new Date('2026-10-18T11:30:00Z'),
+    });
+
+    liveSessions.delete('session-1');
+
+    const response = await request(app.server)
+      .post('/oauth2/introspect')
+      .set('Authorization', basic(clientId, secret))
+      .send({ token: issued.token })
+      .expect(200);
+    expect(response.body).toEqual({ active: false });
+    await app.close();
+  });
+
+  it('reports a rotated refresh token as inactive', async () => {
+    const { app, refreshTokens, clientId } = await harness();
+    const issued = await issueRefreshToken(refreshTokens, {
+      clientId,
+      userId: 'user-1',
+      sessionId: 'session-1',
+      scope: ['openid'],
+      ttlSeconds: 3600,
+      now: new Date('2026-10-18T11:30:00Z'),
+    });
+    await refreshTokens.markRotated(issued.record.tokenHash, new Date(), 'successor-id');
+
+    const response = await request(app.server)
+      .post('/oauth2/introspect')
+      .set('Authorization', basic(clientId, secret))
+      .send({ token: issued.token })
+      .expect(200);
+    expect(response.body).toEqual({ active: false });
     await app.close();
   });
 

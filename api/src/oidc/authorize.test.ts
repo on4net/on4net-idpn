@@ -9,6 +9,7 @@ import {
   type AuthorizationCodeRecord,
   type AuthorizationCodeRepository,
 } from './authorization-code.js';
+import { isAuthenticationTooOld } from './authorize-route.js';
 import { validateAuthorizeRequest, type AuthorizeQuery } from './authorize-request.js';
 import type { OAuthClient } from './client-repository.js';
 
@@ -301,5 +302,24 @@ describe('verifyPkce', () => {
   it('rejects a verifier that violates the allowed character set', () => {
     expect(verifyPkce('short', s256Challenge('short'))).toBe(false);
     expect(verifyPkce('a'.repeat(43) + '!', s256Challenge('a'.repeat(43) + '!'))).toBe(false);
+  });
+});
+
+describe('max_age', () => {
+  const now = new Date('2026-10-21T12:00:00Z');
+
+  it('accepts a session authenticated inside the window', () => {
+    expect(isAuthenticationTooOld({ authTime: '2026-10-21T11:59:00Z' }, 300, now)).toBe(false);
+  });
+
+  it('rejects a session older than the window', () => {
+    expect(isAuthenticationTooOld({ authTime: '2026-10-21T11:00:00Z' }, 300, now)).toBe(true);
+  });
+
+  it('fails closed when the session carries no usable authTime', () => {
+    // `NaN > x` is false, so a missing timestamp used to make max_age silently pass.
+    expect(isAuthenticationTooOld({}, 300, now)).toBe(true);
+    expect(isAuthenticationTooOld({ authTime: '' }, 300, now)).toBe(true);
+    expect(isAuthenticationTooOld({ authTime: 'not-a-date' }, 300, now)).toBe(true);
   });
 });

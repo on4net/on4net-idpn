@@ -201,6 +201,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
       ...(options.token.clientSecrets === undefined
         ? {}
         : { clientSecrets: options.token.clientSecrets }),
+      ...(options.token.sessions === undefined ? {} : { sessions: options.token.sessions }),
       ...(options.token.now === undefined ? {} : { now: options.token.now }),
     });
 

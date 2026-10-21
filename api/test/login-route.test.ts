@@ -2,7 +2,7 @@ import Fastify from 'fastify';
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 
-import { hashPassword, type Argon2Params } from '../src/auth/password.js';
+import { hashPassword, verifyPassword, type Argon2Params } from '../src/auth/password.js';
 import { createMemoryRateLimiter, type RateLimiter } from '../src/http/rate-limit.js';
 import { registerLoginRoute } from '../src/login/routes.js';
 import {
@@ -39,12 +39,15 @@ interface Harness {
   audits: Parameters<LoginUserRepository['registerFailedAttempt']>[0][];
   failures: { userId: string; attempts: number; lockedUntil: Date | null }[];
   revoked: { sid: string; reason: string }[];
+  rehashed: { userId: string; hash: string }[];
 }
 
 interface HarnessOptions {
   rateLimiter?: RateLimiter;
   /** Makes the PostgreSQL mirror fail so the compensation path runs. */
   failPersist?: boolean;
+  /** Hashing policy the route should apply; defaults to the library defaults. */
+  passwordParams?: Argon2Params;
 }
 
 async function harness(
@@ -57,11 +60,13 @@ async function harness(
   const persisted: { sid: string; clientId?: string; loginContext?: string }[] = [];
   const failures: { userId: string; attempts: number; lockedUntil: Date | null }[] = [];
   const revoked: { sid: string; reason: string }[] = [];
+  const rehashed: { userId: string; hash: string }[] = [];
   const audits: unknown[] = [];
 
   registerLoginRoute(app, {
     appUrl,
     ...(options.rateLimiter === undefined ? {} : { rateLimiter: options.rateLimiter }),
+    ...(options.passwordParams === undefined ? {} : { passwordParams: options.passwordParams }),
     users: {
       async findByIdentifier() {
         return currentUser;
@@ -70,6 +75,9 @@ async function harness(
         failures.push({ userId, attempts, lockedUntil });
       },
       async registerSuccessfulLogin() {},
+      async rehashPassword(userId, hash) {
+        rehashed.push({ userId, hash });
+      },
     },
     sessions: {
       async create(input) {
@@ -109,7 +117,7 @@ async function harness(
     now: () => now,
   });
   await app.ready();
-  return { app, sessions, persisted, audits, failures, revoked } as unknown as Harness;
+  return { app, sessions, persisted, audits, failures, revoked, rehashed } as unknown as Harness;
 }
 
 describe('POST /api/v1/login', () => {
@@ -136,6 +144,37 @@ describe('POST /api/v1/login', () => {
       redirectTo: '/oauth2/authorize?client_id=app-a',
     });
 
+    await app.close();
+  });
+
+  it('upgrades the stored hash when the current policy is stronger', async () => {
+    const current = await user();
+    const stronger: Argon2Params = { memoryCost: 16_384, timeCost: 2, parallelism: 1 };
+    const { app, rehashed } = await harness(current, undefined, { passwordParams: stronger });
+
+    await request(app.server)
+      .post('/api/v1/login')
+      .send({ identifier: 'sara@example.com', password })
+      .expect(200);
+
+    expect(rehashed).toHaveLength(1);
+    expect(rehashed[0]?.userId).toBe('user-1');
+    expect(rehashed[0]?.hash).not.toBe(current.passwordHash);
+    // The replacement is usable under the new policy, so the next login succeeds.
+    expect(await verifyPassword(rehashed[0]?.hash ?? '', password, stronger)).toBe(true);
+    await app.close();
+  });
+
+  it('leaves a hash that already matches the policy untouched', async () => {
+    const current = await user();
+    const { app, rehashed } = await harness(current, undefined, { passwordParams: FAST });
+
+    await request(app.server)
+      .post('/api/v1/login')
+      .send({ identifier: 'sara@example.com', password })
+      .expect(200);
+
+    expect(rehashed).toEqual([]);
     await app.close();
   });
 

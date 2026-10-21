@@ -93,6 +93,8 @@ export interface AccountRoutesOptions {
     isAdmin?: (userId: string, clientId: string) => Promise<boolean>;
   };
   hash?: (password: string, params: Argon2Params) => Promise<string>;
+  /** Hashing policy from the validated environment; used for every password change. */
+  passwordParams?: Argon2Params;
   now?: () => Date;
 }
 
@@ -276,6 +278,7 @@ export function registerAccountRoutes(app: FastifyInstance, options: AccountRout
         userId: auth.profile.id,
         currentPassword: parsed.data.currentPassword,
         newPassword: parsed.data.newPassword,
+        ...(options.passwordParams === undefined ? {} : { params: options.passwordParams }),
         keepSessionId: auth.session.sid,
         actorType: 'user',
         actorId: auth.profile.id,

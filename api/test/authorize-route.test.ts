@@ -313,6 +313,52 @@ describe('GET /oauth2/authorize', () => {
     await app.close();
   });
 
+  it('redirects an interactive stale session to the login page instead of failing', async () => {
+    const { app } = buildApp({
+      currentSession: session({ authTime: '2026-10-18T09:00:00.000Z' }),
+      now: new Date('2026-10-18T12:00:00Z'),
+    });
+    await app.ready();
+
+    const response = await request(app.server)
+      .get('/oauth2/authorize')
+      .query({ ...baseQuery, max_age: '60' })
+      .set('Cookie', 'idpn_session=session-abc')
+      .expect(302);
+
+    const location = new URL(response.headers.location ?? '');
+    expect(location.origin + location.pathname).toBe(`${issuer}/login`);
+    expect(location.searchParams.get('error')).toBeNull();
+    const returnTo = new URL(location.searchParams.get('return_to') ?? '', issuer);
+    expect(returnTo.searchParams.get('max_age')).toBe('60');
+    expect(returnTo.searchParams.get('state')).toBe('state-123');
+    await app.close();
+  });
+
+  it('treats a session without authTime as stale for max_age', async () => {
+    const { app } = buildApp({
+      currentSession: session({ authTime: undefined as unknown as string }),
+      now: new Date('2026-10-18T12:00:00Z'),
+    });
+    await app.ready();
+
+    const silent = await request(app.server)
+      .get('/oauth2/authorize')
+      .query({ ...baseQuery, max_age: '60', prompt: 'none' })
+      .expect(302);
+    expect(new URL(silent.headers.location ?? '').searchParams.get('error')).toBe(
+      'login_required',
+    );
+
+    const interactive = await request(app.server)
+      .get('/oauth2/authorize')
+      .query({ ...baseQuery, max_age: '60' })
+      .set('Cookie', 'idpn_session=session-abc')
+      .expect(302);
+    expect(new URL(interactive.headers.location ?? '').pathname).toBe('/login');
+    await app.close();
+  });
+
   it('returns consent_required for prompt=none when consent is missing', async () => {
     const { app } = buildApp({ currentSession: session(), consentGranted: false });
     await app.ready();

@@ -22,6 +22,8 @@ export interface LoginUserRepository {
   findByIdentifier(normalizedIdentifier: string): Promise<LoginUserRecord | null>;
   registerFailedAttempt(userId: string, attempts: number, lockedUntil: Date | null): Promise<void>;
   registerSuccessfulLogin(userId: string, at: Date): Promise<void>;
+  /** Stores a hash produced with the current policy after a successful login (card #70). */
+  rehashPassword?(userId: string, passwordHash: string): Promise<void>;
 }
 
 export interface LoginRequestInput {

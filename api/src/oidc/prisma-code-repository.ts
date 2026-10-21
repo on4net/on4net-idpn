@@ -72,5 +72,16 @@ export function createPrismaCodeRepository(prisma: PrismaClient): AuthorizationC
       });
       return result.count === 1;
     },
+
+    /**
+     * Codes are useless after `expiresAt` (60 s by default) and every replay attempt is
+     * rejected from the cached expiry, so the rows are dead weight that grows forever.
+     */
+    async purgeExpired(before) {
+      const result = await prisma.authorizationCode.deleteMany({
+        where: { expiresAt: { lt: before } },
+      });
+      return result.count;
+    },
   };
 }

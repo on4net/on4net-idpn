@@ -95,6 +95,10 @@ export function createPrismaLoginRepository(prisma: PrismaClient): LoginUserRepo
       });
     },
 
+    async rehashPassword(userId, passwordHash) {
+      await prisma.user.update({ where: { id: userId }, data: { passwordHash } });
+    },
+
     async record(event) {
       await recordAuditEvent(prisma, event);
     },

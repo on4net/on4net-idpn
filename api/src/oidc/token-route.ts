@@ -376,26 +376,13 @@ async function refreshTokenGrant(
     },
   );
 
-  const next = await issueRefreshToken(options.refreshTokens, {
-    clientId: client.clientId,
-    userId: rotation.record.userId,
-    sessionId: rotation.record.sessionId,
-    scope: rotation.record.scope,
-    ttlSeconds: client.refreshTokenTtl,
-    familyId: rotation.record.familyId,
-    // Without this the successor would silently lose its context binding and the next
-    // refresh would issue an unnarrowed token.
-    ...(rotation.record.loginContext === undefined
-      ? {}
-      : { loginContext: rotation.record.loginContext }),
-    now: at,
-  });
-
+  // Rotation already wrote the successor (same family, same context) and linked it from the
+  // presented token; issuing another one here would orphan that row.
   return tokenSuccess(reply, {
     access_token: accessToken,
     token_type: 'Bearer',
     expires_in: client.accessTokenTtl,
-    refresh_token: next.token,
+    refresh_token: rotation.successor.token,
     scope: rotation.record.scope.join(' '),
   });
 }

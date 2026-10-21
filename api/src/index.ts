@@ -60,7 +60,8 @@ import { RedisMfaChallengeStore } from './mfa/challenge-store.js';
 import { RedisWebauthnChallengeStore } from './mfa/webauthn-challenge-store.js';
 import { SimpleWebauthnLibrary } from './mfa/webauthn-library.js';
 import { resolveWebauthnConfig } from './mfa/webauthn.js';
-import { verifyPassword } from './auth/password.js';
+import { hashPassword, verifyPassword } from './auth/password.js';
+import { argon2ParamsFromEnv } from './auth/password-config.js';
 import { buildServer } from './server.js';
 import { readBackupStatus } from './observability/backup-status.js';
 import { DependencyMonitor } from './observability/health.js';
@@ -292,6 +293,13 @@ const authorizeAuthenticationRequirement = createAuthorizeAuthenticationRequirem
 const authorizeMembershipStatus = createAuthorizeMembershipStatus(prisma);
 /** Re-checks the context and membership when a context-bound code/refresh is exchanged. */
 const loginContextAccess = createPrismaLoginContextAccessSource(prisma);
+const authorizationCodes = createPrismaCodeRepository(prisma);
+/**
+ * One hashing policy for every credential: login, password change/reset, admin-created
+ * passwords and MFA recovery codes. `PASSWORD_PEPPER` is applied as the Argon2 secret and is
+ * never stored (card #70 finding 4).
+ */
+const passwordParams = argon2ParamsFromEnv(env);
 
 const app = buildServer({
   issuer: env.APP_URL,
@@ -313,7 +321,7 @@ const app = buildServer({
   token: {
     clients: clientsRepository,
     clientSecrets,
-    codes: createPrismaCodeRepository(prisma),
+    codes: authorizationCodes,
     refreshTokens: createPrismaRefreshTokenRepository(prisma),
     users: usersRepository,
     sessions,
@@ -359,6 +367,7 @@ const app = buildServer({
     users: loginRepository,
     sessions,
     rateLimiter: accountRateLimiter,
+    passwordParams,
     persistSession: (input) => loginRepository.persistSession(input),
     audit: { record: (event) => loginRepository.record(event) },
     mfa: mfaDependencies,
@@ -397,6 +406,7 @@ const app = buildServer({
     users: createPrismaAdminUserRepository(prisma),
     audit: createPrismaAdminAudit(prisma),
     sessions,
+    hashPassword: (plain: string) => hashPassword(plain, passwordParams),
   },
   adminClients: {
     adminClientId: env.ADMIN_CLIENT_ID,
@@ -459,11 +469,13 @@ const app = buildServer({
     profiles: createPrismaAccountProfileRepository(prisma),
     passwords: passwordStore,
     audit: createPrismaAdminAudit(prisma),
+    passwordParams,
     mfa: {
       repository: mfaRepository,
       secretBox: mfaSecretBox,
       issuer: new URL(env.APP_URL).host,
       verify: verifyPassword,
+      recoveryParams: passwordParams,
     },
     webauthn: webauthnDependencies,
     // Context switching is decided from the context status, the membership and the
@@ -485,6 +497,7 @@ const app = buildServer({
     passwords: passwordStore,
     rateLimit: accountRateLimiter,
     audit: createPrismaAdminAudit(prisma),
+    passwordParams,
   },
 });
 
@@ -636,11 +649,29 @@ const accountTokenPurgeTimer = setInterval(() => {
 }, 60 * 60 * 1000);
 accountTokenPurgeTimer.unref();
 
+/**
+ * Authorization codes live for a minute; expired rows are deleted hourly so the table does
+ * not grow without bound and every lookup stays an index hit (card #70 finding 14).
+ */
+const authorizationCodePurgeTimer = setInterval(
+  () => {
+    void authorizationCodes.purgeExpired?.(new Date()).catch((error: unknown) => {
+      logWarning(
+        { component: 'authorization-codes', phase: 'purge' },
+        `code purge failed: ${sanitizeLogMessage(error)}`,
+      );
+    });
+  },
+  60 * 60 * 1000,
+);
+authorizationCodePurgeTimer.unref();
+
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.once(signal, () => {
     keyRotationScheduler.stop();
     clearInterval(backchannelQueueTimer);
     clearInterval(accountTokenPurgeTimer);
+    clearInterval(authorizationCodePurgeTimer);
     void app
       .close()
       .then(() => prisma.$disconnect())

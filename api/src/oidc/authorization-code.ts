@@ -24,6 +24,8 @@ export interface AuthorizationCodeRepository {
   create(record: AuthorizationCodeRecord): Promise<void>;
   findByHash(codeHash: string): Promise<AuthorizationCodeRecord | null>;
   markConsumed(codeHash: string, consumedAt: Date): Promise<boolean>;
+  /** Deletes codes that expired before `before`; returns how many rows were removed. */
+  purgeExpired?(before: Date): Promise<number>;
 }
 
 export interface CreateCodeInput {

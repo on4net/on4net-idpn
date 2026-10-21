@@ -3,7 +3,12 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { sanitizeAuditMetadata } from '../audit/sanitize.js';
 import { authenticateWithPassword } from '../auth/authenticate.js';
 import { maskEmail } from '../auth/normalize.js';
-import { hashPassword } from '../auth/password.js';
+import {
+  DEFAULT_ARGON2_PARAMS,
+  hashPassword,
+  needsRehash,
+  type Argon2Params,
+} from '../auth/password.js';
 import { mfaRequirement } from '../mfa/policy.js';
 import type { MfaLoginDependencies, MfaPolicy } from '../mfa/mfa-types.js';
 import type { WebauthnServiceDependencies } from '../mfa/webauthn.js';
@@ -36,6 +41,8 @@ export interface LoginRouteOptions {
   sessions: Pick<RedisSessionStore, 'create'> & Partial<Pick<RedisSessionStore, 'revoke'>>;
   /** Shared rate limiter for credential attempts; omitted only in tests. */
   rateLimiter?: RateLimiter;
+  /** Hashing policy from the validated environment; defaults to the library defaults. */
+  passwordParams?: Argon2Params;
   /** Mirrors the session into PostgreSQL so tokens can reference it (FK). */
   persistSession(input: {
     sid: string;
@@ -86,7 +93,12 @@ interface LoginBody {
   returnTo?: string;
 }
 
-let decoyHash: string | undefined;
+/**
+ * Decoy hashes keyed by the hashing policy. The pepper is never part of the key, only the
+ * fact that one is configured: the policy is fixed at startup, so one entry per cost profile
+ * is enough and the secret stays out of a long-lived string.
+ */
+const decoyHashes = new Map<string, string>();
 
 /**
  * `POST /api/v1/login` — credential login for the Hosted Auth UI.
@@ -130,18 +142,20 @@ export function registerLoginRoute(app: FastifyInstance, options: LoginRouteOpti
     const user = await options.users.findByIdentifier(normalized);
 
     if (user === null) {
-      await burnPasswordVerification(password);
+      await burnPasswordVerification(password, options.passwordParams);
       return reject(reply, options, request, body, undefined, 'unknown_user');
     }
 
-    const result = await authenticateWithPassword(user, password);
+    const result = await authenticateWithPassword(user, password, {
+      ...(options.passwordParams === undefined ? {} : { params: options.passwordParams }),
+    });
     const at = now();
 
     if (!result.ok) {
       if (result.reason !== 'invalid_credentials') {
         // Deleted, disabled, locked and passwordless accounts return before hashing; pay the
         // same verification cost so the response time does not reveal the account state.
-        await burnPasswordVerification(password);
+        await burnPasswordVerification(password, options.passwordParams);
       }
       // A lock that already elapsed is a fresh window: the counter restarts so an attacker
       // cannot keep the account locked with a single attempt per window.
@@ -156,6 +170,10 @@ export function registerLoginRoute(app: FastifyInstance, options: LoginRouteOpti
       // session: every token path expects an active account (docs/security.md 3.1).
       return reject(reply, options, request, body, user.id, 'account_not_active');
     }
+
+    // Raising the cost or adding a pepper must reach existing accounts, so a valid login
+    // upgrades the stored hash while the plaintext is available exactly once.
+    await upgradePasswordHash(user, password, options);
 
     const requirement = await resolveMfaRequirement(options, user, {
       ...(body.clientId === undefined ? {} : { clientId: body.clientId }),
@@ -310,11 +328,45 @@ async function reject(
 }
 
 /**
+ * Best-effort hash upgrade after a successful password check. A failure here must never turn
+ * a valid login into an error: the next login retries.
+ */
+async function upgradePasswordHash(
+  user: { id: string; passwordHash: string | null },
+  password: string,
+  options: LoginRouteOptions,
+): Promise<void> {
+  const rehash = options.users.rehashPassword;
+  if (rehash === undefined || user.passwordHash === null) {
+    return;
+  }
+  const params = options.passwordParams ?? DEFAULT_ARGON2_PARAMS;
+  if (!needsRehash(user.passwordHash, params)) {
+    return;
+  }
+  try {
+    await rehash(user.id, await hashPassword(password, params));
+  } catch {
+    // Deliberately ignored; the existing hash still verifies.
+  }
+}
+
+/**
  * Verifies a throwaway hash so every rejected attempt costs one Argon2id verification,
  * whether or not the account exists or is usable (`docs/security.md` T1, timing oracle).
  */
-async function burnPasswordVerification(password: string): Promise<void> {
-  decoyHash ??= await hashPassword('idp-decoy-password-value');
+async function burnPasswordVerification(
+  password: string,
+  params: Argon2Params = DEFAULT_ARGON2_PARAMS,
+): Promise<void> {
+  const key = `${params.memoryCost}:${params.timeCost}:${params.parallelism}:${
+    params.pepper === undefined ? 'plain' : 'peppered'
+  }`;
+  let decoyHash = decoyHashes.get(key);
+  if (decoyHash === undefined) {
+    decoyHash = await hashPassword('idp-decoy-password-value', params);
+    decoyHashes.set(key, decoyHash);
+  }
   await authenticateWithPassword(
     {
       id: 'decoy',
@@ -324,6 +376,7 @@ async function burnPasswordVerification(password: string): Promise<void> {
       deletedAt: null,
     },
     password,
+    { params },
   );
 }
 

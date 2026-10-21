@@ -75,7 +75,16 @@ export type RefreshFailure =
   'invalid_grant' | 'reuse_detected' | 'expired' | 'revoked' | 'client_mismatch';
 
 export type RefreshResult =
-  | { ok: true; record: RefreshTokenRecord }
+  | {
+      ok: true;
+      record: RefreshTokenRecord;
+      /**
+       * The successor that was written during rotation. The caller must return this token:
+       * minting another one leaves an unreachable row in the family and points `replacedBy`
+       * at the wrong successor (card #70 finding 9).
+       */
+      successor: { token: string; record: RefreshTokenRecord };
+    }
   | { ok: false; reason: RefreshFailure; revokedFamily?: number };
 
 export interface RotateRefreshInput {
@@ -134,5 +143,5 @@ export async function rotateRefreshToken(
     return { ok: false, reason: 'reuse_detected', revokedFamily };
   }
 
-  return { ok: true, record: current };
+  return { ok: true, record: current, successor: { token: next.token, record: next.record } };
 }

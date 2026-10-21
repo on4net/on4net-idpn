@@ -149,6 +149,39 @@ describe('Prisma authorization code repository', () => {
     expect(second).toEqual({ ok: false, reason: 'code_already_used' });
   }, 60_000);
 
+  it('purges only the codes that expired before the cutoff', async () => {
+    const repository = createPrismaCodeRepository(prisma);
+    const base = {
+      clientId,
+      userId,
+      sessionId,
+      redirectUri: 'https://app.example.com/cb',
+      scope: ['openid'],
+      codeChallenge: s256Challenge(verifier),
+      acr: 'urn:on4net:acr:pwd',
+      amr: ['pwd'],
+    };
+    const stale = await issueAuthorizationCode(repository, {
+      ...base,
+      authTime: new Date('2026-10-01T10:00:00Z'),
+      now: new Date('2026-10-01T10:00:00Z'),
+    });
+    const fresh = await issueAuthorizationCode(repository, {
+      ...base,
+      authTime: new Date('2026-10-18T10:00:00Z'),
+      now: new Date('2026-10-18T10:00:00Z'),
+    });
+
+    const removed = await repository.purgeExpired?.(new Date('2026-10-10T10:00:00Z'));
+    expect(removed).toBe(1);
+    expect(
+      await prisma.authorizationCode.findUnique({ where: { codeHash: hashCode(stale.code) } }),
+    ).toBeNull();
+    expect(
+      await prisma.authorizationCode.findUnique({ where: { codeHash: hashCode(fresh.code) } }),
+    ).not.toBeNull();
+  }, 60_000);
+
   it('does not consume a code when the PKCE verifier is wrong', async () => {
     const repository = createPrismaCodeRepository(prisma);
     const now = new Date('2026-10-18T10:00:00Z');

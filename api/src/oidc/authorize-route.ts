@@ -214,15 +214,12 @@ export function registerAuthorizeRoute(app: FastifyInstance, options: AuthorizeR
     // `prompt=login` (docs/auth-flows.md 2.1) and a missing session both demand an
     // interactive authentication: an existing session must not be silently reused, which is
     // also what makes an explicit context switch auditable rather than invisible.
-    if (session === null || authorize.prompt.includes('login')) {
-      if (wantsSilent) {
-        return redirect(
-          reply,
-          buildErrorRedirect(authorize.redirectUri, oauthError('login_required'), authorize.state),
-        );
-      }
-      // The social flow must never trust browser parameters, so the validated request is kept
-      // server-side under an opaque handle.
+    /**
+     * Sends the user agent to the login page with the validated request preserved. The social
+     * flow must never trust browser parameters, so the request is kept server-side under an
+     * opaque handle.
+     */
+    const redirectToLogin = async (): Promise<FastifyReply> => {
       const loginRequest =
         options.loginRequests === undefined
           ? undefined
@@ -231,16 +228,35 @@ export function registerAuthorizeRoute(app: FastifyInstance, options: AuthorizeR
               authorizeUrl: new URL(returnTo, options.issuer).toString(),
             });
       return redirect(reply, buildLoginRedirect(loginUrl, authorize, returnTo, loginRequest));
+    };
+
+    if (session === null || authorize.prompt.includes('login')) {
+      if (wantsSilent) {
+        return redirect(
+          reply,
+          buildErrorRedirect(authorize.redirectUri, oauthError('login_required'), authorize.state),
+        );
+      }
+      return redirectToLogin();
     }
 
     if (
       authorize.maxAge !== undefined &&
       isAuthenticationTooOld(session, authorize.maxAge, now())
     ) {
-      const error = wantsSilent
-        ? oauthError('login_required', 're-authentication required')
-        : oauthError('interaction_required', 're-authentication required');
-      return redirect(reply, buildErrorRedirect(authorize.redirectUri, error, authorize.state));
+      if (wantsSilent) {
+        return redirect(
+          reply,
+          buildErrorRedirect(
+            authorize.redirectUri,
+            oauthError('login_required', 're-authentication required'),
+            authorize.state,
+          ),
+        );
+      }
+      // `interaction_required` is reserved for `prompt=none`: an interactive client is sent
+      // through authentication again so the existing session is not reused (RFC 9101/OIDC).
+      return redirectToLogin();
     }
 
     const subject: AuthorizeSubjectInput = {
@@ -418,6 +434,17 @@ export function registerAuthorizeRoute(app: FastifyInstance, options: AuthorizeR
   });
 }
 
-function isAuthenticationTooOld(session: IdpSession, maxAgeSeconds: number, now: Date): boolean {
-  return now.getTime() - new Date(session.authTime).getTime() > maxAgeSeconds * 1000;
+export function isAuthenticationTooOld(
+  session: { authTime?: string | Date | undefined },
+  maxAgeSeconds: number,
+  now: Date,
+): boolean {
+  // Sessions created before `authTime` existed carry no timestamp; `NaN > x` is false, which
+  // would make `max_age` silently pass, so an unknown authentication time counts as stale.
+  const authTimeMs =
+    session.authTime === undefined ? Number.NaN : new Date(session.authTime).getTime();
+  if (!Number.isFinite(authTimeMs)) {
+    return true;
+  }
+  return now.getTime() - authTimeMs > maxAgeSeconds * 1000;
 }
