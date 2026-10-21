@@ -303,6 +303,7 @@
   "members.errorForbidden": "دسترسی به مدیریت اعضای این اپ مجاز نیست.",
   "members.errorNetwork": "ارتباط با سرور برقرار نشد.",
   "members.errorRequest": "درخواست انجام نشد.",
+  "members.errorUnexpected": "خطایی رخ داد. دوباره تلاش کنید.",
   "members.invite": "دعوت کاربر",
   "members.inviteDescription": "کاربر فقط به همین اپ اضافه می‌شود.",
   "members.inviteFailed": "دعوت انجام نشد",

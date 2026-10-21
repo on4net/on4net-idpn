@@ -10,6 +10,7 @@ import {
 } from '../authorize.js';
 import { sendProblem } from '../routes.js';
 import { exportAuditEventsQuerySchema, listAuditEventsQuerySchema } from './audit-schemas.js';
+import { decodeAuditCursor } from './prisma-audit-repository.js';
 import type {
   AdminAuditEvent,
   AuditEventFilter,
@@ -156,9 +157,29 @@ export function registerAuditAdminRoutes(app: FastifyInstance, options: AuditRou
         '/api/v1/audit-events',
       );
     }
-    const { page, limit } = parsed.data;
-    const result = await options.events.list(filterOf(parsed.data), page, limit);
-    return reply.header('Cache-Control', 'no-store').send(result);
+    const { page, limit, cursor } = parsed.data;
+    const decoded = cursor === undefined ? undefined : decodeAuditCursor(cursor);
+    if (cursor !== undefined && decoded === null) {
+      return sendProblem(
+        reply,
+        422,
+        'validation-error',
+        'Validation failed',
+        'cursor: is not a valid pagination cursor',
+        '/api/v1/audit-events',
+      );
+    }
+    const result = await options.events.list(
+      filterOf(parsed.data),
+      page,
+      limit,
+      decoded ?? undefined,
+    );
+    const response = reply.header('Cache-Control', 'no-store');
+    if (result.nextCursor !== null) {
+      response.header('X-Next-Cursor', result.nextCursor);
+    }
+    return response.send(result);
   });
 
   app.get('/api/v1/audit-events/export', async (request, reply) => {
@@ -180,6 +201,8 @@ export function registerAuditAdminRoutes(app: FastifyInstance, options: AuditRou
     const query = parsed.data;
     const filter = filterOf(query);
     const events = await options.events.listForExport(filter, maxExportRows);
+    // A capped export must say so: the operator has to know that more rows exist.
+    const truncated = events.length >= maxExportRows;
 
     // Export is a sensitive read and must itself leave a trace (docs/security.md 10).
     await options.audit.record({
@@ -194,6 +217,8 @@ export function registerAuditAdminRoutes(app: FastifyInstance, options: AuditRou
       metadata: {
         format: query.format,
         rows: events.length,
+        truncated,
+        ...(truncated ? { limit: maxExportRows } : {}),
         ...(query.from === undefined ? {} : { from: query.from.toISOString() }),
         ...(query.to === undefined ? {} : { to: query.to.toISOString() }),
         ...(query.action === undefined ? {} : { action: query.action }),
@@ -206,11 +231,14 @@ export function registerAuditAdminRoutes(app: FastifyInstance, options: AuditRou
 
     const body = formatBody(events, query.format);
     const filename = `audit-events-${new Date().toISOString().replace(/[:.]/g, '-')}.${query.format}`;
-    return reply
+    const response = reply
       .header('Content-Type', contentType(query.format))
       .header('Content-Disposition', `attachment; filename="${filename}"`)
-      .header('Cache-Control', 'no-store')
-      .send(body);
+      .header('Cache-Control', 'no-store');
+    if (truncated) {
+      response.header('X-Result-Truncated', 'true').header('X-Result-Limit', String(maxExportRows));
+    }
+    return response.send(body);
   });
 }
 

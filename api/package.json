@@ -21,7 +21,8 @@
     "onboard:client": "tsx --env-file-if-exists=../.env scripts/onboard-client.ts",
     "import:users": "tsx --env-file-if-exists=../.env scripts/import-users.ts",
     "ops:backup": "tsx scripts/ops/backup.ts",
-    "ops:restore": "tsx scripts/ops/restore.ts"
+    "ops:restore": "tsx scripts/ops/restore.ts",
+    "ops:audit-retention": "tsx scripts/ops/audit-retention.ts"
   },
   "dependencies": {
     "@idpn/config": "workspace:*",

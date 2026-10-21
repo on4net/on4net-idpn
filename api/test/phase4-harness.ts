@@ -39,6 +39,18 @@ async function migrateDeploy(connectionString: string): Promise<void> {
   });
 }
 
+/** Removes only the keys this suite namespaces under, never the whole database. */
+async function deleteKeysByPrefix(redis: Redis, prefix: string): Promise<void> {
+  let cursor = '0';
+  do {
+    const [next, keys] = await redis.scan(cursor, 'MATCH', `${prefix}*`, 'COUNT', 500);
+    cursor = next;
+    if (keys.length > 0) {
+      await redis.del(...keys);
+    }
+  } while (cursor !== '0');
+}
+
 export async function startPhase4Infra(prefix: string): Promise<Phase4Infra> {
   let postgres: StartedPostgreSqlContainer | undefined;
   let redisContainer: StartedRedisContainer | undefined;
@@ -71,15 +83,19 @@ export async function startPhase4Infra(prefix: string): Promise<Phase4Infra> {
   const externalRedis = process.env.TEST_REDIS_URL;
   if (externalRedis !== undefined && externalRedis !== '') {
     // A separate logical database keeps this suite's keys away from other local data while
-    // still exercising the real Redis serialization and TTL behaviour.
+    // still exercising the real Redis serialization and TTL behaviour. The index is derived
+    // from the process id instead of `Math.random()` so two suites can never pick the same
+    // database and flush each other's keys.
     const url = new URL(externalRedis);
-    url.pathname = `/${Math.floor(Math.random() * 8) + 7}`;
+    url.pathname = `/${7 + (process.pid % 8)}`;
     redis = new Redis(url.toString());
   } else {
     redisContainer = await new RedisContainer('redis:7-alpine').withStartupTimeout(180_000).start();
     redis = new Redis(redisContainer.getConnectionUrl());
   }
-  await redis.flushdb();
+  // Only this suite's keys are removed: `flushdb` would wipe whatever else an operator keeps
+  // in the shared database.
+  await deleteKeysByPrefix(redis, 'idpn:');
 
   const keys = new SigningKeyManager(new MemorySigningKeyRepository());
   await keys.ensureKey();

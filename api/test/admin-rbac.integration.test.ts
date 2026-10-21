@@ -311,6 +311,48 @@ describe('roles and cross-client protection', () => {
     await expect(prisma.role.findUnique({ where: { key: 'app-b:member' } })).resolves.toBeNull();
   });
 
+  it('refuses to link a platform permission to an app role', async () => {
+    await request(app.server)
+      .post('/api/v1/permissions')
+      .set(await authorization(adminUserId))
+      .send({ key: 'idp:user:read', description: 'platform user read' });
+    const response = await request(app.server)
+      .post('/api/v1/roles')
+      .set(await authorization(adminUserId))
+      .send({
+        key: 'app-a:platform-admin',
+        name: 'Platform admin',
+        clientId: 'app-a',
+        permissions: ['idp:user:read'],
+      })
+      .expect(422);
+    expect(response.body.detail).toContain('platform permission');
+    await expect(
+      prisma.role.findUnique({ where: { key: 'app-a:platform-admin' } }),
+    ).resolves.toBeNull();
+  });
+
+  it('accepts the documented per-app global permissions on an app role', async () => {
+    await request(app.server)
+      .post('/api/v1/permissions')
+      .set(await authorization(adminUserId))
+      .send({ key: 'idp:client-member:read', description: 'member read' });
+    const created = await request(app.server)
+      .post('/api/v1/roles')
+      .set(await authorization(adminUserId))
+      .send({
+        key: 'app-a:user-admin',
+        name: 'User admin',
+        clientId: 'app-a',
+        permissions: ['idp:client-member:read', 'app-a:contact:read'],
+      })
+      .expect(201);
+    expect(created.body.permissionKeys.sort()).toEqual([
+      'app-a:contact:read',
+      'idp:client-member:read',
+    ]);
+  });
+
   it('rejects unknown permissions, duplicate keys and foreign role prefixes', async () => {
     await request(app.server)
       .post('/api/v1/roles')

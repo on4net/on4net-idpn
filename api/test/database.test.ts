@@ -366,6 +366,28 @@ describe('initial schema', () => {
         '42501',
       );
       await expectSqlError('DELETE FROM audit_events WHERE id = $1', [event.id], '42501');
+      // TRUNCATE never fires a row-level trigger; the statement-level one must catch it.
+      await expectSqlError('TRUNCATE audit_events', [], '42501');
+      // Even with the maintenance switch on, a rewrite stays forbidden: history may be pruned.
+      await client.query(`SELECT set_config('idpn.audit_maintenance', 'on', true)`);
+      await expectSqlError(
+        `UPDATE audit_events SET action = 'tampered' WHERE id = $1`,
+        [event.id],
+        '42501',
+      );
+      // ...and pruning is allowed, which is the documented retention path.
+      await client.query('DELETE FROM audit_events WHERE id = $1', [event.id]);
+      await client.query(`SELECT set_config('idpn.audit_maintenance', '', true)`);
+      const second = await client.query<{ id: string }>(
+        `INSERT INTO audit_events (actor_type, action, result)
+         VALUES ('system', 'test.append_only', 'success')
+         RETURNING id`,
+      );
+      await expectSqlError(
+        'DELETE FROM audit_events WHERE id = $1',
+        [second.rows[0]?.id],
+        '42501',
+      );
     });
   });
 
@@ -381,54 +403,61 @@ describe('initial schema', () => {
 
   it('rolls back and re-applies the migrations', async () => {
     const latest = await rollbackLatestMigration({ connectionString, confirm: true });
-    expect(latest).toBe('0012_account_token_retention');
+    expect(latest).toBe('0013_audit_hardening');
+    const truncateTrigger = await client.query<{ count: string }>(
+      `SELECT count(*)::text AS count FROM pg_trigger WHERE tgname = 'audit_events_no_truncate'`,
+    );
+    expect(Number(truncateTrigger.rows[0]?.count)).toBe(0);
+
+    const second = await rollbackLatestMigration({ connectionString, confirm: true });
+    expect(second).toBe('0012_account_token_retention');
     const tokenConstraint = await client.query<{ confdeltype: string }>(
       `SELECT confdeltype FROM pg_constraint WHERE conname = 'account_tokens_user_id_fkey'`,
     );
     expect(tokenConstraint.rows[0]?.confdeltype).toBe('r');
 
-    const second = await rollbackLatestMigration({ connectionString, confirm: true });
-    expect(second).toBe('0011_assignment_source_membership');
+    const third = await rollbackLatestMigration({ connectionString, confirm: true });
+    expect(third).toBe('0011_assignment_source_membership');
     const sourceColumn = await client.query<{ column: string | null }>(
       `SELECT column_name AS "column" FROM information_schema.columns
         WHERE table_name = 'assignments' AND column_name = 'source_membership_id'`,
     );
     expect(sourceColumn.rows[0]?.column ?? null).toBeNull();
 
-    const third = await rollbackLatestMigration({ connectionString, confirm: true });
-    expect(third).toBe('0010_missing_fk_indexes');
+    const fourth = await rollbackLatestMigration({ connectionString, confirm: true });
+    expect(fourth).toBe('0010_missing_fk_indexes');
     const runtimeIndex = await client.query<{ indexname: string | null }>(
       `SELECT to_regclass('public.refresh_tokens_client_id_idx') AS indexname`,
     );
     expect(runtimeIndex.rows[0]?.indexname).toBeNull();
 
-    const fourth = await rollbackLatestMigration({ connectionString, confirm: true });
-    expect(fourth).toBe('0009_session_login_context');
+    const fifth = await rollbackLatestMigration({ connectionString, confirm: true });
+    expect(fifth).toBe('0009_session_login_context');
     const contextColumn = await client.query<{ column: string | null }>(
       `SELECT column_name AS "column" FROM information_schema.columns
         WHERE table_name = 'sessions' AND column_name = 'login_context'`,
     );
     expect(contextColumn.rows[0]?.column ?? null).toBeNull();
 
-    const fifth = await rollbackLatestMigration({ connectionString, confirm: true });
-    expect(fifth).toBe('0008_client_translations');
+    const sixth = await rollbackLatestMigration({ connectionString, confirm: true });
+    expect(sixth).toBe('0008_client_translations');
     const translationTable = await client.query<{ translations: string | null }>(
       `SELECT to_regclass('public.client_translations') AS translations`,
     );
     expect(translationTable.rows[0]?.translations).toBeNull();
 
-    const sixth = await rollbackLatestMigration({ connectionString, confirm: true });
-    expect(sixth).toBe('0007_login_context_binding');
     const seventh = await rollbackLatestMigration({ connectionString, confirm: true });
-    expect(seventh).toBe('0006_webauthn_credentials');
+    expect(seventh).toBe('0007_login_context_binding');
     const eighth = await rollbackLatestMigration({ connectionString, confirm: true });
-    expect(eighth).toBe('0005_account_tokens');
+    expect(eighth).toBe('0006_webauthn_credentials');
     const ninth = await rollbackLatestMigration({ connectionString, confirm: true });
-    expect(ninth).toBe('0004_mfa_factors');
+    expect(ninth).toBe('0005_account_tokens');
     const tenth = await rollbackLatestMigration({ connectionString, confirm: true });
-    expect(tenth).toBe('0003_audit_events_append_only');
+    expect(tenth).toBe('0004_mfa_factors');
     const eleventh = await rollbackLatestMigration({ connectionString, confirm: true });
-    expect(eleventh).toBe('0002_assignments_nulls_not_distinct');
+    expect(eleventh).toBe('0003_audit_events_append_only');
+    const twelfth = await rollbackLatestMigration({ connectionString, confirm: true });
+    expect(twelfth).toBe('0002_assignments_nulls_not_distinct');
     const rolledBack = await rollbackLatestMigration({ connectionString, confirm: true });
     expect(rolledBack).toBe('0001_init');
 
@@ -436,7 +465,7 @@ describe('initial schema', () => {
     const history = await client.query<{ migration_name: string; rolled_back_at: Date | null }>(
       `SELECT "migration_name", "rolled_back_at" FROM "_prisma_migrations"`,
     );
-    expect(history.rows).toHaveLength(12);
+    expect(history.rows).toHaveLength(13);
     expect(history.rows.every((row) => row.rolled_back_at !== null)).toBe(true);
 
     const afterRollback = await client.query<{ users: string | null }>(
@@ -452,8 +481,7 @@ describe('initial schema', () => {
     expect(afterReapply.rows[0]?.users).not.toBeNull();
   }, 240_000);
 
-  it('seeding twice does not duplicate data', async () => {
-    const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
+  it('seeding twice does not duplicate data', async () => {    const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
     try {
       await seedDatabase(prisma);
       const first = await countSeededRows(prisma);

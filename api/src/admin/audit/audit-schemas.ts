@@ -30,6 +30,12 @@ export const listAuditEventsQuerySchema = z
     ...filterFields,
     page: z.coerce.number().int().min(1).max(10_000).default(1),
     limit: z.coerce.number().int().min(1).max(100).default(25),
+    /**
+     * Opaque keyset cursor (`occurred_at|id`, base64url). When present it wins over `page`,
+     * so an auditor paging through a busy log never skips or repeats a row because new events
+     * shifted the offset.
+     */
+    cursor: z.string().trim().min(1).max(200).optional(),
   })
   .refine(chronological, { message: 'from must not be after to', path: ['from'] });
 

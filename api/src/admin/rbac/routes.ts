@@ -407,6 +407,9 @@ export function registerRbacAdminRoutes(app: FastifyInstance, options: RbacRoute
     const principal = await authorize(request, reply, {
       permission: WRITE_PERMISSION,
       delegatedPermission: DELEGATED_WRITE,
+      // Replacing the permission set changes what every holder of the role can do, exactly
+      // like deleting the role, so it needs the same fresh authentication.
+      stepUp: true,
       allowDelegated: true,
     });
     if (principal === null) {

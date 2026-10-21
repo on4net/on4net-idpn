@@ -32,13 +32,30 @@ export interface AuditEventPage {
   page: number;
   limit: number;
   total: number;
+  /** Cursor for the next page; `null` when this page is the last one. */
+  nextCursor: string | null;
+}
+
+/** Position in `(occurred_at, id)` order; the sort key of the keyset pagination. */
+export interface AuditEventCursor {
+  occurredAt: Date;
+  id: string;
 }
 
 export type AuditExportFormat = 'csv' | 'ndjson';
 
 /** Persistence port for the audit endpoints (docs/api.md 3.8). */
 export interface AuditEventRepository {
-  list(filter: AuditEventFilter, page: number, limit: number): Promise<AuditEventPage>;
-  /** Most recent `limit` events matching the filter, ordered newest first. */
+  /**
+   * One page, newest first. Without a cursor it uses `page`/`limit` and counts the total;
+   * with a cursor it continues after that position and skips the count.
+   */
+  list(
+    filter: AuditEventFilter,
+    page: number,
+    limit: number,
+    cursor?: AuditEventCursor,
+  ): Promise<AuditEventPage>;
+  /** Most recent `limit` events matching the filter, ordered newest first (no count). */
   listForExport(filter: AuditEventFilter, limit: number): Promise<AdminAuditEvent[]>;
 }

@@ -327,8 +327,43 @@ describe('audit listing and filtering', () => {
     });
   });
 
-  it('filters by action, actor, target type, result, public client and time range', async () => {
-    const byAction = await request(app.server)
+  it('pages by keyset so a new event cannot shift the next page', async () => {
+    const first = await request(app.server)
+      .get('/api/v1/audit-events?limit=2')
+      .set('Authorization', await auth(readerUserId))
+      .expect(200);
+    expect(first.headers['x-next-cursor']).toEqual(expect.any(String));
+    const cursor = first.body.nextCursor as string;
+    expect(cursor).toBe(first.headers['x-next-cursor']);
+
+    // An event arriving between the two reads would shift an offset page; the cursor must not.
+    await prisma.auditEvent.create({
+      data: {
+        occurredAt: new Date('2026-10-05T10:00:00Z'),
+        actorType: 'system',
+        action: 'audit.inserted_between_pages',
+        result: 'success',
+        metadata: {},
+      },
+    });
+
+    const second = await request(app.server)
+      .get(`/api/v1/audit-events?limit=2&cursor=${encodeURIComponent(cursor)}`)
+      .set('Authorization', await auth(readerUserId))
+      .expect(200);
+    const firstIds = (first.body.items as { id: string }[]).map((item) => item.id);
+    const secondIds = (second.body.items as { id: string }[]).map((item) => item.id);
+    expect(secondIds.some((id) => firstIds.includes(id))).toBe(false);
+    // The cursor page skips the count: an auditor reading a busy log must not pay for it.
+    expect(second.body.total).toBe(0);
+
+    const invalid = await request(app.server)
+      .get('/api/v1/audit-events?cursor=not-a-cursor')
+      .set('Authorization', await auth(readerUserId));
+    expect(invalid.status).toBe(422);
+  });
+
+  it('filters by action, actor, target type, result, public client and time range', async () => {    const byAction = await request(app.server)
       .get('/api/v1/audit-events?action=user.login.failed')
       .set('Authorization', await auth(readerUserId))
       .expect(200);
@@ -427,12 +462,20 @@ describe('audit export', () => {
       'id,occurredAt,actorType,actorId,action,targetType,targetId,clientId,ip,userAgent,result,metadata',
     );
     expect(lines).toHaveLength(1 + EXPORT_CAP);
+    // The cap must be visible to the caller, not silently applied.
+    expect(response.headers['x-result-truncated']).toBe('true');
+    expect(response.headers['x-result-limit']).toBe(String(EXPORT_CAP));
 
     const record = await prisma.auditEvent.findFirst({
       where: { action: 'audit.export' },
       orderBy: { occurredAt: 'desc' },
     });
-    expect(record?.metadata).toMatchObject({ format: 'csv', rows: EXPORT_CAP, targetType: 'user' });
+    expect(record?.metadata).toMatchObject({
+      format: 'csv',
+      rows: EXPORT_CAP,
+      targetType: 'user',
+      truncated: true,
+    });
   });
 
   it('exports NDJSON with one event per line', async () => {

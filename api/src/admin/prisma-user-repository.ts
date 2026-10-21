@@ -189,6 +189,11 @@ export function createPrismaAdminUserRepository(
             ...(input.phone === undefined ? {} : { phone: input.phone }),
             ...(input.locale === undefined ? {} : { locale: input.locale }),
             ...(input.avatarUrl === undefined ? {} : { avatarUrl: input.avatarUrl }),
+            // A new address has not been proven: an admin change must not keep the old
+            // verification, otherwise an account takeover could inherit a verified mailbox.
+            ...(input.email === undefined || input.email === existing.email
+              ? {}
+              : { emailVerifiedAt: null }),
           },
           select: SELECT,
         });

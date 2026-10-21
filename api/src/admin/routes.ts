@@ -298,8 +298,7 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
       updated = await options.users.update(request.params.id, {
         ...body,
         ...(body.email === undefined ? {} : { email: normalizeEmail(body.email) }),
-      });
-    } catch (error) {
+      });    } catch (error) {
       if (error instanceof DuplicateUserError) {
         return sendProblem(reply, 409, 'conflict', 'Conflict', `${error.field} is already taken`);
       }
@@ -319,11 +318,25 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
     action: string,
     status: UserStatus,
     withSessionRevocation: boolean,
+    guards: { rejectFrom?: readonly UserStatus[]; rejectDetail?: string } = {},
   ) => {
     app.post<{ Params: { id: string } }>(path, async (request, reply) => {
       const principal = await authorize(request, reply, 'idp:user:write');
       if (principal === null) {
         return reply;
+      }
+      const existing = await options.users.findById(request.params.id);
+      if (existing === null) {
+        return sendProblem(reply, 404, 'not-found', 'Not found', 'user does not exist');
+      }
+      if (guards.rejectFrom?.includes(existing.status) === true) {
+        return sendProblem(
+          reply,
+          409,
+          'conflict',
+          'Conflict',
+          guards.rejectDetail ?? 'the account status does not allow this operation',
+        );
       }
       const user = await options.users.setStatus(request.params.id, status, {
         clearLock: true,
@@ -349,7 +362,12 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRoutesOp
 
   statusAction('/api/v1/users/:id/disable', 'user.disable', 'disabled', true);
   statusAction('/api/v1/users/:id/enable', 'user.enable', 'active', false);
-  statusAction('/api/v1/users/:id/unlock', 'user.unlock', 'active', false);
+  // Unlocking clears a failed-login lock; it must never be a back door that re-enables a
+  // disabled account (that requires the explicit enable action, which is audited as such).
+  statusAction('/api/v1/users/:id/unlock', 'user.unlock', 'active', false, {
+    rejectFrom: ['disabled'],
+    rejectDetail: 'a disabled account must be enabled explicitly',
+  });
 
   app.post<{ Params: { id: string } }>(
     '/api/v1/users/:id/reset-password',

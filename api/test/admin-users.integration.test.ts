@@ -234,6 +234,8 @@ describe('Admin API authentication and authorization', () => {
       .expect(200);
     expect(response.body).toMatchObject({ id: viewerUserId, clientId: adminClientId });
     expect(response.body.permissions).toEqual(['idp:user:read']);
+    // Identity and permissions must never be cached by a browser or an intermediary.
+    expect(response.headers['cache-control']).toBe('no-store');
   });
 });
 
@@ -354,6 +356,56 @@ describe('Admin API user lifecycle', () => {
     });
     expect(audit?.metadata).toMatchObject({ fields: ['displayName', 'locale'] });
   });
+
+  it('clears email verification when an admin changes the address', async () => {
+    const list = await request(app.server)
+      .get('/api/v1/users?q=viewer')
+      .set('Authorization', await auth())
+      .expect(200);
+    const userId = list.body.items[0].id as string;
+    await prisma.user.update({
+      where: { id: userId },
+      data: { emailVerifiedAt: new Date('2026-01-01T00:00:00Z') },
+    });
+
+    await request(app.server)
+      .patch(`/api/v1/users/${userId}`)
+      .set('Authorization', await auth())
+      .send({ email: `moved-${Date.now()}@example.com` })
+      .expect(200);
+
+    const stored = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    // The new address has never been proven; keeping the old verification would let an
+    // admin-controlled email change inherit a verified mailbox.
+    expect(stored.emailVerifiedAt).toBeNull();
+
+    // A change that does not touch the address keeps the verification.
+    await prisma.user.update({
+      where: { id: userId },
+      data: { emailVerifiedAt: new Date('2026-01-01T00:00:00Z') },
+    });
+    await request(app.server)
+      .patch(`/api/v1/users/${userId}`)
+      .set('Authorization', await auth())
+      .send({ displayName: 'Viewer' })
+      .expect(200);
+    const unchanged = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    expect(unchanged.emailVerifiedAt).not.toBeNull();
+  });
+
+  it('refuses an admin token once the administrator account is disabled', async () => {
+    const token = await auth();
+    await prisma.user.update({ where: { id: viewerUserId }, data: { status: 'disabled' } });
+    try {
+      const response = await request(app.server)
+        .get('/api/v1/users')
+        .set('Authorization', await auth(viewerUserId));
+      expect(response.status).toBe(403);
+    } finally {
+      await prisma.user.update({ where: { id: viewerUserId }, data: { status: 'active' } });
+    }
+    await request(app.server).get('/api/v1/users').set('Authorization', token).expect(200);
+  });
 });
 
 describe('Admin API status actions', () => {
@@ -441,6 +493,20 @@ describe('Admin API status actions', () => {
       .set('Authorization', await auth())
       .expect(200);
     expect(enabled.body.user.status).toBe('active');
+  });
+
+  it('refuses to unlock a disabled account instead of silently re-enabling it', async () => {
+    const user = await createActiveUser('disabledunlock');
+    await prisma.user.update({ where: { id: user.id }, data: { status: 'disabled' } });
+
+    const refused = await request(app.server)
+      .post(`/api/v1/users/${user.id}/unlock`)
+      .set('Authorization', await auth());
+    expect(refused.status).toBe(409);
+    expect(refused.body.detail).toContain('disabled');
+
+    const stored = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
+    expect(stored.status).toBe('disabled');
   });
 
   it('resets a password, revokes sessions and requires a change on next sign-in', async () => {

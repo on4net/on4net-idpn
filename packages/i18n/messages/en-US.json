@@ -303,6 +303,7 @@
   "members.errorForbidden": "You are not allowed to manage the members of this app.",
   "members.errorNetwork": "Could not reach the server.",
   "members.errorRequest": "The request failed.",
+  "members.errorUnexpected": "Something went wrong. Try again.",
   "members.invite": "Invite member",
   "members.inviteDescription": "The user is added to this app only.",
   "members.inviteFailed": "Invitation failed",

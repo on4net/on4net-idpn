@@ -1,4 +1,5 @@
 import type { PrismaClient } from '../../generated/prisma/client.js';
+import { isClientScopedPermission } from '../authorize.js';
 import { permissionOwnershipProblem } from './rbac-validation.js';
 import type {
   AdminPermission,
@@ -122,11 +123,29 @@ export function createPrismaRbacRepository(prisma: PrismaClient): AdminRbacRepos
 
     for (const row of rows) {
       const permissionClientId = row.client?.clientId ?? null;
-      if (!allowGlobalPermissions && permissionClientId !== roleClientId) {
+      const clientScopedGlobal = permissionClientId === null && isClientScopedPermission(row.key);
+      // A delegated admin may only link permissions of the addressed app plus the documented
+      // per-app family from the global catalog (`idp:client-*`, `idp:social-provider:*`).
+      // Anything else - another client's permission or a platform permission - is refused.
+      if (
+        !allowGlobalPermissions &&
+        !clientScopedGlobal &&
+        permissionClientId !== roleClientId
+      ) {
         return {
           ok: false,
           reason: 'cross-client-permission',
           detail: `permission "${row.key}" does not belong to client "${roleClientId ?? 'global'}"`,
+        };
+      }
+      // A client-owned role may carry a global permission only from the documented per-app
+      // family. Linking `idp:user:*` or `idp:client:*` would let an app role grant platform
+      // administration, whichever admin created the role.
+      if (roleClientId !== null && permissionClientId === null && !clientScopedGlobal) {
+        return {
+          ok: false,
+          reason: 'cross-client-permission',
+          detail: `permission "${row.key}" is a platform permission and cannot be linked to an app role`,
         };
       }
       const problem = permissionOwnershipProblem(permissionClientId, roleClientId);

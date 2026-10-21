@@ -698,6 +698,12 @@ POST /api/v1/users
 | GET | `/api/v1/audit-events`        | `idp:audit:read`   | فیلتر زمانی/عملیات/کاربر |
 | GET | `/api/v1/audit-events/export` | `idp:audit:export` | خروجی CSV/NDJSON         |
 
+- صفحه‌بندی **Keyset** روی `(occurred_at, id)` است: پارامتر `cursor` (از فیلد `nextCursor` یا هدر `X-Next-Cursor` پاسخ قبلی) صفحهٔ بعد را می‌دهد و بر `page` اولویت دارد. با cursor، `total` محاسبه نمی‌شود.
+- ترتیب همیشه نزولی است؛ `page/limit` فقط برای صفحهٔ اول یا پرش مستقیم استفاده شود.
+- Export حداکثر ۱۰٬۰۰۰ ردیف می‌دهد؛ اگر به سقف برسد هدرهای `X-Result-Truncated: true` و `X-Result-Limit` ارسال می‌شود و در Audit (`audit.export`) مقدار `truncated: true` ثبت می‌گردد.
+- `audit_events` فقط Append است: `UPDATE`/`DELETE`/`TRUNCATE` توسط Trigger مسدود می‌شوند. حذف نگهداری (پیش‌فرض ۱۲ ماه) فقط از مسیر `pnpm --filter @idpn/api ops:audit-retention -- --yes` و با سوئیچ تراکنشی `idpn.audit_maintenance` ممکن است.
+- همهٔ پاسخ‌های `/api/*` و `/oauth2/*` با `Cache-Control: no-store` ارسال می‌شوند.
+
 نمونه فیلتر:
 
 ```

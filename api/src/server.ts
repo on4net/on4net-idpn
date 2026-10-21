@@ -173,6 +173,14 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     reply.header('X-Content-Type-Options', 'nosniff');
     reply.header('Referrer-Policy', 'no-referrer');
     reply.header('X-Request-Id', request.id);
+    // Everything under /api and /oauth2 carries identity, secrets or token material, so no
+    // intermediate cache or browser may store it. Routes that already chose a value keep it.
+    if (
+      reply.getHeader('Cache-Control') === undefined &&
+      (request.url.startsWith('/api/') || request.url.startsWith('/oauth2/'))
+    ) {
+      reply.header('Cache-Control', 'no-store');
+    }
     return payload;
   });
 

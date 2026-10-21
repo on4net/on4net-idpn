@@ -606,6 +606,8 @@ model AuditEvent {
   @@index([actorType, actorId])
   @@index([targetType, targetId])
   @@index([clientId, occurredAt])
+  // The documented example filters by `action`; without this the reader scans the whole log.
+  @@index([action, occurredAt])
   @@map("audit_events")
 }
 

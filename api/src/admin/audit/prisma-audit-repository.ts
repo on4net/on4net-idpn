@@ -2,6 +2,7 @@ import { sanitizeAuditMetadata } from '../../audit/sanitize.js';
 import type { Prisma, PrismaClient } from '../../generated/prisma/client.js';
 import type {
   AdminAuditEvent,
+  AuditEventCursor,
   AuditEventFilter,
   AuditEventPage,
   AuditEventRepository,
@@ -97,37 +98,84 @@ async function whereFor(
   };
 }
 
-/** Prisma-backed audit reader (docs/api.md 3.8). */
+/**
+ * Prisma-backed audit reader (docs/api.md 3.8).
+ *
+ * Paging is keyset based on `(occurred_at, id)`: an auditor reading a busy log must not skip
+ * or repeat rows because new events shifted an offset. The total is counted only for the
+ * first page, and exports never count at all - the count was pure overhead there.
+ */
 export function createPrismaAuditEventRepository(prisma: PrismaClient): AuditEventRepository {
-  const find = async (
-    filter: AuditEventFilter,
-    take: number,
-    skip: number,
-  ): Promise<{ items: AdminAuditEvent[]; total: number }> => {
-    const where = await whereFor(prisma, filter);
-    if (where === null) {
-      return { items: [], total: 0 };
-    }
-    const [rows, total] = await Promise.all([
-      prisma.auditEvent.findMany({
+  const cursorWhere = (cursor: AuditEventCursor | undefined): Prisma.AuditEventWhereInput =>
+    cursor === undefined
+      ? {}
+      : {
+          OR: [
+            { occurredAt: { lt: cursor.occurredAt } },
+            { occurredAt: cursor.occurredAt, id: { lt: cursor.id } },
+          ],
+        };
+
+  return {
+    async list(filter, page, limit, cursor): Promise<AuditEventPage> {
+      const where = await whereFor(prisma, filter);
+      if (where === null) {
+        return { items: [], page, limit, total: 0, nextCursor: null };
+      }
+      const rows = await prisma.auditEvent.findMany({
+        where: { ...where, ...cursorWhere(cursor) },
+        select: AUDIT_EVENT_SELECT,
+        orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
+        take: limit + 1,
+        ...(cursor === undefined ? { skip: (page - 1) * limit } : {}),
+      });
+      const hasMore = rows.length > limit;
+      const items = (hasMore ? rows.slice(0, limit) : rows).map(toEvent);
+      const total = cursor === undefined ? await prisma.auditEvent.count({ where }) : 0;
+      const last = items.at(-1);
+      return {
+        items,
+        page,
+        limit,
+        total,
+        nextCursor:
+          hasMore && last !== undefined
+            ? Buffer.from(`${last.occurredAt}|${last.id}`, 'utf8').toString('base64url')
+            : null,
+      };
+    },
+    async listForExport(filter, limit) {
+      const where = await whereFor(prisma, filter);
+      if (where === null) {
+        return [];
+      }
+      const rows = await prisma.auditEvent.findMany({
         where,
         select: AUDIT_EVENT_SELECT,
         orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
-        take,
-        skip,
-      }),
-      prisma.auditEvent.count({ where }),
-    ]);
-    return { items: rows.map(toEvent), total };
+        take: limit,
+      });
+      return rows.map(toEvent);
+    },
   };
+}
 
-  return {
-    async list(filter, page, limit): Promise<AuditEventPage> {
-      const { items, total } = await find(filter, limit, (page - 1) * limit);
-      return { items, page, limit, total };
-    },
-    async listForExport(filter, limit) {
-      return (await find(filter, limit, 0)).items;
-    },
-  };
+/** Decodes an opaque `nextCursor`; invalid values are a client error, never a silent reset. */
+export function decodeAuditCursor(value: string): AuditEventCursor | null {
+  let decoded: string;
+  try {
+    decoded = Buffer.from(value, 'base64url').toString('utf8');
+  } catch {
+    return null;
+  }
+  const separator = decoded.lastIndexOf('|');
+  if (separator <= 0) {
+    return null;
+  }
+  const occurredAt = new Date(decoded.slice(0, separator));
+  const id = decoded.slice(separator + 1);
+  if (Number.isNaN(occurredAt.getTime()) || id === '') {
+    return null;
+  }
+  return { occurredAt, id };
 }
