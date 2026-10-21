@@ -51,6 +51,12 @@ const connectSources = (options: SecurityHeaderOptions): string[] =>
 /** Builds the CSP for a profile. Never emits `unsafe-eval` or a wildcard source. */
 export function contentSecurityPolicy(options: SecurityHeaderOptions): string {
   const dev = options.dev === true;
+  /**
+   * Per-client context logos are cross-origin images from the client's own asset host
+   * (`ClientLoginContext.branding.logoUrl`), so the Hosted UI admits `https:` images only —
+   * never `http:` and never a script/style source (card #63 finding 2).
+   */
+  const imageSources = ["'self'", 'data:', ...(dev ? [] : ['https:'])];
   if (options.profile === 'remote') {
     // The response is imported as a module by the host document, so this policy only applies
     // if the file is navigated to directly; keep it strict anyway.
@@ -80,7 +86,7 @@ export function contentSecurityPolicy(options: SecurityHeaderOptions): string {
     // React/Radix set inline style attributes; a stylesheet nonce is not viable for a
     // source-copied shadcn/Tailwind build, so inline *styles* stay allowed.
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data:",
+    `img-src ${imageSources.join(' ')}`,
     "font-src 'self' data:",
     `connect-src ${connectSources(options).join(' ')}`,
     "worker-src 'self' blob:",

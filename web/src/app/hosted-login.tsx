@@ -885,6 +885,20 @@ export function HostedLoginPage({
       />
     ) : null;
 
+  const socialBlock =
+    showSocial && challengeToken === null ? (
+      <SocialLogin
+        locale={locale}
+        clientId={clientId ?? ''}
+        providers={socialProviders}
+        loginRequest={loginRequest}
+        returnTo={returnTo}
+        loginHint={loginHint}
+        errorCode={socialError}
+        navigate={navigate}
+      />
+    ) : undefined;
+
   const content =
     flowView ??
     (challengeToken === null ? (
@@ -896,24 +910,21 @@ export function HostedLoginPage({
           errorCode={errorCode}
           defaultIdentifier={loginHint}
           forgotHref={forgotHref}
-          social={
-            showSocial ? (
-              <SocialLogin
-                locale={locale}
-                clientId={clientId ?? ''}
-                providers={socialProviders}
-                loginRequest={loginRequest}
-                returnTo={returnTo}
-                loginHint={loginHint}
-                errorCode={socialError}
-                navigate={navigate}
-              />
-            ) : undefined
-          }
+          social={socialBlock}
           onSubmit={handleSubmit}
         />
       ) : (
-        <LoginContextMethodNotice locale={locale} dir={dir} />
+        // A context may allow social sign-in without a password; the providers must still be
+        // offered next to the notice, otherwise the page is a dead end (card #63 finding 1).
+        <main
+          dir={dir}
+          className="w-full max-w-sm rounded-lg border border-border bg-card p-6 text-start shadow-sm"
+        >
+          <div className="grid gap-3" role="status" aria-live="polite">
+            <LoginContextMethodNotice locale={locale} dir={dir} />
+            {socialBlock === undefined ? null : socialBlock}
+          </div>
+        </main>
       )
     ) : (
       <MfaForm
@@ -951,7 +962,9 @@ export function HostedLoginPage({
           ) : null}
           {showSkeleton || flowView !== null ? null : (
             <>
-              {resolution.requiresSelection && challengeToken === null && activeContextKey ? (
+              {(resolution.requiresSelection || resolution.invalidRequested) &&
+              challengeToken === null &&
+              activeContextKey ? (
                 <LoginContextSelector
                   locale={locale}
                   dir={dir}

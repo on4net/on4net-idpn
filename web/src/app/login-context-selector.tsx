@@ -46,8 +46,20 @@ export function LoginContextSelector({
   const groupId = React.useId();
   const hintId = `${groupId}-hint`;
 
-  if (contexts.length < 2) {
+  if (contexts.length < 2 && !invalidRequested) {
     return null;
+  }
+
+  if (contexts.length < 2) {
+    // A single-context client that asked for an unknown/disabled context still gets the
+    // documented "not available" notice instead of a silent substitution (card #63 finding 5).
+    return (
+      <section dir={dir} className="mb-3" data-testid="login-context-selector">
+        <Alert variant="destructive" role="status" aria-live="polite">
+          <AlertDescription>{t('login.context.unavailable')}</AlertDescription>
+        </Alert>
+      </section>
+    );
   }
 
   return (
@@ -146,6 +158,9 @@ export function LoginContextPanel({
     <section
       dir={dir}
       aria-label={t('login.context.panelLabel')}
+      // The panel is replaced when the user picks another context; announce the change.
+      role="status"
+      aria-live="polite"
       className="mb-3 grid gap-2 text-start"
       data-testid="login-context-panel"
       data-login-context={context.key}

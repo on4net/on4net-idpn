@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -92,8 +92,44 @@ afterEach(() => {
   window.history.replaceState({}, '', '/');
 });
 
-describe('sanitizeLoginContexts', () => {
-  it('keeps valid contexts in server order and drops malformed entries', () => {
+describe('context method availability', () => {
+  const SOCIAL_ONLY: LoginContextSummary = {
+    key: 'customer-social',
+    name: '???? ?? ?????',
+    methods: ['google'],
+    mfaPolicy: 'optional',
+    registrationPolicy: 'disabled',
+  };
+
+  it('offers the allowed social provider when the context forbids passwords', async () => {
+    // `loginMethods: ['google']` is a valid admin configuration; the page must not be a dead end.
+    await renderHosted(
+      <Page
+        search="?client_id=app-a"
+        fetchConfig={vi.fn().mockResolvedValue(CONFIG([SOCIAL_ONLY], SOCIAL_ONLY.key))}
+      />,
+    );
+
+    expect(screen.queryByLabelText('??? ????')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Google/ })).toBeInTheDocument();
+  });
+
+  it('shows the unavailable notice for a single-context client that asked for another context', async () => {
+    await renderHosted(
+      <Page
+        search="?client_id=app-a&login_context=retired"
+        fetchConfig={vi.fn().mockResolvedValue(CONFIG([SOCIAL_ONLY], SOCIAL_ONLY.key))}
+      />,
+    );
+
+    expect(screen.getByTestId('login-context-selector')).toBeInTheDocument();
+    // The documented "not available" notice, not a silent substitution.
+    expect(
+      within(screen.getByTestId('login-context-selector')).getByRole('status'),
+    ).toBeInTheDocument();
+  });
+});
+describe('sanitizeLoginContexts', () => {  it('keeps valid contexts in server order and drops malformed entries', () => {
     const contexts = sanitizeLoginContexts([
       {
         key: 'customer-admin',
