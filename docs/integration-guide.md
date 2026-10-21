@@ -164,6 +164,10 @@ const IdpnAccount = React.lazy(() => import('idpn/AccountApp'));
 - UI مشترک با **shadcn/ui + Tailwind v4** ساخته می‌شود و داخل بسته MFE قرار دارد.
 - اپ‌های میزبان نباید shadcn یا Tailwind نسخه خودشان را برای MFE نصب کنند.
 - اپ میزبان فقط Theme/Locale را از Config می‌دهد؛ استایل کامپوننت‌ها را Override نمی‌کند.
+- MFE هیچ فونتی دانلود نمی‌کند و روی صفحه میزبان درخواست `@font-face` نمی‌سازد. اگر ظاهر MFE باید
+  با تایپوگرافی IdP یکی باشد، میزبان فایل‌های `vazirmatn-arabic.woff2`، `vazirmatn-latin.woff2` و
+  `inter-latin.woff2` را از `web/public/fonts/` در دامنه خود سرو می‌کند و با `font-display: swap`
+  اعلان می‌کند (CSP: `font-src 'self'`). در غیر این صورت پشته فونت به فونت سیستم برمی‌گردد.
 - جزئیات توکن‌ها، RTL و ایزولاسیون: [design-system.md](./design-system.md).
 
 ## 4. الگوی BFF (توصیه‌شده)

@@ -155,11 +155,14 @@ for (const [name, value] of Object.entries(idpnThemeToCssVariables(config.theme,
   - `text-start` / `text-end` به‌جای `text-left` / `text-right`
 - آیکون‌های جهت‌دار (Chevron، Arrow) در RTL چرخانده شوند (`rtl:rotate-180`).
 - فونت به‌ازای Locale: `Vazirmatn` برای `fa-IR`، `Inter` برای `en-US`؛ با `font-display: swap`.
-  - **وضعیت فعلی:** هنوز هیچ فایل فونتی در مخزن منتشر نمی‌شود؛ لایه تم فقط *پشته فونت* را تعیین
-    می‌کند و مرورگر به فونت سیستمی برمی‌گردد. تصمیم آگاهانه است تا زمانی که فونت self-hosted
-    (woff2 زیرمجموعه‌شده با `font-display: swap` و لایسنس OFL) اضافه شود؛ افزودن آن یک تغییر
-    دارایی‌محور جداگانه است (کارت پیگیری ثبت شده). تا آن زمان تست a11y فقط پشته و توکن
-    `--idpn-font-sans` را تأیید می‌کند، نه رندر واقعی گلیف‌ها.
+  - فایل‌های woff2 زیرمجموعه‌شده (OFL 1.1) در `web/public/fonts/` منتشر می‌شوند و اعلان
+    `@font-face` با `unicode-range` در `web/src/styles/fonts.css` است. این فایل فقط از ورودی
+    Hosted UI (`web/src/main.tsx`) بارگذاری می‌شود؛ MFE و Web Component همچنان تنها
+    `globals.css` را بسته‌بندی می‌کنند تا صفحه میزبان هیچ درخواست فونتی به IdP نفرستد.
+  - میزبان‌هایی که همان تایپوگرافی را در MFE می‌خواهند، همان فایل‌ها را در دامنه خود سرو
+    می‌کنند (`docs/integration-guide.md`). CSP هاست‌شده `font-src 'self' data:` است.
+  - تست a11y علاوه بر پشته و توکن `--idpn-font-sans`، بارگذاری واقعی فونت را با
+    `document.fonts.check` و وضعیت هر Face بررسی می‌کند.
 - اعداد، تاریخ و واحد پول با `Intl` و Locale فعال؛ تست ترکیب فارسی/انگلیسی.
 - فرم‌ها، پیام‌های خطا و Placeholderها در RTL تست شوند.
 

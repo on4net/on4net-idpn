@@ -43,11 +43,11 @@ async function expectNoHorizontalOverflow(page: Page): Promise<void> {
 }
 
 /**
- * The resolved stack is applied inside `.idpn-root` only, never on `:root`.
+ * The resolved stack is applied inside `.idpn-root` only, never on `:root`, and the hosted
+ * page really loads the self-hosted webfont (card #76).
  *
- * This asserts the *declared* stack: the repository ships no webfont, so no browser can
- * actually rasterise Vazirmatn/Inter here and asserting `document.fonts.check` would fail
- * everywhere (card #56 finding 6). A real webfont is a separate, asset-bearing change.
+ * `document.fonts.check` alone is weak — it also returns `true` when no matching face is
+ * declared — so the loaded faces are asserted as well. A missing or broken woff2 fails here.
  */
 async function expectScopedFont(page: Page, family: 'Vazirmatn' | 'Inter'): Promise<void> {
   const rootFont = await page
@@ -63,6 +63,23 @@ async function expectScopedFont(page: Page, family: 'Vazirmatn' | 'Inter'): Prom
     .getByTestId('idpn-root')
     .evaluate((element) => getComputedStyle(element).getPropertyValue('--idpn-font-sans'));
   expect(token).toContain(family);
+
+  await page.evaluate(() => document.fonts.ready);
+  const available = await page.evaluate(
+    (name) => document.fonts.check(`16px "${name}"`),
+    family,
+  );
+  expect(available).toBe(true);
+
+  const faces = await page.evaluate(
+    (name) =>
+      Array.from(document.fonts)
+        .filter((face) => face.family.replace(/["']/g, '') === name)
+        .map((face) => face.status),
+    family,
+  );
+  expect(faces.length).toBeGreaterThan(0);
+  expect(faces.every((status) => status === 'loaded')).toBe(true);
 }
 
 async function submitPasswordStep(page: Page, locale: 'fa-IR' | 'en-US'): Promise<void> {
