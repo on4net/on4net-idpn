@@ -198,7 +198,8 @@ export interface AccountApiClient {
   /** Switches the current session to another context of the same app (no password). */
   switchContext(loginContext: string): Promise<SwitchContextResult>;
   getMfaStatus(options?: { signal?: AbortSignal }): Promise<AccountMfaStatus>;
-  enrollTotp(input?: { name?: string }): Promise<TotpEnrollment>;
+  /** Enrolment re-proves the password, so a hijacked session cannot bind a factor. */
+  enrollTotp(input: { password: string; name?: string }): Promise<TotpEnrollment>;
   verifyTotpEnrollment(input: { factorId: string; code: string }): Promise<{
     ok: true;
     recoveryCodes: string[];
@@ -319,7 +320,7 @@ export function createAccountApiClient(options: AccountApiClientOptions = {}): A
       }),
     getMfaStatus: (callOptions = {}) =>
       call<AccountMfaStatus>('/api/v1/account/mfa', { method: 'GET' }, callOptions.signal),
-    enrollTotp: (input = {}) =>
+    enrollTotp: (input) =>
       call<TotpEnrollment>('/api/v1/account/mfa/totp/enroll', {
         method: 'POST',
         body: JSON.stringify(input),

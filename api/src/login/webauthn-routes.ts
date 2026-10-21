@@ -4,18 +4,25 @@ import { sanitizeAuditMetadata } from '../audit/sanitize.js';
 import { MFA_ACR, type MfaLoginDependencies } from '../mfa/mfa-types.js';
 import { MFA_CHALLENGE_MAX_ATTEMPTS, isChallengeToken } from '../mfa/challenge-store.js';
 import { beginAuthentication, finishAuthentication } from '../mfa/webauthn.js';
+import type { RateLimiter } from '../http/rate-limit.js';
 import { serializeSessionCookie } from '../session/cookie.js';
 import type { RedisSessionStore } from '../session/store.js';
+import { isAccountLocked, nextFailureState } from './lockout.js';
 import type { LoginRouteOptions } from './routes.js';
 
 export interface LoginWebauthnRouteOptions {
   mfa: MfaLoginDependencies;
   webauthn: NonNullable<LoginRouteOptions['webauthn']>;
-  users: Pick<LoginRouteOptions['users'], 'registerSuccessfulLogin'>;
+  users: Pick<
+    LoginRouteOptions['users'],
+    'registerSuccessfulLogin' | 'registerFailedAttempt'
+  >;
   sessions: Pick<RedisSessionStore, 'create'>;
   persistSession: LoginRouteOptions['persistSession'];
   audit: LoginRouteOptions['audit'];
   cookie: LoginRouteOptions['cookie'];
+  /** Shared limiter; the per-challenge budget alone is bypassed by opening new challenges. */
+  rateLimiter?: RateLimiter;
   now?: () => Date;
 }
 
@@ -58,7 +65,6 @@ export function registerLoginWebauthnRoutes(
       }
       const user = await options.mfa.repository.findUserSecurity(challenge.userId);
       if (user === null || user.status !== 'active') {
-        await options.mfa.challenges.fail(token);
         return failure(reply, 401, 'mfa_challenge_invalid', CHALLENGE_INVALID_MESSAGE);
       }
       const started = await beginAuthentication(options.webauthn, {
@@ -94,14 +100,33 @@ export function registerLoginWebauthnRoutes(
         return failure(reply, 400, 'invalid_request', VERIFY_FAILED_MESSAGE);
       }
 
-      const challenge = await options.mfa.challenges.read(token);
-      if (challenge === null) {
+      if (options.rateLimiter !== undefined) {
+        const allowed = await options.rateLimiter.consume(
+          `login:mfa:${request.ip}`,
+          { windowSeconds: 60, max: 20 },
+        );
+        if (!allowed) {
+          return failure(reply, 429, 'too_many_requests', RATE_LIMITED_MESSAGE);
+        }
+      }
+
+      // Claim the attempt before the ceremony: the reservation is atomic, so concurrent
+      // assertions each get a distinct attempt number instead of sharing one budget.
+      const reservation = await options.mfa.challenges.reserve(token);
+      if (reservation.record === null) {
         return failure(reply, 401, 'mfa_challenge_invalid', CHALLENGE_INVALID_MESSAGE);
       }
+      if (!reservation.allowed) {
+        return failure(reply, 429, 'mfa_rate_limited', RATE_LIMITED_MESSAGE);
+      }
+      const challenge = reservation.record;
+      const at = now();
       const user = await options.mfa.repository.findUserSecurity(challenge.userId);
       if (user === null || user.status !== 'active') {
-        await options.mfa.challenges.fail(token);
         return failure(reply, 401, 'mfa_challenge_invalid', CHALLENGE_INVALID_MESSAGE);
+      }
+      if (isAccountLocked(user.lockedUntil, at)) {
+        return failure(reply, 429, 'mfa_rate_limited', RATE_LIMITED_MESSAGE);
       }
 
       const result = await finishAuthentication(options.webauthn, {
@@ -112,7 +137,12 @@ export function registerLoginWebauthnRoutes(
         mfaChallengeToken: token,
       });
       if (!result.ok) {
-        const attempts = await options.mfa.challenges.fail(token);
+        const failureState = nextFailureState(user, at);
+        await options.users.registerFailedAttempt(
+          user.id,
+          failureState.attempts,
+          failureState.lockedUntil,
+        );
         await options.audit.record({
           actorType: 'user',
           actorId: user.id,
@@ -125,10 +155,13 @@ export function registerLoginWebauthnRoutes(
           metadata: sanitizeAuditMetadata({
             method: 'webauthn',
             reason: result.reason,
-            attempts,
+            attempts: failureState.attempts,
+            challengeAttempt: reservation.attempt,
           }),
         });
-        if (attempts >= MFA_CHALLENGE_MAX_ATTEMPTS) {
+        if (failureState.locked || reservation.attempt >= MFA_CHALLENGE_MAX_ATTEMPTS) {
+          // Destroy the challenge and its counter, matching the TOTP route.
+          await options.mfa.challenges.consume(token);
           return failure(reply, 429, 'mfa_rate_limited', RATE_LIMITED_MESSAGE);
         }
         if (result.reason === 'mfa_challenge_mismatch' || result.reason === 'challenge_invalid') {
@@ -143,7 +176,6 @@ export function registerLoginWebauthnRoutes(
         return failure(reply, 401, 'mfa_challenge_invalid', CHALLENGE_INVALID_MESSAGE);
       }
 
-      const at = now();
       const amr = ['pwd', 'webauthn', 'hwk'];
       const session = await options.sessions.create({
         userId: user.id,

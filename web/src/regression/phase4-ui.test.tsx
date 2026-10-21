@@ -187,6 +187,7 @@ describe('account MFA and passkey forms', () => {
     render(<AccountRoot apiClient={client} locale="fa-IR" />);
 
     await screen.findByTestId('mfa-section');
+    await user.type(screen.getByLabelText('رمز عبور فعلی'), 'user-password-123');
     await user.click(screen.getByRole('button', { name: 'فعال‌سازی' }));
 
     expect(enrollTotp).toHaveBeenCalled();

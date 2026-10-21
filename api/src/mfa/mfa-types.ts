@@ -44,6 +44,9 @@ export interface MfaUserSecurity {
   status: 'active' | 'locked' | 'disabled' | 'pending';
   passwordHash: string | null;
   deletedAt: Date | null;
+  /** Shared lockout state, so a wrong second factor counts like a wrong password. */
+  failedLoginCount: number;
+  lockedUntil: Date | null;
 }
 
 export interface RecoveryCodeRecord {

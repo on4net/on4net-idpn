@@ -604,6 +604,7 @@ describe('Account MFA section', () => {
     await screen.findByText('سارا محمدی');
     const user = userEvent.setup();
 
+    await user.type(screen.getByLabelText('رمز عبور فعلی'), 'user-password-123');
     await user.click(screen.getByTestId('mfa-enable'));
 
     expect(fake.enrollTotp).toHaveBeenCalledTimes(1);
@@ -636,6 +637,7 @@ describe('Account MFA section', () => {
     await screen.findByText('سارا محمدی');
     const user = userEvent.setup();
 
+    await user.type(screen.getByLabelText('رمز عبور فعلی'), 'user-password-123');
     await user.click(screen.getByTestId('mfa-enable'));
     await user.type(await screen.findByLabelText('کد ۶ رقمی'), '12');
     await user.click(screen.getByTestId('mfa-verify'));
@@ -659,6 +661,7 @@ describe('Account MFA section', () => {
     await screen.findByText('سارا محمدی');
     const user = userEvent.setup();
 
+    await user.type(screen.getByLabelText('رمز عبور فعلی'), 'user-password-123');
     await user.click(screen.getByTestId('mfa-enable'));
     await user.type(await screen.findByLabelText('کد ۶ رقمی'), '123456');
     await user.click(screen.getByTestId('mfa-verify'));
@@ -750,6 +753,7 @@ describe('Account MFA section', () => {
     await screen.findByText('سارا محمدی');
     const user = userEvent.setup();
 
+    await user.type(screen.getByLabelText('رمز عبور فعلی'), 'user-password-123');
     await user.click(screen.getByTestId('mfa-enable'));
     expect(await screen.findByTestId('mfa-error')).toHaveTextContent('عملیات MFA انجام نشد');
 
@@ -761,6 +765,7 @@ describe('Account MFA section', () => {
       digits: 6,
       period: 30,
     });
+    await user.type(screen.getByLabelText('رمز عبور فعلی'), 'user-password-123');
     await user.click(screen.getByTestId('mfa-enable'));
     await screen.findByTestId('mfa-enrollment');
 

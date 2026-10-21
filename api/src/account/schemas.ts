@@ -31,6 +31,8 @@ export type SwitchContextBody = z.infer<typeof switchContextSchema>;
 /** MFA enrollment and management bodies (docs/account-api.md). */
 export const enrollTotpSchema = z
   .object({
+    /** Re-proves the session owner; enrolment is a sensitive mutation like disable. */
+    password: z.string().min(1).max(128),
     name: z.string().trim().min(1).max(64).optional(),
   })
   .strict();

@@ -40,10 +40,27 @@ export interface MfaChallenge {
   record: MfaChallengeRecord;
 }
 
+/** Result of atomically claiming one verification attempt for a challenge. */
+export interface MfaAttemptReservation {
+  /** 1-based attempt number claimed by this request. */
+  attempt: number;
+  /** The challenge record, or `null` when the challenge expired, was used or never existed. */
+  record: MfaChallengeRecord | null;
+  /** Whether this attempt is inside the budget and may run the verifier. */
+  allowed: boolean;
+}
+
 export interface MfaChallengeStore {
   create(input: CreateMfaChallengeInput): Promise<MfaChallenge>;
   /** Reads without consuming, so a wrong code can be retried within the attempt budget. */
   read(token: string): Promise<MfaChallengeRecord | null>;
+  /**
+   * Claims one attempt atomically **before** verification, so concurrent requests cannot
+   * all spend the same budget (`docs/security.md` T3). The attempt is counted even when the
+   * code turns out to be wrong; `allowed: false` means the budget is exhausted and the
+   * challenge has been destroyed.
+   */
+  reserve(token: string): Promise<MfaAttemptReservation>;
   /** Records a failure; returns the attempt count and drops the challenge after the limit. */
   fail(token: string): Promise<number>;
   /** Atomic read-and-delete. Returns `null` for an unknown, expired or already used token. */
@@ -128,6 +145,26 @@ export class RedisMfaChallengeStore implements MfaChallengeStore {
     return raw === null ? null : parseRecord(raw);
   }
 
+  async reserve(token: string): Promise<MfaAttemptReservation> {
+    if (!isChallengeToken(token)) {
+      return { attempt: 0, record: null, allowed: false };
+    }
+    const attemptsKey = `${ATTEMPTS_KEY}${token}`;
+    // INCR is atomic across API instances: concurrent requests get distinct attempt numbers,
+    // so at most MFA_CHALLENGE_MAX_ATTEMPTS of them may reach the verifier.
+    const attempt = await this.redis.incr(attemptsKey);
+    if (attempt === 1) {
+      await this.redis.expire(attemptsKey, MFA_CHALLENGE_TTL_SECONDS);
+    }
+    const raw = await this.redis.get(`${CHALLENGE_KEY}${token}`);
+    const record = raw === null ? null : parseRecord(raw);
+    const allowed = record !== null && attempt <= MFA_CHALLENGE_MAX_ATTEMPTS;
+    if (!allowed) {
+      await this.redis.del(`${CHALLENGE_KEY}${token}`);
+    }
+    return { attempt, record, allowed };
+  }
+
   async fail(token: string): Promise<number> {
     if (!isChallengeToken(token)) {
       return MFA_CHALLENGE_MAX_ATTEMPTS;
@@ -183,6 +220,20 @@ export class MemoryMfaChallengeStore implements MfaChallengeStore {
 
   async read(token: string): Promise<MfaChallengeRecord | null> {
     return this.live(token);
+  }
+
+  async reserve(token: string): Promise<MfaAttemptReservation> {
+    if (!isChallengeToken(token)) {
+      return { attempt: 0, record: null, allowed: false };
+    }
+    const attempt = (this.attempts.get(token) ?? 0) + 1;
+    this.attempts.set(token, attempt);
+    const record = this.live(token);
+    const allowed = record !== null && attempt <= MFA_CHALLENGE_MAX_ATTEMPTS;
+    if (!allowed) {
+      this.challenges.delete(token);
+    }
+    return { attempt, record, allowed };
   }
 
   async fail(token: string): Promise<number> {

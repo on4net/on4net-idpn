@@ -88,14 +88,39 @@ export async function getMfaStatus(
 
 export type EnrollTotpResult =
   | { ok: true; factorId: string; secret: string; otpauthUri: string }
-  | { ok: false; reason: 'already_enrolled' | 'unavailable' };
+  | { ok: false; reason: 'already_enrolled' | 'unavailable' | 'invalid_password' | 'denied' };
 
+/**
+ * Starts TOTP enrolment after re-proving the password. A session alone is not enough: a
+ * hijacked session on an account without MFA must not be able to bind an attacker-controlled
+ * authenticator and survive a later password reset (docs/security.md, account MFA).
+ */
 export async function enrollTotp(
   deps: AccountMfaDependencies,
-  input: { userId: string; accountName: string; name?: string },
+  input: { userId: string; accountName: string; password: string; name?: string },
 ): Promise<EnrollTotpResult> {
   if (deps.secretBox === null) {
     return { ok: false, reason: 'unavailable' };
+  }
+  const user = await deps.repository.findUserSecurity(input.userId);
+  if (user === null || user.deletedAt !== null || user.status === 'disabled') {
+    return { ok: false, reason: 'denied' };
+  }
+  const params = deps.recoveryParams ?? DEFAULT_ARGON2_PARAMS;
+  const proven =
+    user.passwordHash !== null &&
+    (await (deps.verify ?? verifyPassword)(user.passwordHash, input.password, params));
+  if (!proven) {
+    await deps.repository.recordAudit({
+      actorType: 'user',
+      actorId: input.userId,
+      action: 'user.mfa.failed',
+      targetType: 'user',
+      targetId: input.userId,
+      result: 'failure',
+      metadata: { type: 'totp', stage: 'enroll' },
+    });
+    return { ok: false, reason: 'invalid_password' };
   }
   const secret = generateTotpSecret();
   const created = await deps.repository.createTotpFactor(

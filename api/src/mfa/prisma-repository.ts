@@ -320,6 +320,8 @@ export function createPrismaMfaRepository(
           status: true,
           passwordHash: true,
           deletedAt: true,
+          failedLoginCount: true,
+          lockedUntil: true,
         },
       });
     },

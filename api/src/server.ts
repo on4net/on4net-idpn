@@ -275,6 +275,9 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
         persistSession: options.login.persistSession,
         audit: options.login.audit,
         cookie: options.login.cookie,
+        ...(options.login.rateLimiter === undefined
+          ? {}
+          : { rateLimiter: options.login.rateLimiter }),
         ...(options.login.now === undefined ? {} : { now: options.login.now }),
       });
       if (options.login.webauthn !== undefined) {
@@ -286,6 +289,9 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
           persistSession: options.login.persistSession,
           audit: options.login.audit,
           cookie: options.login.cookie,
+          ...(options.login.rateLimiter === undefined
+            ? {}
+            : { rateLimiter: options.login.rateLimiter }),
           ...(options.login.now === undefined ? {} : { now: options.login.now }),
         });
       }

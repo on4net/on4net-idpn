@@ -251,7 +251,7 @@ describe('account MFA client', () => {
     }) as unknown as FetchMock;
     const client = createAccountApiClient({ fetchImpl });
 
-    await client.enrollTotp();
+    await client.enrollTotp({ password: 'secret-password' });
     await client.verifyTotpEnrollment({ factorId: 'f1', code: '123456' });
     await client.disableTotp({ password: 'secret-password' });
     await client.regenerateRecoveryCodes({ password: 'secret-password' });
@@ -298,7 +298,7 @@ describe('account MFA client', () => {
     );
     const client = createAccountApiClient({ fetchImpl });
 
-    await expect(client.enrollTotp()).rejects.toMatchObject({
+    await expect(client.enrollTotp({ password: 'secret-password' })).rejects.toMatchObject({
       status: 503,
       code: 'mfa_unavailable',
     });

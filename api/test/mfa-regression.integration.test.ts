@@ -127,7 +127,7 @@ async function enrollTotp(
     .post('/api/v1/account/mfa/totp/enroll')
     .set('Cookie', cookie(session))
     .set(sameOrigin)
-    .send({});
+    .send({ password: userPassword });
   expect(start.status).toBe(201);
 
   const confirm = await request(app.server)
@@ -428,7 +428,7 @@ describe('MFA challenge binding and single use', () => {
       .post('/api/v1/account/mfa/totp/enroll')
       .set('Cookie', cookie(session))
       .set(sameOrigin)
-      .send({});
+      .send({ password: userPassword });
     expect(start.status).toBe(201);
 
     const optional = await login(user.username, 'app-optional');

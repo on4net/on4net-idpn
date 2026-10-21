@@ -17,9 +17,8 @@ import {
   sanitizeReturnTo,
   type LoginUserRepository,
 } from './login-types.js';
+import { nextFailureState } from './lockout.js';
 
-const MAX_FAILED_ATTEMPTS = 5;
-const LOCK_DURATION_MS = 15 * 60 * 1000;
 const ACR_PASSWORD = 'urn:on4net:acr:pwd';
 
 /**
@@ -146,14 +145,8 @@ export function registerLoginRoute(app: FastifyInstance, options: LoginRouteOpti
       }
       // A lock that already elapsed is a fresh window: the counter restarts so an attacker
       // cannot keep the account locked with a single attempt per window.
-      const previousAttempts =
-        user.lockedUntil !== null && user.lockedUntil.getTime() <= at.getTime()
-          ? 0
-          : user.failedLoginCount;
-      const attempts = previousAttempts + 1;
-      const lockedUntil =
-        attempts >= MAX_FAILED_ATTEMPTS ? new Date(at.getTime() + LOCK_DURATION_MS) : null;
-      await options.users.registerFailedAttempt(user.id, attempts, lockedUntil);
+      const failure = nextFailureState(user, at);
+      await options.users.registerFailedAttempt(user.id, failure.attempts, failure.lockedUntil);
       // One audit row per failure: `reject` records it with the masked identifier.
       return reject(reply, options, request, body, user.id, result.reason, maskEmail(user.email));
     }

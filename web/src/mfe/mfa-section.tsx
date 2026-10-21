@@ -18,6 +18,7 @@ import {
 import { browserPasskeyDriver, passkeysSupported, type PasskeyDriver } from './passkey-client';
 
 const CODE_ID = 'mfa-enrollment-code';
+const ENROLL_PASSWORD_ID = 'mfa-enrollment-password';
 const REGENERATE_PASSWORD_ID = 'mfa-regenerate-password';
 const DISABLE_PASSWORD_ID = 'mfa-disable-password';
 const DISABLE_CODE_ID = 'mfa-disable-code';
@@ -78,6 +79,7 @@ export function MfaSection({ api, locale, t, onEvent, passkeys }: MfaSectionProp
 
   const [busy, setBusy] = React.useState<Busy>(null);
   const [enrollment, setEnrollment] = React.useState<TotpEnrollment | null>(null);
+  const [enrollPassword, setEnrollPassword] = React.useState('');
   const [code, setCode] = React.useState('');
   const [codeError, setCodeError] = React.useState<string | null>(null);
   const [recoveryCodes, setRecoveryCodes] = React.useState<string[] | null>(null);
@@ -129,13 +131,19 @@ export function MfaSection({ api, locale, t, onEvent, passkeys }: MfaSectionProp
     setFormError(reasonOf(caught));
   };
 
-  const startEnrollment = async (): Promise<void> => {
+  const startEnrollment = async (event: React.FormEvent<HTMLFormElement>): Promise<void> => {
+    event.preventDefault();
+    if (enrollPassword === '') {
+      setFormError(t('account.password.currentRequired'));
+      return;
+    }
     setBusy('enroll');
     setFormError(null);
     setNotice(null);
     setCodeError(null);
     try {
-      setEnrollment(await api.enrollTotp());
+      setEnrollment(await api.enrollTotp({ password: enrollPassword }));
+      setEnrollPassword('');
       setCode('');
     } catch (caught) {
       report(caught);
@@ -370,19 +378,27 @@ export function MfaSection({ api, locale, t, onEvent, passkeys }: MfaSectionProp
         )}
 
         {status !== null && !totpConfirmed && enrollment === null ? (
-          <div className="grid gap-2">
+          <form className="grid gap-2" noValidate onSubmit={(event) => void startEnrollment(event)}>
+            <Label htmlFor={ENROLL_PASSWORD_ID}>{t('account.mfa.passwordLabel')}</Label>
+            <Input
+              id={ENROLL_PASSWORD_ID}
+              name="password"
+              type="password"
+              autoComplete="current-password"
+              value={enrollPassword}
+              onChange={(event) => setEnrollPassword(event.target.value)}
+            />
             <Button
-              type="button"
+              type="submit"
               data-testid="mfa-enable"
               disabled={busy !== null || status.available === false}
-              onClick={() => void startEnrollment()}
             >
               {busy === 'enroll' ? t('account.mfa.enabling') : t('account.mfa.enable')}
             </Button>
             {status.available === false ? (
               <p className="text-xs text-muted-foreground">{t('account.mfa.errorUnavailable')}</p>
             ) : null}
-          </div>
+          </form>
         ) : null}
 
         {enrollment === null ? null : (

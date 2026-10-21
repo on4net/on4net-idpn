@@ -19,7 +19,11 @@ import { hashPassword, verifyPassword, type Argon2Params } from '../src/auth/pas
 import { createSecretBox } from '../src/crypto/secret-box.js';
 import { PrismaClient } from '../src/generated/prisma/client.js';
 import { createPrismaLoginRepository } from '../src/login/prisma-repository.js';
-import { MemoryMfaChallengeStore, RedisMfaChallengeStore } from '../src/mfa/challenge-store.js';
+import {
+  MFA_CHALLENGE_MAX_ATTEMPTS,
+  MemoryMfaChallengeStore,
+  RedisMfaChallengeStore,
+} from '../src/mfa/challenge-store.js';
 import { createPrismaMfaRepository } from '../src/mfa/prisma-repository.js';
 import { totpCode } from '../src/mfa/totp.js';
 import { MemorySigningKeyRepository, SigningKeyManager } from '../src/oidc/keys.js';
@@ -142,7 +146,7 @@ async function enrollTotp(userId: string): Promise<{ factorId: string; recoveryC
     .post('/api/v1/account/mfa/totp/enroll')
     .set('Cookie', cookie(session))
     .set(sameOrigin)
-    .send({});
+    .send({ password: userPassword });
   expect(start.status).toBe(201);
 
   const confirm = await request(app.server)
@@ -277,7 +281,7 @@ describe('account MFA enrollment', () => {
       .post('/api/v1/account/mfa/totp/enroll')
       .set('Cookie', cookie(session))
       .set(sameOrigin)
-      .send({});
+      .send({ password: userPassword });
     expect(start.status).toBe(201);
     expect(start.body.otpauthUri).toContain('otpauth://totp/');
     expect(start.body.secret).toMatch(/^[A-Z2-7]{32}$/);
@@ -299,6 +303,33 @@ describe('account MFA enrollment', () => {
     expect(JSON.stringify(status.body)).not.toContain(start.body.secret);
   });
 
+  it('requires the current password before starting enrolment', async () => {
+    const userId = await createUser('enroll-password');
+    const session = await createSession(userId);
+
+    const missing = await request(app.server)
+      .post('/api/v1/account/mfa/totp/enroll')
+      .set('Cookie', cookie(session))
+      .set(sameOrigin)
+      .send({});
+    expect(missing.status).toBe(422);
+
+    const wrong = await request(app.server)
+      .post('/api/v1/account/mfa/totp/enroll')
+      .set('Cookie', cookie(session))
+      .set(sameOrigin)
+      .send({ password: 'wrong-password-1' });
+    expect(wrong.status).toBe(400);
+    expect(wrong.body.code).toBe('invalid_current_password');
+    // A hijacked session cannot bind an authenticator without the password.
+    expect(await prisma.mfaFactor.count({ where: { userId } })).toBe(0);
+
+    const audit = await prisma.auditEvent.findFirst({
+      where: { action: 'user.mfa.failed', actorId: userId },
+    });
+    expect(audit?.metadata).toMatchObject({ type: 'totp', stage: 'enroll' });
+  });
+
   it('requires a valid code before confirming and issuing recovery codes', async () => {
     const userId = await createUser('confirm-user');
     const session = await createSession(userId);
@@ -307,7 +338,7 @@ describe('account MFA enrollment', () => {
       .post('/api/v1/account/mfa/totp/enroll')
       .set('Cookie', cookie(session))
       .set(sameOrigin)
-      .send({});
+      .send({ password: userPassword });
     const wrong = await request(app.server)
       .post('/api/v1/account/mfa/totp/verify')
       .set('Cookie', cookie(session))
@@ -328,7 +359,7 @@ describe('account MFA enrollment', () => {
       .post('/api/v1/account/mfa/totp/enroll')
       .set('Cookie', cookie(session))
       .set(sameOrigin)
-      .send({});
+      .send({ password: userPassword });
     expect(again.status).toBe(409);
     expect(again.body.code).toBe('totp_already_enrolled');
 
@@ -357,7 +388,7 @@ describe('account MFA enrollment', () => {
       .post('/api/v1/account/mfa/totp/enroll')
       .set('Cookie', cookie(session))
       .set('Origin', 'https://evil.example')
-      .send({});
+      .send({ password: userPassword });
     expect(response.status).toBe(403);
     expect(await prisma.mfaFactor.count({ where: { userId } })).toBe(0);
   });
@@ -484,6 +515,47 @@ describe('login with TOTP', () => {
     for (const event of audits) {
       expect(JSON.stringify(event.metadata)).not.toContain('000000');
     }
+  });
+
+  it('does not let concurrent guesses spend the budget more than once', async () => {
+    const userId = await createUser('login-concurrent');
+    await enrollTotp(userId);
+    const challenge = await login('login-concurrent', 'app-a');
+
+    const responses = await Promise.all(
+      Array.from({ length: MFA_CHALLENGE_MAX_ATTEMPTS * 2 }, () =>
+        verify(challenge.body.challengeToken, '000000', 'totp'),
+      ),
+    );
+
+    // Only a reserved attempt may reach the verifier, so exactly the budget is spent no
+    // matter how many requests arrive at once.
+    const audited = await prisma.auditEvent.count({
+      where: { action: 'user.mfa.failed', actorId: userId },
+    });
+    expect(audited).toBe(MFA_CHALLENGE_MAX_ATTEMPTS);
+    expect(responses.some((response) => response.status === 429)).toBe(true);
+    expect(
+      responses.filter((response) => response.status === 200),
+    ).toHaveLength(0);
+  });
+
+  it('locks the account after repeated wrong MFA codes', async () => {
+    const userId = await createUser('login-lockout');
+    await enrollTotp(userId);
+    const challenge = await login('login-lockout', 'app-a');
+
+    for (let attempt = 1; attempt <= MFA_CHALLENGE_MAX_ATTEMPTS; attempt += 1) {
+      await verify(challenge.body.challengeToken, '000000', 'totp');
+    }
+
+    const locked = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    expect(locked.lockedUntil).not.toBeNull();
+    expect(locked.lockedUntil?.getTime() ?? 0).toBeGreaterThan(Date.now());
+
+    // The password branch honours the same lock, so the account is not left half-protected.
+    const fresh = await login('login-lockout', 'app-a');
+    expect(fresh.status).toBe(401);
   });
 
   it('rejects a replayed TOTP step even with a fresh challenge', async () => {

@@ -609,11 +609,32 @@ export function registerAccountRoutes(app: FastifyInstance, options: AccountRout
     const result = await enrollTotp(options.mfa, {
       userId: auth.profile.id,
       accountName: auth.profile.email,
+      password: parsed.data.password,
       ...(parsed.data.name === undefined ? {} : { name: parsed.data.name }),
     });
     if (!result.ok) {
       if (result.reason === 'unavailable') {
         return mfaUnavailable(reply);
+      }
+      if (result.reason === 'invalid_password') {
+        return sendProblem(
+          reply,
+          400,
+          'invalid-current-password',
+          'Invalid current password',
+          'the current password is incorrect',
+          { code: 'invalid_current_password' },
+        );
+      }
+      if (result.reason === 'denied') {
+        return sendProblem(
+          reply,
+          401,
+          'unauthorized',
+          'Unauthorized',
+          'the account is no longer available',
+          { code: 'account_unavailable' },
+        );
       }
       return sendProblem(
         reply,
