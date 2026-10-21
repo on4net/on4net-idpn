@@ -31,6 +31,28 @@ export const ACCOUNT_LIFECYCLE_RATE_LIMITS = {
   resendPerUser: { windowSeconds: 3600, max: 5 },
 } as const satisfies Record<string, RateLimitPolicy>;
 
+/**
+ * Fixed response budget for the two anti-enumeration recovery endpoints. The known-address
+ * branch must not answer measurably slower than the unknown-address branch, so both answer
+ * after the same minimum time regardless of how long the mail transport takes
+ * (docs/security.md 4, T13).
+ */
+export const RECOVERY_RESPONSE_BUDGET_MS = 300;
+/**
+ * How long the response may wait for the mail transport before answering anyway. A fast
+ * transport (including tests) keeps the accurate audit outcome; a slow one is observed in the
+ * background and must never hold the response.
+ */
+export const RECOVERY_MAIL_OBSERVE_MS = 50;
+
+const sleep = (milliseconds: number): Promise<void> =>
+  new Promise((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
+
+/** Recovery outcome as recorded in audit metadata. `dispatched` = still in flight at answer. */
+type RecoveryOutcome = 'sent' | 'ignored' | 'mail_failed' | 'dispatched';
+
 export interface AccountLifecycleRoutesOptions {
   appUrl: string;
   sessions: { read(sid: string): Promise<IdpSession | null> };
@@ -179,6 +201,15 @@ export function registerAccountLifecycleRoutes(
       return invalidToken(reply, instance);
     }
 
+    // An account that already proved its mailbox and holds a password must not be reopened
+    // through a long-lived invite link (docs/auth-flows.md 8.2). The token is spent so it
+    // cannot be retried later.
+    if (purpose === 'invite' && user.passwordHash !== null && user.emailVerifiedAt !== null) {
+      await options.tokens.invalidateActive(user.id, 'invite', at);
+      await auditTokenFailure(request, 'account.invite.token_failed', 'used', user.id);
+      return invalidToken(reply, instance);
+    }
+
     // Policy failures must not burn the link: validate before the atomic consume.
     const violations = validatePassword(input.password, user);
     if (violations.length > 0) {
@@ -259,7 +290,40 @@ export function registerAccountLifecycleRoutes(
     };
   };
 
+  /**
+   * Starts a recovery mail without letting its latency reach the caller. The promise is
+   * observed for a short window so a fast transport still yields the exact audit outcome;
+   * `padToBudget` then makes the answer time independent of the branch.
+   */
+  const dispatchRecoveryMail = async (send: () => Promise<boolean>): Promise<RecoveryOutcome> =>
+    Promise.race([
+      send().then(
+        (sent): RecoveryOutcome => (sent ? 'sent' : 'ignored'),
+        (error: unknown): RecoveryOutcome => {
+          // The message body contains a token; only the transport error reaches the log.
+          const message = error instanceof Error ? error.message : 'unknown error';
+          console.error(`account recovery mail failed: ${message}`);
+          return 'mail_failed';
+        },
+      ),
+      sleep(RECOVERY_MAIL_OBSERVE_MS).then((): RecoveryOutcome => 'dispatched'),
+    ]);
+
+  /**
+   * Both recovery endpoints answer after the same minimum time, so a slow mail transport (or
+   * a membership lookup) cannot tell the caller whether the address exists. A `dispatched`
+   * send keeps running in the background; the audit row recorded at answer time says so
+   * instead of pretending the mail already went out.
+   */
+  const padToBudget = async (startedAt: number): Promise<void> => {
+    const remaining = RECOVERY_RESPONSE_BUDGET_MS - (Date.now() - startedAt);
+    if (remaining > 0) {
+      await sleep(remaining);
+    }
+  };
+
   app.post('/api/v1/account/password/forgot', async (request, reply) => {
+    const startedAt = Date.now();
     const parsed = forgotPasswordSchema.safeParse(request.body ?? {});
     if (!parsed.success) {
       return validation(reply, parsed.error, '/api/v1/account/password/forgot');
@@ -283,17 +347,10 @@ export function registerAccountLifecycleRoutes(
     }
 
     const user = await options.lifecycle.users.findByEmail(email);
-    let outcome: 'sent' | 'ignored' | 'mail_failed' = 'ignored';
-    if (user !== null) {
-      try {
-        outcome = (await options.lifecycle.sendPasswordReset(user.id)) ? 'sent' : 'ignored';
-      } catch (error) {
-        outcome = 'mail_failed';
-        // The message body contains a token; only the transport error reaches the log.
-        const message = error instanceof Error ? error.message : 'unknown error';
-        console.error(`password reset mail failed: ${message}`);
-      }
-    }
+    const outcome =
+      user === null
+        ? 'ignored'
+        : await dispatchRecoveryMail(() => options.lifecycle.sendPasswordReset(user.id));
     await audit(request, {
       action: 'account.password.reset_requested',
       actorType: 'anonymous',
@@ -302,7 +359,8 @@ export function registerAccountLifecycleRoutes(
       metadata: { outcome, email: maskAddress(email) },
     });
 
-    // Identical status and body for every address (anti-enumeration).
+    // Identical status, body and timing for every address (anti-enumeration).
+    await padToBudget(startedAt);
     return noStore(reply).code(202).send({ status: 'accepted' });
   });
 
@@ -331,6 +389,16 @@ export function registerAccountLifecycleRoutes(
       return applied;
     }
 
+    // A completed reset proves mailbox control, so any outstanding invite or verification
+    // link must not be able to set another password afterwards (finding 8).
+    const resetAt = now();
+    const staleInvites = await options.tokens.invalidateActive(applied.userId, 'invite', resetAt);
+    const staleVerifications = await options.tokens.invalidateActive(
+      applied.userId,
+      'email_verification',
+      resetAt,
+    );
+
     await audit(request, {
       action: 'account.password.reset',
       userId: applied.userId,
@@ -338,6 +406,7 @@ export function registerAccountLifecycleRoutes(
       metadata: {
         revokedSessions: applied.revokedSessions,
         revokedRefreshTokens: applied.revokedRefreshTokens,
+        invalidatedTokens: staleInvites + staleVerifications,
       },
     });
     try {
@@ -427,6 +496,7 @@ export function registerAccountLifecycleRoutes(
   });
 
   app.post('/api/v1/account/email/verification/request', async (request, reply) => {
+    const startedAt = Date.now();
     const parsed = forgotPasswordSchema.safeParse(request.body ?? {});
     if (!parsed.success) {
       return validation(reply, parsed.error, '/api/v1/account/email/verification/request');
@@ -450,16 +520,10 @@ export function registerAccountLifecycleRoutes(
     }
 
     const user = await options.lifecycle.users.findByEmail(email);
-    let outcome: 'sent' | 'ignored' | 'mail_failed' = 'ignored';
-    if (user !== null) {
-      try {
-        outcome = (await options.lifecycle.sendVerification(user.id)) ? 'sent' : 'ignored';
-      } catch (error) {
-        outcome = 'mail_failed';
-        const message = error instanceof Error ? error.message : 'unknown error';
-        console.error(`verification mail failed: ${message}`);
-      }
-    }
+    const outcome =
+      user === null
+        ? 'ignored'
+        : await dispatchRecoveryMail(() => options.lifecycle.sendVerification(user.id));
     await audit(request, {
       action: 'account.email.verification_requested',
       actorType: 'anonymous',
@@ -467,6 +531,7 @@ export function registerAccountLifecycleRoutes(
       result: outcome === 'mail_failed' ? 'failure' : 'success',
       metadata: { outcome, email: maskAddress(email) },
     });
+    await padToBudget(startedAt);
     return noStore(reply).code(202).send({ status: 'accepted' });
   });
 

@@ -10,6 +10,13 @@ export interface SessionStoreOptions {
   now?: () => Date;
   /** Called after a session is revoked so the caller can audit it (never receives tokens). */
   onRevoked?: SessionRevocationHook;
+  /**
+   * Called when a read slid the idle timeout, so the PostgreSQL mirror (admin lists, the
+   * active-session gauge) sees the same expiry as Redis. Throttled per `sid`.
+   */
+  onSlide?: (session: IdpSession) => Promise<void> | void;
+  /** Minimum seconds between two mirrored slides of one sid (default 60). */
+  slideMirrorIntervalSeconds?: number;
 }
 
 const SESSION_KEY = 'idpn:sess:';
@@ -34,12 +41,18 @@ export class RedisSessionStore implements ClientSessionRevoker {
   private readonly policy: SessionPolicy;
   private readonly now: () => Date;
   private readonly onRevoked: SessionRevocationHook | undefined;
+  private readonly onSlide: ((session: IdpSession) => Promise<void> | void) | undefined;
+  private readonly slideMirrorIntervalMs: number;
+  /** Last time each sid was mirrored, so a busy session does not write on every request. */
+  private readonly lastSlideMirrorAt = new Map<string, number>();
 
   constructor(options: SessionStoreOptions) {
     this.cache = options.cache;
     this.policy = options.policy;
     this.now = options.now ?? (() => new Date());
     this.onRevoked = options.onRevoked;
+    this.onSlide = options.onSlide;
+    this.slideMirrorIntervalMs = (options.slideMirrorIntervalSeconds ?? 60) * 1000;
   }
 
   async create(input: CreateSessionInput): Promise<IdpSession> {
@@ -91,7 +104,32 @@ export class RedisSessionStore implements ClientSessionRevoker {
       idleExpiresAt: (idleExpiresAt < absolute ? idleExpiresAt : absolute).toISOString(),
     };
     await this.persist(next);
+    await this.mirrorSlide(next);
     return next;
+  }
+
+  /**
+   * Write-behind of the idle slide into the PostgreSQL mirror. Without it the row keeps the
+   * creation-time expiry, so after one idle window the Admin API reports no active session
+   * and the `idpn_active_sessions` gauge under-counts. Throttled and best effort: a mirror
+   * failure must never fail the request that read the session.
+   */
+  private async mirrorSlide(session: IdpSession): Promise<void> {
+    if (this.onSlide === undefined) {
+      return;
+    }
+    const at = this.now().getTime();
+    const last = this.lastSlideMirrorAt.get(session.sid) ?? 0;
+    if (at - last < this.slideMirrorIntervalMs) {
+      return;
+    }
+    this.lastSlideMirrorAt.set(session.sid, at);
+    try {
+      await this.onSlide(session);
+    } catch {
+      // The mirror is derived state; the authoritative session is already in Redis.
+      this.lastSlideMirrorAt.delete(session.sid);
+    }
   }
 
   /**

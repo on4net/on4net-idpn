@@ -55,6 +55,9 @@ let adminUserId: string;
 let mailer: RecordingMailer;
 let sessions: RedisSessionStore;
 let resetTokens: ReturnType<typeof createPrismaAccountTokenStore>;
+let lifecycleUsers: ReturnType<typeof createPrismaLifecycleUserStore>;
+let passwords: ReturnType<typeof createPrismaPasswordStore>;
+let audit: ReturnType<typeof createPrismaAdminAudit>;
 
 const connectionString = (): string => connectionStringValue;
 
@@ -251,8 +254,8 @@ beforeAll(async () => {
   });
 
   mailer = new RecordingMailer();
-  const audit = createPrismaAdminAudit(prisma);
-  const lifecycleUsers = createPrismaLifecycleUserStore(prisma);
+  audit = createPrismaAdminAudit(prisma);
+  lifecycleUsers = createPrismaLifecycleUserStore(prisma);
   resetTokens = createPrismaAccountTokenStore(prisma);
   const lifecycle = createAccountLifecycle({
     users: lifecycleUsers,
@@ -261,12 +264,14 @@ beforeAll(async () => {
     links: { uiBaseUrl },
   });
   const rateLimit = createMemoryRateLimiter();
-  const passwords = createPrismaPasswordStore(prisma, { sessions });
+  passwords = createPrismaPasswordStore(prisma, { sessions });
   const rbac = createPrismaRbacRepository(prisma);
 
   app = buildServer({
     issuer,
     keys,
+    // The reference reverse proxy is the only peer; only its X-Forwarded-For is trusted.
+    trustProxy: ['127.0.0.1', '::1'],
     adminMembers: {
       adminClientId: 'admin-panel',
       permissions: createPrismaPermissionReader(prisma),
@@ -616,5 +621,117 @@ describe('password reset', () => {
     expect(unknown.body).toEqual(wrongPurpose.body);
     const stored = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
     expect(await verifyPassword(stored.passwordHash ?? '', existingPassword)).toBe(true);
+  }, 60_000);
+
+  it('invalidates an outstanding invite token after a successful reset', async () => {
+    const email = uniqueEmail('stale-invite');
+    const userId = await createUser(email);
+    // Leftover onboarding link from before the account had a password.
+    const invite = await issueAccountToken(resetTokens, { userId, purpose: 'invite' });
+    const reset = await issueAccountToken(resetTokens, { userId, purpose: 'password_reset' });
+
+    await request(app.server)
+      .post('/api/v1/account/password/reset')
+      .send({ token: reset.token, password: newPassword })
+      .expect(200);
+
+    const replay = await request(app.server)
+      .post('/api/v1/account/invite/accept')
+      .send({ token: invite.token, password: 'attacker-chosen-password' });
+    expect(replay.status).toBe(400);
+
+    const stored = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    expect(await verifyPassword(stored.passwordHash ?? '', newPassword)).toBe(true);
+  }, 60_000);
+
+  it('refuses an invite token for an account that already has a password and a verified email', async () => {
+    const email = uniqueEmail('already-onboarded');
+    const userId = await createUser(email, { emailVerifiedAt: new Date() });
+    const invite = await issueAccountToken(resetTokens, { userId, purpose: 'invite' });
+
+    const response = await request(app.server)
+      .post('/api/v1/account/invite/accept')
+      .send({ token: invite.token, password: 'attacker-chosen-password' });
+
+    expect(response.status).toBe(400);
+    const stored = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    expect(await verifyPassword(stored.passwordHash ?? '', existingPassword)).toBe(true);
+
+    // The token is spent, so a second attempt cannot succeed either.
+    await request(app.server)
+      .post('/api/v1/account/invite/accept')
+      .send({ token: invite.token, password: 'attacker-chosen-password' })
+      .expect(400);
+  }, 60_000);
+
+  it('answers the recovery endpoints within the same budget for known and unknown addresses', async () => {
+    const knownEmail = uniqueEmail('timing-known');
+    await createUser(knownEmail);
+
+    const slowMailer = {
+      async send(): Promise<void> {
+        await new Promise((resolve) => {
+          setTimeout(resolve, 1200);
+        });
+      },
+    };
+    const slowLifecycle = createAccountLifecycle({
+      users: lifecycleUsers,
+      tokens: resetTokens,
+      mailer: slowMailer,
+      links: { uiBaseUrl },
+    });
+    const slowApp = buildServer({
+      issuer,
+      keys,
+      accountLifecycle: {
+        sessions,
+        lifecycle: slowLifecycle,
+        tokens: resetTokens,
+        passwords,
+        rateLimit: createMemoryRateLimiter(),
+        audit,
+        hash: (password) => hashPassword(password, FAST_ARGON2),
+      },
+    });
+    await slowApp.ready();
+    try {
+      const measure = async (email: string): Promise<number> => {
+        const startedAt = Date.now();
+        const response = await request(slowApp.server)
+          .post('/api/v1/account/password/forgot')
+          .send({ email });
+        expect(response.status).toBe(202);
+        return Date.now() - startedAt;
+      };
+
+      const knownMs = await measure(knownEmail);
+      const unknownMs = await measure(uniqueEmail('timing-unknown'));
+
+      // The 1.2 s transport never reaches the caller: the response waits only for the budget.
+      expect(knownMs).toBeLessThan(600);
+      expect(unknownMs).toBeLessThan(600);
+      expect(Math.abs(knownMs - unknownMs)).toBeLessThan(150);
+    } finally {
+      await slowApp.close();
+    }
+  }, 60_000);
+
+  it('isolates the per-IP recovery limit by the forwarded client address', async () => {
+    const attempt = (ip: string): request.Test =>
+      request(app.server)
+        .post('/api/v1/account/password/reset')
+        .set('X-Forwarded-For', ip)
+        .send({ token: 'b'.repeat(43), password: newPassword });
+
+    const statuses: number[] = [];
+    for (let index = 0; index < 20; index += 1) {
+      statuses.push((await attempt('203.0.113.9')).status);
+    }
+    expect(new Set(statuses)).toEqual(new Set([400]));
+    expect((await attempt('203.0.113.9')).status).toBe(429);
+
+    // A different client behind the same trusted proxy keeps its own bucket.
+    expect((await attempt('203.0.113.10')).status).toBe(400);
   }, 60_000);
 });

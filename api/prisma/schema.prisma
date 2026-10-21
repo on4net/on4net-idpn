@@ -290,7 +290,9 @@ model AccountToken {
   consumedAt DateTime?           @map("consumed_at") @db.Timestamptz(6)
   createdAt  DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+  // Cascade: lifecycle tokens are derived from the user and must never block a hard delete
+  // (docs/domain-model.md 4). Retention is enforced by the scheduled purge.
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, purpose, consumedAt])
   @@index([expiresAt])

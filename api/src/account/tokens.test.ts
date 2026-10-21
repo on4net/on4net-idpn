@@ -67,11 +67,62 @@ function memoryStore(): AccountTokenStore & { rows: StoredToken[] } {
       row.consumedAt = at;
       return { ok: true, userId: row.userId };
     },
+    async purge({ now, retainDays }) {
+      const cutoff = new Date(now.getTime() - (retainDays ?? 30) * 24 * 60 * 60 * 1000);
+      const before = rows.length;
+      for (let index = rows.length - 1; index >= 0; index -= 1) {
+        const row = rows[index]!;
+        if (
+          (row.consumedAt !== null && row.consumedAt.getTime() < cutoff.getTime()) ||
+          row.expiresAt.getTime() < cutoff.getTime()
+        ) {
+          rows.splice(index, 1);
+        }
+      }
+      return before - rows.length;
+    },
   };
 }
 
 const at = new Date('2026-10-19T10:00:00.000Z');
 const later = (ms: number): Date => new Date(at.getTime() + ms);
+
+describe('account token retention', () => {
+  it('purges consumed and long-expired tokens but keeps live ones', async () => {
+    const store = memoryStore();
+    const live = await issueAccountToken(store, { userId: 'user-1', purpose: 'password_reset' }, () => at);
+
+    const oldConsumed = await issueAccountToken(store, { userId: 'user-1', purpose: 'invite' }, () => at);
+    const consumedToken = store.rows.find((row) => row.tokenHash === hashOpaqueToken(oldConsumed.token));
+    consumedToken!.consumedAt = new Date('2026-08-01T00:00:00.000Z');
+
+    const longExpired = await issueAccountToken(
+      store,
+      { userId: 'user-2', purpose: 'email_verification' },
+      () => new Date('2026-08-01T00:00:00.000Z'),
+    );
+
+    const deleted = await store.purge({ now: at, retainDays: 30 });
+
+    expect(deleted).toBe(2);
+    expect(store.rows.map((row) => row.tokenHash)).toEqual([hashOpaqueToken(live.token)]);
+    expect(store.rows.some((row) => row.tokenHash === hashOpaqueToken(longExpired.token))).toBe(
+      false,
+    );
+  });
+
+  it('keeps a token that expired inside the retention window', async () => {
+    const store = memoryStore();
+    const issued = await issueAccountToken(
+      store,
+      { userId: 'user-1', purpose: 'password_reset' },
+      () => new Date(at.getTime() - 31 * 60 * 1000),
+    );
+
+    expect(await store.purge({ now: at, retainDays: 30 })).toBe(0);
+    expect(store.rows.some((row) => row.tokenHash === hashOpaqueToken(issued.token))).toBe(true);
+  });
+});
 
 describe('account token lifecycle', () => {
   it('stores only the hash and never the emailed token', async () => {

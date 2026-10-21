@@ -4,6 +4,7 @@ import {
   sanitizeIdpnTheme,
 } from '@idpn/contracts/theme';
 import { z } from 'zod';
+import { isSafeTarget as safeTarget } from '../src/security/targets.ts';
 import type {
   IdpnDirection,
   IdpnEventHandler,
@@ -34,11 +35,10 @@ const LOCALE_PATTERN = /^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$/;
 
 /**
  * Redirect targets and API bases must be an absolute http(s) URL or a same-origin path.
- * Protocol-relative `//host` and `javascript:` values are rejected so config cannot be
- * turned into an open redirect.
+ * Protocol-relative `//host`, `/\host` (a browser reads the backslash as `/`) and
+ * `javascript:` values are rejected so config cannot be turned into an open redirect.
  */
-const isSafeTarget = (value: string): boolean =>
-  (value.startsWith('/') && !value.startsWith('//')) || /^https?:\/\/[^\s/]+/i.test(value);
+const isSafeTarget = (value: string): boolean => safeTarget(value);
 
 export type HostModuleSelection = IdpnMfeModule | 'all';
 

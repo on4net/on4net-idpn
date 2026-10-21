@@ -281,6 +281,9 @@ https://auth.example.com/oauth2/social/{clientId}/{provider}/callback
 ## 12. امنیت MFE
 
 - Remote فقط از Origin مورد اعتماد بارگذاری می‌شود (CSP `script-src` و `connect-src`).
+- `IDPN_REMOTE_ENTRY` قبل از ساخت Config اعتبارسنجی می‌شود: یا مسیر same-origin با یک `/` ابتدایی، یا URL با `https` که Origin آن در `IDPN_REMOTE_ORIGINS` Allowlist شده باشد؛ در غیر این صورت Build/Dev Server با خطای صریح متوقف می‌شود. فقط همان Origin در CSP مجاز می‌شود.
+- مسیرهای `/api` و `/auth` از میزبان پراکسی می‌شوند (`IDPN_IDP_ORIGIN`)، بنابراین کوکی BFF first-party می‌ماند و فراخوانی‌های `/auth/*` بومی ۴۰۴ نمی‌شوند.
+- مقادیر `api-base` و `loginUrl` با یک قاعده مشترک (`isSafeTarget`) بررسی می‌شوند: `//host`، `/\host` و `\\host` (که مرورگر مانند `//` تفسیر می‌کند) رد می‌شوند.
 - فرم رمز یا دکمه سوشال داخل دامنه اپ ساخته نمی‌شود؛ ورود فقط با Redirect سطح‌بالا به Hosted Auth UI انجام می‌شود.
 - هیچ توکنی در `localStorage` یا رویدادهای MFE قرار نمی‌گیرد.
 - در حالت BFF، MFE فقط با Cookie نشست اپ و Endpointهای `/auth/*` کار می‌کند.

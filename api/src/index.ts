@@ -29,6 +29,7 @@ import { GoogleSocialAdapter } from './social/google.js';
 import { createPrismaEffectiveAccessSource } from './oidc/effective-access.js';
 import {
   BackchannelLogoutDispatcher,
+  BackchannelLogoutQueueDrainer,
   BACKCHANNEL_LOGOUT_QUEUE_KEY,
   FetchBackchannelLogoutSender,
   RedisBackchannelLogoutQueue,
@@ -66,6 +67,7 @@ import { DependencyMonitor } from './observability/health.js';
 import { sanitizeLogMessage } from './observability/logging.js';
 import { ApiMetrics } from './observability/metrics.js';
 import { createPrismaSessionRevocationHook } from './session/prisma-revocation.js';
+import { createPrismaSessionSlideMirror } from './session/prisma-slide.js';
 import { RedisSessionCache } from './session/redis-cache.js';
 import { RedisSessionStore } from './session/store.js';
 
@@ -155,6 +157,9 @@ const sessions = new RedisSessionStore({
   // Automatic revocations (currently the concurrent-session limit) are mirrored and
   // audited here; explicit admin/logout/password revocations are audited by their route.
   onRevoked: createPrismaSessionRevocationHook(prisma),
+  // The idle slide is write-behind so the admin list and the active-session gauge see the
+  // real expiry instead of the creation-time one (throttled per sid inside the store).
+  onSlide: createPrismaSessionSlideMirror(prisma),
 });
 
 const clientsRepository = createPrismaClientRepository(prisma);
@@ -292,6 +297,9 @@ const app = buildServer({
   issuer: env.APP_URL,
   keys,
   logLevel: env.LOG_LEVEL,
+  // Only a peer inside these ranges may set X-Forwarded-For; without it every client behind
+  // the reference Caddy shares one per-IP rate-limit bucket (docs/security.md 4).
+  trustProxy: env.TRUSTED_PROXY_CIDRS.length > 0 ? env.TRUSTED_PROXY_CIDRS : false,
   readiness: dependencyMonitor,
   ...(env.METRICS_ENABLED
     ? {
@@ -582,9 +590,57 @@ const keyRotationScheduler = new KeyRotationScheduler({
 });
 keyRotationScheduler.start();
 
+/**
+ * Drains the durable back-channel logout queue (docs/auth-flows.md 6.3). The worker issues a
+ * fresh Logout Token per attempt, keeps in-flight entries in a separate list so a crash does
+ * not lose them, and dead-letters an entry after `maxAttempts`.
+ */
+const backchannelQueueDrainer = new BackchannelLogoutQueueDrainer({
+  redis,
+  tokens: new LogoutTokenSigner({
+    issuer: env.APP_URL,
+    keys,
+    registry: new RedisLogoutTokenJtiRegistry(redis),
+  }),
+  sender: new FetchBackchannelLogoutSender(),
+  onDelivery: (delivery) => metrics.recordBackchannelDelivery(delivery.status),
+  onError: (error, context) => {
+    logError(
+      { component: 'backchannel-logout', clientId: context.clientId, phase: context.phase },
+      `back-channel logout retry failed: ${sanitizeLogMessage(error)}`,
+    );
+  },
+});
+const backchannelQueueTimer = setInterval(() => {
+  void backchannelQueueDrainer.drainOnce().catch((error: unknown) => {
+    logWarning(
+      { component: 'backchannel-logout', phase: 'drain' },
+      `queue drain failed: ${sanitizeLogMessage(error)}`,
+    );
+  });
+}, 15_000);
+backchannelQueueTimer.unref();
+
+/**
+ * Retention for account lifecycle tokens: consumed and long-expired invite/verification/reset
+ * rows are deleted hourly, so the table keeps the `expires_at` index meaningful instead of
+ * growing forever (docs/domain-model.md 4).
+ */
+const accountTokenPurgeTimer = setInterval(() => {
+  void accountTokens.purge({ now: new Date() }).catch((error: unknown) => {
+    logWarning(
+      { component: 'account-tokens', phase: 'purge' },
+      `token purge failed: ${sanitizeLogMessage(error)}`,
+    );
+  });
+}, 60 * 60 * 1000);
+accountTokenPurgeTimer.unref();
+
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.once(signal, () => {
     keyRotationScheduler.stop();
+    clearInterval(backchannelQueueTimer);
+    clearInterval(accountTokenPurgeTimer);
     void app
       .close()
       .then(() => prisma.$disconnect())

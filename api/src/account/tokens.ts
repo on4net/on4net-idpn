@@ -39,6 +39,11 @@ export interface AccountTokenStore {
     at: Date,
     expectedUserId?: string,
   ): Promise<TokenConsumption>;
+  /**
+   * Deletes tokens that were consumed or expired longer than the retention window ago, so the
+   * table cannot grow without bound (and a hard user delete is not blocked by old rows).
+   */
+  purge(input: { now: Date; retainDays?: number }): Promise<number>;
 }
 
 export type TokenFailure = 'invalid' | 'expired' | 'used' | 'wrong_user';
@@ -50,6 +55,9 @@ export interface IssuedAccountToken {
   token: string;
   expiresAt: Date;
 }
+
+/** Default retention for consumed/expired account tokens (docs/domain-model.md 4). */
+export const ACCOUNT_TOKEN_RETENTION_DAYS = 30;
 
 export async function issueAccountToken(
   store: AccountTokenStore,

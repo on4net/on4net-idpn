@@ -130,6 +130,11 @@ export interface BuildServerOptions {
   account?: Omit<AccountRoutesOptions, 'appUrl'>;
   /** Mounts invite acceptance, email verification and password reset (docs/auth-flows.md 8). */
   accountLifecycle?: Omit<AccountLifecycleRoutesOptions, 'appUrl'>;
+  /**
+   * Reverse proxies whose `X-Forwarded-For` may be trusted (CIDR list). `request.ip` is the
+   * proxy address without it, so every per-IP limit would share one bucket.
+   */
+  trustProxy?: boolean | string | string[];
 }
 
 /**
@@ -140,6 +145,11 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   const app = Fastify({
     logger: options.logLevel === undefined ? false : buildLoggerOptions(options.logLevel),
     genReqId: (request) => sanitizeRequestId(request.headers['x-request-id']) ?? randomUUID(),
+    // Behind the reference reverse proxy every request shares the proxy's address unless the
+    // trusted CIDRs are declared, which collapses every per-IP rate-limit bucket into one and
+    // makes the audited `ip` useless (docs/security.md 4). Only a peer inside the configured
+    // ranges may set `X-Forwarded-For`.
+    trustProxy: options.trustProxy ?? false,
   });
   const issuer = options.issuer ?? 'http://127.0.0.1:3000';
   const keys = options.keys ?? new SigningKeyManager(new MemorySigningKeyRepository());

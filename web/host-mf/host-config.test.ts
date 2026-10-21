@@ -125,6 +125,8 @@ describe('parseHostConfig', () => {
     ['javascript:alert(1)', 'JAVASCRIPT'],
     ['//evil.example.com/authorize', 'PROTOCOL_RELATIVE'],
     ['auth', 'RELATIVE_WITHOUT_SLASH'],
+    ['/\\evil.example.com/authorize', 'BACKSLASH'],
+    ['\\\\evil.example.com/authorize', 'BACKSLASH'],
   ])('rejects an unsafe login URL (%s)', (loginUrl, _reason) => {
     const issues = issuesOf({ ...baseEnv, VITE_IDPN_LOGIN_URL: loginUrl });
     expect(issues).toEqual([

@@ -72,6 +72,9 @@ function fakeTokens(): AccountTokenStore {
     async consume() {
       return { ok: false, reason: 'invalid' };
     },
+    async purge() {
+      return 0;
+    },
   };
 }
 

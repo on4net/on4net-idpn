@@ -133,6 +133,24 @@ describe('IdpnUserManagementElement', () => {
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain('limit=5');
   });
 
+  it('ignores a protocol-relative or backslash api-base', async () => {
+    for (const apiBase of ['//evil.example.com/api', '/\\evil.example.com/api', '\\\\evil.example.com']) {
+      fetchMock.mockClear();
+      const element = mount({ 'api-base': apiBase });
+      await waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThan(0));
+      for (const url of requestedUrls()) {
+        expect(url.startsWith('/api/')).toBe(true);
+      }
+      element.remove();
+    }
+  });
+
+  it('honours a same-origin api-base', async () => {
+    mount({ 'api-base': '/auth' });
+    await waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThan(0));
+    expect(requestedUrls()[0]).toContain('/auth/api/v1/clients/app-a/members');
+  });
+
   it('resolves the locale against the host locales config and sets lang/dir on the element', async () => {
     const element = mount({ locale: 'de-DE' });
     element.locales = {

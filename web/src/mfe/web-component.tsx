@@ -7,6 +7,7 @@ import {
 import { createRoot, type Root } from 'react-dom/client';
 
 import { isDirection, resolveDirection, resolveLocale, translate } from '@/i18n';
+import { isSafeTarget } from '@/security/targets.ts';
 
 import { AccountRoot, type AccountEvent } from './account';
 import { UserManagementRoot, type UserManagementEvent } from './user-management';
@@ -161,6 +162,25 @@ export class IdpnMfeElement extends HTMLElement {
     this.renderModule();
   }
 
+  /**
+   * `api-base` is host configuration but it is still an attribute, so it is validated like the
+   * host's own targets: an absolute `http(s)` URL or a same-origin path with a single leading
+   * slash. `\\`, `/\\` and `//` are protocol-relative tricks and fall back to same-origin
+   * instead of sending the session cookie elsewhere.
+   */
+  private resolveApiBase(): string | undefined {
+    const value = this.getAttribute('api-base');
+    if (value === null || value.trim() === '') {
+      return undefined;
+    }
+    const trimmed = value.trim();
+    if (!isSafeTarget(trimmed)) {
+      console.warn('[idpn-mfe] ignoring an unsafe api-base attribute');
+      return undefined;
+    }
+    return trimmed;
+  }
+
   private renderModule(): void {
     if (this.root === null) {
       return;
@@ -200,7 +220,7 @@ export class IdpnMfeElement extends HTMLElement {
       return;
     }
 
-    const apiBaseUrl = this.getAttribute('api-base') ?? undefined;
+    const apiBaseUrl = this.resolveApiBase();
     const theme = this.theme;
     const locales = this.localesConfig;
     const onEvent = this.deliverEvent;

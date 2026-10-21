@@ -14,8 +14,10 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import type { AuditEventInput } from '../src/audit/sanitize.js';
 import {
+  BACKCHANNEL_LOGOUT_INFLIGHT_KEY,
   BACKCHANNEL_LOGOUT_QUEUE_KEY,
   BackchannelLogoutDispatcher,
+  BackchannelLogoutQueueDrainer,
   RedisBackchannelLogoutQueue,
   type BackchannelDelivery,
   type BackchannelLogoutNotifyInput,
@@ -643,22 +645,17 @@ describe('back-channel logout delivery', () => {
 
     const queued = await redis.lrange(BACKCHANNEL_LOGOUT_QUEUE_KEY, 0, -1);
     expect(queued).toHaveLength(1);
-    const entry = JSON.parse(queued[0] ?? '{}') as {
-      clientId: string;
-      sid: string;
-      uri: string;
-      logoutToken: string;
-      attempts: number;
-    };
+    const entry = JSON.parse(queued[0] ?? '{}') as Record<string, unknown>;
     expect(entry).toMatchObject({
       clientId: clientA.clientId,
       sid: session.sid,
       uri: clientA.backchannelLogoutUri,
       attempts: 3,
     });
-    await expect(
-      keys.verify(entry.logoutToken, { issuer, audience: clientA.clientId }),
-    ).resolves.toMatchObject({ sid: session.sid, aud: clientA.clientId });
+    // Only identifiers are queued: a Logout Token lives 120 s and is signed material, so the
+    // drain worker re-issues it instead of persisting a dead token in Redis.
+    expect(entry['logoutToken']).toBeUndefined();
+    expect(entry['sub']).toEqual(expect.any(String));
 
     await expect(sessions.read(session.sid)).resolves.toBeNull();
     expect(audits.find((event) => event.action === 'session.logout')?.metadata).toMatchObject({
@@ -678,6 +675,37 @@ describe('back-channel logout delivery', () => {
     expect(deliveries).toEqual([{ clientId: clientA.clientId, status: 'delivered', attempts: 3 }]);
     expect(tokensFor(clientA.backchannelLogoutUri ?? '')).toHaveLength(3);
     expect(await redis.llen(BACKCHANNEL_LOGOUT_QUEUE_KEY)).toBe(0);
+  });
+
+  it('drains a queued entry with a freshly issued token', async () => {
+    const session = await createSession(clientA);
+    // A previous process could only persist the identifiers; the token was never stored.
+    await redis.lpush(
+      BACKCHANNEL_LOGOUT_QUEUE_KEY,
+      JSON.stringify({
+        clientId: clientA.clientId,
+        sid: session.sid,
+        uri: clientA.backchannelLogoutUri,
+        attempts: 3,
+        queuedAt: new Date().toISOString(),
+      }),
+    );
+
+    const drainer = new BackchannelLogoutQueueDrainer({
+      redis,
+      tokens: signer,
+      sender,
+    });
+
+    expect(await drainer.drainOnce()).toBe(1);
+    expect(await redis.llen(BACKCHANNEL_LOGOUT_QUEUE_KEY)).toBe(0);
+    expect(await redis.llen(BACKCHANNEL_LOGOUT_INFLIGHT_KEY)).toBe(0);
+
+    const delivered = tokensFor(clientA.backchannelLogoutUri ?? '').at(-1);
+    expect(delivered).toBeDefined();
+    await expect(
+      keys.verify(delivered!, { issuer, audience: clientA.clientId }),
+    ).resolves.toMatchObject({ sid: session.sid, aud: clientA.clientId });
   });
 
   it('notifies clients that only hold an authorization code for the session', async () => {

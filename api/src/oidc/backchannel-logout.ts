@@ -1,10 +1,18 @@
 import { lookup } from 'node:dns/promises';
+import { request as httpRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
 import { isIP } from 'node:net';
 
 import type { IssueLogoutTokenInput } from './logout-token.js';
 
 /** Durable fallback queue drained by the retry worker (docs/roadmap.md phase 3). */
 export const BACKCHANNEL_LOGOUT_QUEUE_KEY = 'idpn:logout-queue';
+/** Entries that exhausted their attempts; kept for operators, never redelivered. */
+export const BACKCHANNEL_LOGOUT_DEAD_LETTER_KEY = 'idpn:logout-queue:dead';
+/** One in-flight list so a crashed worker cannot lose an entry (BLMOVE target). */
+export const BACKCHANNEL_LOGOUT_INFLIGHT_KEY = 'idpn:logout-queue:inflight';
+/** Hard cap so a permanently failing client cannot grow the list without bound. */
+export const BACKCHANNEL_LOGOUT_QUEUE_MAX = 1000;
 
 /** One client that took part in the session and therefore must learn about the logout. */
 export interface BackchannelLogoutParticipant {
@@ -31,13 +39,20 @@ export interface BackchannelLogoutSender {
   send(uri: string, logoutToken: string): Promise<void>;
 }
 
+/**
+ * A queued delivery stores the identifiers, never the token: a Logout Token lives 120 s, so
+ * the drain worker issues a fresh one per attempt (docs/auth-flows.md 6.3). Keeping the
+ * token out of Redis also keeps signed token material and `sub` out of the list payload.
+ */
 export interface QueuedBackchannelLogout {
   clientId: string;
   sid: string;
+  sub?: string;
   uri: string;
-  logoutToken: string;
   attempts: number;
   queuedAt: string;
+  /** Earliest time the drain worker may retry; absent means "now". */
+  nextAttemptAt?: string;
 }
 
 export interface BackchannelLogoutQueue {
@@ -47,6 +62,7 @@ export interface BackchannelLogoutQueue {
 /** Subset of the Redis client used for the durable queue. */
 export interface RedisListClient {
   lpush(key: string, value: string): Promise<number>;
+  ltrim?(key: string, start: number, stop: number): Promise<unknown>;
 }
 
 export class RedisBackchannelLogoutQueue implements BackchannelLogoutQueue {
@@ -54,6 +70,8 @@ export class RedisBackchannelLogoutQueue implements BackchannelLogoutQueue {
 
   async push(entry: QueuedBackchannelLogout): Promise<void> {
     await this.redis.lpush(BACKCHANNEL_LOGOUT_QUEUE_KEY, JSON.stringify(entry));
+    // Bounded list: the oldest entries fall off instead of growing forever.
+    await this.redis.ltrim?.(BACKCHANNEL_LOGOUT_QUEUE_KEY, 0, BACKCHANNEL_LOGOUT_QUEUE_MAX - 1);
   }
 }
 
@@ -155,8 +173,8 @@ export class BackchannelLogoutDispatcher {
       await this.options.queue.push({
         clientId: participant.clientId,
         sid: input.sid,
+        ...(input.sub === undefined ? {} : { sub: input.sub }),
         uri,
-        logoutToken: token,
         attempts,
         queuedAt: this.now().toISOString(),
       });
@@ -168,7 +186,20 @@ export class BackchannelLogoutDispatcher {
   }
 }
 
-const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
+
+/**
+ * `new URL('https://[::1]/x').hostname` keeps the brackets, so `net.isIP` reports 0 and the
+ * private-address rules silently skip every IPv6 literal. Classification always runs on the
+ * bare address.
+ */
+export function stripBrackets(hostname: string): string {
+  return hostname.startsWith('[') && hostname.endsWith(']') ? hostname.slice(1, -1) : hostname;
+}
+
+export function isLoopbackHostname(hostname: string): boolean {
+  return LOOPBACK_HOSTS.has(stripBrackets(hostname).toLowerCase());
+}
 
 /** Reserved/private address ranges that must never receive a Logout Token (T17 SSRF). */
 export function isPrivateAddress(address: string): boolean {
@@ -221,12 +252,12 @@ export function assertBackchannelLogoutUri(uri: string): URL {
     throw new Error('back-channel logout URI must not contain a fragment');
   }
   if (url.protocol === 'https:') {
-    if (isPrivateAddress(url.hostname)) {
+    if (isPrivateAddress(stripBrackets(url.hostname))) {
       throw new Error('back-channel logout URI must not target a private address');
     }
     return url;
   }
-  if (url.protocol === 'http:' && LOOPBACK_HOSTS.has(url.hostname)) {
+  if (url.protocol === 'http:' && isLoopbackHostname(url.hostname)) {
     return url;
   }
   throw new Error('back-channel logout URI must use https');
@@ -239,10 +270,54 @@ const defaultHostResolver: HostResolver = async (hostname) => {
   return addresses.map((entry) => entry.address);
 };
 
-export type FetchLike = typeof fetch;
+/**
+ * Transport that posts the form body over a connection pinned to a validated address.
+ * `address`/`family` come from the SSRF check, so the transport must not resolve the
+ * hostname again (that is exactly the rebinding window this contract closes).
+ */
+export type BackchannelHttpTransport = (
+  url: URL,
+  body: string,
+  options: { timeoutMs: number; address: string; family: 4 | 6 },
+) => Promise<{ status: number }>;
+
+const defaultTransport: BackchannelHttpTransport = (url, body, options) =>
+  new Promise((resolve, reject) => {
+    const request = url.protocol === 'https:' ? httpsRequest : httpRequest;
+    const hostname = stripBrackets(url.hostname);
+    const request_ = request(
+      {
+        method: 'POST',
+        protocol: url.protocol,
+        hostname,
+        ...(url.port === '' ? {} : { port: Number(url.port) }),
+        path: `${url.pathname}${url.search}`,
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Cache-Control': 'no-store',
+          'Content-Length': String(Buffer.byteLength(body)),
+        },
+        timeout: options.timeoutMs,
+        // The only resolution the request performs: the address that was validated a moment
+        // ago. A DNS answer that changes in between cannot steer the token anywhere else.
+        lookup: (_host, _options, callback) => {
+          callback(null, options.address, options.family);
+        },
+        ...(url.protocol === 'https:' ? { servername: hostname } : {}),
+      },
+      (response) => {
+        response.resume();
+        resolve({ status: response.statusCode ?? 0 });
+      },
+    );
+    request_.on('timeout', () => request_.destroy(new Error('back-channel logout timed out')));
+    request_.on('error', reject);
+    request_.end(body);
+  });
 
 export interface FetchBackchannelLogoutSenderOptions {
-  fetchImpl?: FetchLike;
+  /** Network transport; tests inject a fake, production uses the pinned default. */
+  transport?: BackchannelHttpTransport;
   timeoutMs?: number;
   resolveHost?: HostResolver;
 }
@@ -252,40 +327,225 @@ export interface FetchBackchannelLogoutSenderOptions {
  *
  * The destination is a registered client URL, but it is re-checked at send time (scheme,
  * credentials, wildcards and private address resolution) because registration data can
- * change and DNS can point at internal infrastructure.
+ * change and DNS can point at internal infrastructure. The connection is then pinned to the
+ * address that passed the check, so a resolver that changes its answer between the check and
+ * the request (DNS rebinding, T17) cannot reach an internal host.
  */
 export class FetchBackchannelLogoutSender implements BackchannelLogoutSender {
-  private readonly fetchImpl: FetchLike;
+  private readonly transport: BackchannelHttpTransport;
   private readonly timeoutMs: number;
   private readonly resolveHost: HostResolver;
 
   constructor(options: FetchBackchannelLogoutSenderOptions = {}) {
-    this.fetchImpl = options.fetchImpl ?? fetch;
+    this.transport = options.transport ?? defaultTransport;
     this.timeoutMs = options.timeoutMs ?? 5000;
     this.resolveHost = options.resolveHost ?? defaultHostResolver;
   }
 
   async send(uri: string, logoutToken: string): Promise<void> {
     const url = assertBackchannelLogoutUri(uri);
-    if (isIP(url.hostname) === 0 && !LOOPBACK_HOSTS.has(url.hostname)) {
-      const addresses = await this.resolveHost(url.hostname);
-      if (addresses.some((address) => isPrivateAddress(address))) {
-        throw new Error('back-channel logout host resolves to a private address');
-      }
-    }
-
-    const response = await this.fetchImpl(uri, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Cache-Control': 'no-store',
-      },
-      body: new URLSearchParams({ logout_token: logoutToken }).toString(),
-      redirect: 'error',
-      signal: AbortSignal.timeout(this.timeoutMs),
+    const pinned = await this.pinnedTarget(url);
+    const body = new URLSearchParams({ logout_token: logoutToken }).toString();
+    const { status } = await this.transport(url, body, {
+      timeoutMs: this.timeoutMs,
+      ...pinned,
     });
-    if (!response.ok) {
-      throw new Error(`back-channel logout failed with status ${response.status}`);
+    if (status < 200 || status >= 300) {
+      throw new Error(`back-channel logout failed with status ${status}`);
     }
   }
+
+  /** Resolves the destination once, rejects private answers and returns the pinned address. */
+  private async pinnedTarget(url: URL): Promise<{ address: string; family: 4 | 6 }> {
+    const host = stripBrackets(url.hostname);
+    const literal = isIP(host);
+    if (literal === 4 || literal === 6) {
+      // `assertBackchannelLogoutUri` already rejected private literals (including `[::1]`).
+      return { address: host, family: literal };
+    }
+
+    const addresses = await this.resolveHost(host);
+    if (addresses.length === 0) {
+      throw new Error('back-channel logout host did not resolve');
+    }
+    const loopback = url.protocol === 'http:' && isLoopbackHostname(host);
+    if (!loopback && addresses.some((address) => isPrivateAddress(address))) {
+      throw new Error('back-channel logout host resolves to a private address');
+    }
+    const chosen = addresses[0] ?? '';
+    const family = isIP(chosen);
+    if (family !== 4 && family !== 6) {
+      throw new Error('back-channel logout host resolved to a non-IP address');
+    }
+    return { address: chosen, family };
+  }
+}
+
+/** Subset of the Redis client the drain worker needs (BLMOVE keeps the entry safe). */
+export interface RedisQueueDrainClient extends RedisListClient {
+  blmove(
+    source: string,
+    destination: string,
+    from: 'LEFT' | 'RIGHT',
+    to: 'LEFT' | 'RIGHT',
+    timeoutSeconds: number,
+  ): Promise<string | null>;
+  lrem(key: string, count: number, value: string): Promise<number>;
+}
+
+export interface BackchannelLogoutQueueDrainerOptions {
+  redis: RedisQueueDrainClient;
+  tokens: LogoutTokenSource;
+  sender: BackchannelLogoutSender;
+  /** Attempts recorded on the entry plus the worker's own; 5 by default. */
+  maxAttempts?: number;
+  /** Entries moved per `drainOnce` call. */
+  batchSize?: number;
+  /** Seconds BLMOVE waits for an entry; 1 by default. */
+  blockSeconds?: number;
+  /** Backoff for the next worker attempt. */
+  retryDelayMs?: readonly number[];
+  now?: () => Date;
+  onError?: (
+    error: unknown,
+    context: { clientId: string; phase: 'issue' | 'send' | 'queue' },
+  ) => void;
+  onDelivery?: (delivery: BackchannelDelivery) => void;
+}
+
+/**
+ * Drains the durable queue (finding: the queue had no consumer, so a failed delivery was
+ * never retried and the list grew without bound while holding signed tokens and `sub`).
+ *
+ * - `BLMOVE` moves an entry to an in-flight list, so a worker crash cannot lose it.
+ * - A fresh Logout Token is issued per attempt: queued tokens live 120 s and would be dead
+ *   by the time the worker runs, which is why the payload carries identifiers only.
+ * - After `maxAttempts` the entry moves to the dead-letter list instead of cycling forever.
+ */
+export class BackchannelLogoutQueueDrainer {
+  private readonly maxAttempts: number;
+  private readonly batchSize: number;
+  private readonly blockSeconds: number;
+  private readonly retryDelayMs: readonly number[];
+  private readonly now: () => Date;
+
+  constructor(private readonly options: BackchannelLogoutQueueDrainerOptions) {
+    this.maxAttempts = options.maxAttempts ?? 5;
+    this.batchSize = options.batchSize ?? 10;
+    this.blockSeconds = options.blockSeconds ?? 1;
+    this.retryDelayMs = options.retryDelayMs ?? [60, 300, 900, 3600];
+    this.now = options.now ?? (() => new Date());
+  }
+
+  /** Moves up to `batchSize` entries; returns how many were attempted. */
+  async drainOnce(): Promise<number> {
+    let processed = 0;
+    for (let index = 0; index < this.batchSize; index += 1) {
+      const raw = await this.options.redis.blmove(
+        BACKCHANNEL_LOGOUT_QUEUE_KEY,
+        BACKCHANNEL_LOGOUT_INFLIGHT_KEY,
+        'RIGHT',
+        'LEFT',
+        this.blockSeconds,
+      );
+      if (raw === null) {
+        break;
+      }
+      processed += 1;
+      await this.attempt(raw);
+    }
+    return processed;
+  }
+
+  private async attempt(raw: string): Promise<void> {
+    let entry: QueuedBackchannelLogout;
+    try {
+      entry = parseQueuedEntry(raw);
+    } catch (error) {
+      // Not a valid entry: park it instead of retrying it forever.
+      await this.options.redis.lrem(BACKCHANNEL_LOGOUT_INFLIGHT_KEY, 1, raw);
+      await this.options.redis.lpush(
+        BACKCHANNEL_LOGOUT_DEAD_LETTER_KEY,
+        JSON.stringify({ raw, reason: 'malformed', deadAt: this.now().toISOString() }),
+      );
+      this.options.onError?.(error, { clientId: '', phase: 'queue' });
+      return;
+    }
+
+    const dueAt = entry.nextAttemptAt === undefined ? 0 : Date.parse(entry.nextAttemptAt);
+    if (Number.isFinite(dueAt) && dueAt > this.now().getTime()) {
+      // Not due yet: take it off the in-flight list without spending an attempt.
+      await this.options.redis.lrem(BACKCHANNEL_LOGOUT_INFLIGHT_KEY, 1, raw);
+      await this.options.redis.lpush(BACKCHANNEL_LOGOUT_QUEUE_KEY, raw);
+      return;
+    }
+
+    const attempts = entry.attempts + 1;
+    let outcome: 'delivered' | 'failed' = 'failed';
+    try {
+      const token = await this.options.tokens.issue({
+        clientId: entry.clientId,
+        sid: entry.sid,
+        ...(entry.sub === undefined ? {} : { sub: entry.sub }),
+      });
+      await this.options.sender.send(entry.uri, token);
+      outcome = 'delivered';
+    } catch (error) {
+      this.options.onError?.(error, {
+        clientId: entry.clientId,
+        phase: error instanceof Error && error.message.includes('issue') ? 'issue' : 'send',
+      });
+    }
+
+    await this.options.redis.lrem(BACKCHANNEL_LOGOUT_INFLIGHT_KEY, 1, raw);
+    if (outcome === 'delivered') {
+      this.options.onDelivery?.({ clientId: entry.clientId, status: 'delivered', attempts });
+      return;
+    }
+
+    if (attempts >= this.maxAttempts) {
+      await this.options.redis.lpush(
+        BACKCHANNEL_LOGOUT_DEAD_LETTER_KEY,
+        JSON.stringify({ ...entry, attempts, deadAt: this.now().toISOString() }),
+      );
+      this.options.onDelivery?.({ clientId: entry.clientId, status: 'failed', attempts });
+      return;
+    }
+
+    const delay = this.retryDelayMs[attempts - 1] ?? this.retryDelayMs.at(-1) ?? 60;
+    await this.options.redis.lpush(
+      BACKCHANNEL_LOGOUT_QUEUE_KEY,
+      JSON.stringify({
+        ...entry,
+        attempts,
+        nextAttemptAt: new Date(this.now().getTime() + delay * 1000).toISOString(),
+      }),
+    );
+    this.options.onDelivery?.({ clientId: entry.clientId, status: 'queued', attempts });
+  }
+}
+
+function parseQueuedEntry(raw: string): QueuedBackchannelLogout {
+  const parsed = JSON.parse(raw) as Partial<QueuedBackchannelLogout>;
+  if (
+    typeof parsed.clientId !== 'string' ||
+    parsed.clientId === '' ||
+    typeof parsed.sid !== 'string' ||
+    parsed.sid === '' ||
+    typeof parsed.uri !== 'string' ||
+    parsed.uri === '' ||
+    typeof parsed.attempts !== 'number' ||
+    typeof parsed.queuedAt !== 'string'
+  ) {
+    throw new Error('queued back-channel logout entry is malformed');
+  }
+  return {
+    clientId: parsed.clientId,
+    sid: parsed.sid,
+    uri: parsed.uri,
+    attempts: parsed.attempts,
+    queuedAt: parsed.queuedAt,
+    ...(typeof parsed.sub === 'string' ? { sub: parsed.sub } : {}),
+    ...(typeof parsed.nextAttemptAt === 'string' ? { nextAttemptAt: parsed.nextAttemptAt } : {}),
+  };
 }

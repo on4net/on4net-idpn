@@ -15,6 +15,13 @@ import type { SigningKeyManager } from './keys.js';
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /**
+ * How old an expired `id_token_hint` may be and still identify its session. RP-Initiated
+ * Logout 1.0 §2 expects logout to work long after the ID token expired; the bound keeps a
+ * leaked hint from being usable forever (docs/auth-flows.md 6.2).
+ */
+export const MAX_ID_TOKEN_HINT_AGE_SECONDS = 24 * 60 * 60;
+
+/**
  * Persistence required by logout. Participants are derived from the database because a
  * session is shared by every client that obtained a code or refresh token for it.
  */
@@ -101,9 +108,11 @@ export function registerLogoutRoute(app: FastifyInstance, options: LogoutRouteOp
     let sub: string | undefined;
 
     if (idTokenHint !== undefined && idTokenHint !== '') {
+      let decodedHint: ReturnType<typeof decodeJwt>;
       let audience: string | undefined;
       try {
-        audience = singleAudience(decodeJwt(idTokenHint).aud);
+        decodedHint = decodeJwt(idTokenHint);
+        audience = singleAudience(decodedHint.aud);
       } catch {
         return invalidRequest(reply, 'id_token_hint is not a valid token');
       }
@@ -127,7 +136,24 @@ export function registerLogoutRoute(app: FastifyInstance, options: LogoutRouteOp
           currentDate: now(),
         });
       } catch {
-        return invalidRequest(reply, 'id_token_hint is not valid');
+        // An expired hint still identifies its session, so logout must keep working for a
+        // session older than the ID-token lifetime. Re-verify at issuance (signature, issuer,
+        // audience and `nbf` stay enforced) within a bounded hint age.
+        const issuedAt = typeof decodedHint['iat'] === 'number' ? decodedHint['iat'] : 0;
+        const at = now();
+        const ageSeconds = Math.floor(at.getTime() / 1000) - issuedAt;
+        if (issuedAt <= 0 || ageSeconds > MAX_ID_TOKEN_HINT_AGE_SECONDS) {
+          return invalidRequest(reply, 'id_token_hint is not valid');
+        }
+        try {
+          payload = await options.keys.verify(idTokenHint, {
+            issuer: options.issuer,
+            audience,
+            currentDate: new Date(issuedAt * 1000 + 1000),
+          });
+        } catch {
+          return invalidRequest(reply, 'id_token_hint is not valid');
+        }
       }
 
       if (typeof payload['sid'] !== 'string' || !UUID_PATTERN.test(payload['sid'])) {

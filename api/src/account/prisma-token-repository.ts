@@ -1,5 +1,6 @@
 import type { PrismaClient } from '../generated/prisma/client.js';
 import type { AccountTokenPurpose, AccountTokenStore, TokenConsumption } from './tokens.js';
+import { ACCOUNT_TOKEN_RETENTION_DAYS } from './tokens.js';
 
 /** Prisma-backed single-use token store for invite, verification and reset flows. */
 export function createPrismaAccountTokenStore(prisma: PrismaClient): AccountTokenStore {
@@ -40,8 +41,7 @@ export function createPrismaAccountTokenStore(prisma: PrismaClient): AccountToke
       };
     },
 
-    async consume(tokenHash, purpose, at, expectedUserId): Promise<TokenConsumption> {
-      const consumed = await prisma.accountToken.updateMany({
+    async consume(tokenHash, purpose, at, expectedUserId): Promise<TokenConsumption> {      const consumed = await prisma.accountToken.updateMany({
         where: {
           tokenHash,
           purpose,
@@ -74,6 +74,20 @@ export function createPrismaAccountTokenStore(prisma: PrismaClient): AccountToke
         return { ok: false, reason: 'used' };
       }
       return { ok: false, reason: 'expired' };
+    },
+
+    async purge({ now, retainDays }) {
+      const cutoff = new Date(
+        now.getTime() - (retainDays ?? ACCOUNT_TOKEN_RETENTION_DAYS) * 24 * 60 * 60 * 1000,
+      );
+      // Consumed rows and rows that expired before the window are dead weight; everything
+      // else may still be spent by the mailbox holder.
+      const deleted = await prisma.accountToken.deleteMany({
+        where: {
+          OR: [{ consumedAt: { lt: cutoff } }, { expiresAt: { lt: cutoff } }],
+        },
+      });
+      return deleted.count;
     },
   };
 }
