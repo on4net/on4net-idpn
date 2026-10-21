@@ -5,6 +5,33 @@ import type { IdpnTheme } from '@idpn/contracts/theme';
 
 import { IdpnRoot, PortalContainerError, resolvePortalTarget, type PortalScope } from './idpn-root';
 
+describe('IdpnRoot layout variants', () => {
+  it('centres a standalone surface but leaves an embedded one to its host', () => {
+    const { unmount } = render(
+      <IdpnRoot locale="fa-IR" dir="rtl">
+        <span>محتوا</span>
+      </IdpnRoot>,
+    );
+    const standalone = screen.getByTestId('idpn-root');
+    expect(standalone.style.minHeight).toBe('100vh');
+    expect(standalone.style.display).toBe('grid');
+    unmount();
+
+    render(
+      <IdpnRoot locale="fa-IR" dir="rtl" layout="embedded">
+        <span>محتوا</span>
+      </IdpnRoot>,
+    );
+    const embedded = screen.getByTestId('idpn-root');
+    // The host (or the Shadow-DOM wrapper) owns the box; the module must not force 100vh.
+    expect(embedded.style.minHeight).toBe('');
+    expect(embedded.style.display).toBe('');
+    expect(embedded.style.padding).toBe('');
+    // Theme tokens are still applied.
+    expect(embedded.style.getPropertyValue('--idpn-font-sans')).toContain("'Vazirmatn'");
+  });
+});
+
 describe('IdpnRoot theme application', () => {
   it('writes sanitized tokens only to the .idpn-root element', () => {
     render(

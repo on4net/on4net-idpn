@@ -24,7 +24,9 @@ const app = buildBffApp({
       .filter(Boolean),
   },
   hostedLoginUrl: process.env.HOSTED_UI_URL ?? `${idpBaseUrl.replace(/\/+$/, '')}/`,
-  secureCookies: idpBaseUrl.startsWith('https://'),
+  // Cookie security follows the origin the browser actually talks to, not the IdP origin:
+  // a browser over plain HTTP never sends a `Secure` cookie back (card #71 finding 7).
+  secureCookies: process.env.BFF_COOKIE_SECURE === 'true' || publicUrl.startsWith('https://'),
   logger: true,
 });
 

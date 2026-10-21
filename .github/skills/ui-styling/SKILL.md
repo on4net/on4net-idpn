@@ -13,15 +13,19 @@ The design system is **shadcn/ui + Tailwind v4**, vendored into `web/src/compone
 1. **Components come from the pinned shadcn CLI only.**
    `pnpm --filter @idpn/web ui:add <component>` — runs `pnpm dlx shadcn@4.22.0 add` (the CLI is never installed).
    Never copy component source from a blog, gist, another project, or an unapproved registry.
-2. **No runtime dependency on the CLI.** `shadcn` stays in `devDependencies`; the app imports only
-   `web/src/components/ui/*` and `web/src/lib/utils.ts`.
+2. **No runtime dependency on the CLI.** The shadcn CLI is never installed (`pnpm dlx` only,
+   `pnpm --filter @idpn/web ui:add`); the app imports only `web/src/components/ui/*` and
+   `web/src/lib/utils.ts`.
 3. **Tokens only.** Use semantic tokens (`bg-background`, `text-foreground`, `border-border`, `--idpn-*`).
    Hard-coded palette classes (`bg-red-500`) and arbitrary hex values are rejected in review.
 4. **Preflight stays out of the MFE.** `web/src/styles/globals.css` imports only
-   `tailwindcss/theme.css` and `tailwindcss/utilities.css`. Adding `tailwindcss`/preflight resets host apps.
+   `tailwindcss/utilities.css` — not `tailwindcss` (preflight) and not `tailwindcss/theme.css`,
+   which emits `:root, :host` defaults into the host document. Adding either resets host apps.
 5. **Tokens live on `.idpn-root`,** never `:root`, so several apps/themes can coexist.
-6. **Every Radix portal takes `container`** (`Dialog`, `Select`, future `Popover`/`Tooltip`) and receives it
-   from `usePortalContainer()`; portals must render inside `.idpn-root`.
+6. **Portals resolve their own container.** Every Radix portal (`Dialog`, `Select`, future
+   `Popover`/`Tooltip`) is wrapped by the shared component so it renders inside `.idpn-root`
+   automatically. Never pass `container={usePortalContainer()}` at a call site: the hook may
+   return `null` outside `<IdpnRoot>` and `resolvePortalTarget` throws on an explicit `null`.
 7. **RTL first.** Use logical utilities (`ps-/pe-/ms-/me-/start-/end-/text-start/text-end`); directional icons
    rotate with `rtl:rotate-180`; dialogs are centered with flex, not `translate-x`.
 8. **Accessibility is part of "done".** Labels for inputs, `aria-invalid`/`aria-describedby` for errors,
@@ -63,8 +67,9 @@ New components need the Design System owner's agreement (recorded on the issue) 
 
 ## Upgrade policy
 
-- Registry/CLI upgrades are **pinned and deliberate**: bump `shadcn` in `web/package.json`, regenerate the
-  component, and record the change in `web/UPSTREAM.md` with the date and re-applied patches.
+- Registry/CLI upgrades are **pinned and deliberate**: bump the `shadcn@<version>` tag used by the
+  `ui:add` script (the CLI is never a dependency), regenerate the component, and record the change in
+  `web/UPSTREAM.md` with the date and re-applied patches.
 - Never auto-update components. Review diffs for RTL, portal and token regressions.
 - Run the full checklist (typecheck, unit coverage, E2E) after any upgrade.
 

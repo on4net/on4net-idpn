@@ -679,7 +679,7 @@ export function UserManagementRoot({
   });
   const direction = resolveDirection(activeLocale, dir ?? locales?.dir?.[activeLocale]);
   return (
-    <IdpnRoot locale={activeLocale} dir={direction} theme={theme}>
+    <IdpnRoot locale={activeLocale} dir={direction} theme={theme} layout="embedded">
       <UserManagement
         {...props}
         locale={activeLocale}

@@ -43,6 +43,9 @@ interface CallbackQuery {
 }
 
 const DEFAULT_COOKIE = 'bff_session';
+/** Browser-bound login transaction (card #71 finding 2). */
+const TX_COOKIE_NAME = 'bff_tx';
+const TX_TTL_SECONDS = Math.floor(LOGIN_TRANSACTION_TTL_MS / 1000);
 
 export function buildBffApp(options: BffAppOptions): FastifyInstance {
   const app = Fastify({ logger: options.logger ?? false });
@@ -71,7 +74,7 @@ export function buildBffApp(options: BffAppOptions): FastifyInstance {
     return payload;
   });
 
-  const readSessionId = (request: FastifyRequest): string | null => {
+  const readCookie = (request: FastifyRequest, name: string): string | null => {
     const header = request.headers.cookie;
     if (header === undefined) {
       return null;
@@ -81,7 +84,7 @@ export function buildBffApp(options: BffAppOptions): FastifyInstance {
       if (separator === -1) {
         continue;
       }
-      if (part.slice(0, separator).trim() === cookieName) {
+      if (part.slice(0, separator).trim() === name) {
         const value = part.slice(separator + 1).trim();
         return value === '' ? null : value;
       }
@@ -89,15 +92,21 @@ export function buildBffApp(options: BffAppOptions): FastifyInstance {
     return null;
   };
 
-  const sessionCookie = (value: string, maxAgeSeconds: number): string =>
+  const readSessionId = (request: FastifyRequest): string | null =>
+    readCookie(request, cookieName);
+
+  const cookieHeader = (name: string, value: string, maxAgeSeconds: number): string =>
     [
-      `${cookieName}=${value}`,
+      `${name}=${value}`,
       'Path=/',
       'HttpOnly',
       'SameSite=Lax',
       `Max-Age=${maxAgeSeconds}`,
       ...(secureCookies ? ['Secure'] : []),
     ].join('; ');
+
+  const sessionCookie = (value: string, maxAgeSeconds: number): string =>
+    cookieHeader(cookieName, value, maxAgeSeconds);
 
   const currentSession = async (request: FastifyRequest): Promise<BffSession | null> => {
     const id = readSessionId(request);
@@ -115,12 +124,32 @@ export function buildBffApp(options: BffAppOptions): FastifyInstance {
       .header('Content-Type', 'text/html; charset=utf-8')
       .send(renderPage({ title, body }));
 
-  /** Only relative paths are echoed back, so `returnTo` cannot leave the BFF origin. */
+  /**
+   * Only relative paths are echoed back, so `returnTo` cannot leave the BFF origin.
+   *
+   * `/\evil.example` and any value containing a backslash, whitespace or control character is
+   * rejected: browsers normalise `/\` to `//`, which turns it into a protocol-relative URL
+   * (card #71 finding 1).
+   */
   const safeReturnTo = (value: unknown): string => {
     if (typeof value !== 'string' || value === '' || !value.startsWith('/')) {
       return '/';
     }
-    return value.startsWith('//') ? '/' : value;
+    const unsafe = [...value].some((character) => {
+      const code = character.codePointAt(0) ?? 0;
+      return character === '\\' || code <= 0x20 || code === 0x7f;
+    });
+    if (value.startsWith('//') || unsafe) {
+      return '/';
+    }
+    try {
+      const base = 'http://bff.invalid';
+      const resolved = new URL(value, base);
+      // Resolving must stay on the placeholder origin; anything else escaped the path.
+      return resolved.origin === base ? `${resolved.pathname}${resolved.search}${resolved.hash}` : '/';
+    } catch {
+      return '/';
+    }
   };
 
   const signInFailed = (reply: FastifyReply, reason: string): FastifyReply =>
@@ -140,16 +169,21 @@ export function buildBffApp(options: BffAppOptions): FastifyInstance {
     };
     await store.saveTransaction(transaction);
 
-    return reply.header('Cache-Control', 'no-store').redirect(
-      buildAuthorizeUrl(options.idp, {
-        state: transaction.state,
-        nonce: transaction.nonce,
-        codeChallenge: pkce.challenge,
-        ...(query.ui_locales === undefined ? {} : { uiLocales: query.ui_locales }),
-        ...(query.login_hint === undefined ? {} : { loginHint: query.login_hint }),
-      }),
-      302,
-    );
+    // Bind the transaction to this browser: the callback must present the same state in the
+    // cookie, so a callback URL minted elsewhere is rejected (login CSRF, card #71 finding 2).
+    return reply
+      .header('Set-Cookie', cookieHeader(TX_COOKIE_NAME, transaction.state, TX_TTL_SECONDS))
+      .header('Cache-Control', 'no-store')
+      .redirect(
+        buildAuthorizeUrl(options.idp, {
+          state: transaction.state,
+          nonce: transaction.nonce,
+          codeChallenge: pkce.challenge,
+          ...(query.ui_locales === undefined ? {} : { uiLocales: query.ui_locales }),
+          ...(query.login_hint === undefined ? {} : { loginHint: query.login_hint }),
+        }),
+        302,
+      );
   });
 
   app.get('/auth/callback', async (request, reply) => {
@@ -160,6 +194,11 @@ export function buildBffApp(options: BffAppOptions): FastifyInstance {
     }
     if (query.state === undefined || query.state === '' || query.code === undefined) {
       return signInFailed(reply, 'invalid_request');
+    }
+
+    if (readCookie(request, TX_COOKIE_NAME) !== query.state) {
+      // The browser that started the flow must be the one that finishes it.
+      return signInFailed(reply, 'invalid_state');
     }
 
     const transaction = await store.takeTransaction(query.state);
@@ -188,7 +227,11 @@ export function buildBffApp(options: BffAppOptions): FastifyInstance {
     await store.createSession(session);
 
     return reply
-      .header('Set-Cookie', sessionCookie(session.id, Math.max(1, Math.floor(sessionTtlMs / 1000))))
+      .header('Set-Cookie', [
+        sessionCookie(session.id, Math.max(1, Math.floor(sessionTtlMs / 1000))),
+        // The transaction is consumed: drop the binding cookie in the same response.
+        cookieHeader(TX_COOKIE_NAME, '', 0),
+      ])
       .redirect(transaction.returnTo, 302);
   });
 

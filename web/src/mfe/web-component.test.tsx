@@ -304,11 +304,12 @@ describe('Web Component module selection', () => {
     const element = mount({}, ACCOUNT_ELEMENT_NAME);
     await waitFor(() => expect(element.shadowRoot?.textContent).toContain('سارا محمدی'));
 
-    element.theme = { primary: '#abcdef' };
+    // An AA-compliant primary: the contract drops palettes that cannot carry white text.
+    element.theme = { primary: '#0f766e' };
 
     await waitFor(() => {
       const root = element.shadowRoot?.querySelector('.idpn-root') as HTMLElement;
-      expect(root.style.getPropertyValue('--idpn-primary')).toBe('#abcdef');
+      expect(root.style.getPropertyValue('--idpn-primary')).toBe('#0f766e');
     });
   });
 

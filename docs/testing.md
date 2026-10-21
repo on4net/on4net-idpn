@@ -178,6 +178,9 @@ flowchart TB
 | E2E-016 | ورود از دو Context مختلف یک اپ با نقش‌های متفاوت |
 | E2E-017 | تغییر زبان و RTL بدون Reload و با حفظ State |
 | E2E-018 | متن اختصاصی اپ در صفحه ورود نمایش داده می‌شود |
+| E2E-019 | BFF نمونه: ورود با PKCE، نگه‌داری توکن سمت سرور، Refresh و خروج (`e2e/bff/`) |
+| E2E-020 | BFF: State متصل به مرورگر و Callback جعلی رد می‌شود (`invalid_state`) |
+| E2E-021 | SSO و خروج بین دو کلاینت روی یک BFF (`e2e/bff/sso-logout.spec.ts`) |
 
 ### 7.2 قواعد
 
@@ -257,7 +260,7 @@ flowchart TB
 | Unit | هر PR | Vitest با Coverage |
 | Integration | هر PR | Testcontainers (Postgres/Redis) |
 | Contract | هر PR | OpenAPI diff + Schema |
-| E2E Smoke | هر PR | 3 سناریوی حیاتی Chromium |
+| E2E Smoke | هر PR | همه پروژه‌های Playwright روی Chromium: API، Hosted UI، MFE (Isolation، Web Component، Module Federation) و BFF |
 | E2E Full | Main/Nightly | همه سناریوها + Firefox/WebKit |
 | Security | Nightly/Release | Audit، Trivy، ZAP Baseline |
 | Load | Release | k6 |

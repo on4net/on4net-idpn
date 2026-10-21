@@ -579,7 +579,7 @@ describe('HostedLoginPage', () => {
         return new Response(
           JSON.stringify({
             locales: { default: 'fa-IR', supported: ['fa-IR'] },
-            theme: { primary: '#abcdef' },
+            theme: { primary: '#0f766e' },
           }),
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         );
@@ -599,7 +599,7 @@ describe('HostedLoginPage', () => {
 
     expect(await screen.findByTestId('public-config-loaded')).toBeInTheDocument();
     expect(screen.getByTestId('idpn-root').style.getPropertyValue('--idpn-primary')).toBe(
-      '#abcdef',
+      '#0f766e',
     );
 
     await user.type(screen.getByLabelText('ایمیل یا نام کاربری'), 'sara');

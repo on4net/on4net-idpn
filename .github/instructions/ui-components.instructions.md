@@ -1,5 +1,5 @@
 ---
-applyTo: 'web/src/components/ui/**,web/src/app/**,web/src/mfe/**'
+applyTo: 'web/src/components/ui/**,web/src/app/**,web/src/mfe/**,web/src/styles/**'
 description: shadcn/ui component governance for on4net IDPN UI code.
 ---
 
@@ -14,8 +14,9 @@ These rules apply to any change under `web/src/components/ui`, `web/src/app` and
    (source, date, local patches) in the same change.
 3. **Tokens:** use semantic Tailwind tokens and `--idpn-*` variables. Raw palette classes
    (`bg-red-500`) and hex values are rejected.
-4. **Isolation:** never import Tailwind preflight into MFE styles; tokens stay on `.idpn-root`;
-   every Radix portal receives `container` from `usePortalContainer()`.
+4. **Isolation:** never import Tailwind preflight (or `tailwindcss/theme.css`) into MFE styles;
+   tokens stay on `.idpn-root`; shared Radix wrappers resolve the portal container themselves —
+   never pass `container={usePortalContainer()}` from a call site.
 5. **RTL:** logical utilities only (`ps/pe/ms/me/start/end/text-start/text-end`); verify Persian rendering.
 6. **A11y:** labels, `aria-invalid`/`aria-describedby`, keyboard operation, focus visible;
    axe must report zero Critical/Serious.

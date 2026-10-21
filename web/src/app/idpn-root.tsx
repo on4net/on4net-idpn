@@ -70,6 +70,12 @@ export interface IdpnRootProps {
   theme?: IdpnTheme;
   /** Applies the `dark` class so `.idpn-root.dark` picks the client's dark overrides. */
   dark?: boolean;
+  /**
+   * `standalone` (default) centres the surface in the viewport for the Hosted pages;
+   * `embedded` drops the min-height/grid/padding so a host or a Shadow-DOM wrapper controls
+   * the layout (docs/micro-frontend.md 5, card #71 finding 6).
+   */
+  layout?: 'standalone' | 'embedded';
   children: React.ReactNode;
   'data-client-id'?: string;
   /** Observability hooks for the Hosted shell: config/bundle resolution state. */
@@ -88,7 +94,15 @@ export interface IdpnRootProps {
  * properties inside `globals.css`, so `:root` is never touched and several clients can
  * coexist on one page.
  */
-export function IdpnRoot({ locale, dir, theme, dark = false, children, ...rest }: IdpnRootProps) {
+export function IdpnRoot({
+  locale,
+  dir,
+  theme,
+  dark = false,
+  layout = 'standalone',
+  children,
+  ...rest
+}: IdpnRootProps) {
   const [portalContainer, setPortalContainer] = React.useState<HTMLElement | null>(null);
   const portalScope = React.useMemo<PortalScope>(
     () => ({ container: portalContainer }),
@@ -96,15 +110,16 @@ export function IdpnRoot({ locale, dir, theme, dark = false, children, ...rest }
   );
 
   const style = React.useMemo(() => {
+    const layoutStyle: Record<string, string> =
+      layout === 'standalone'
+        ? { minHeight: '100vh', display: 'grid', placeItems: 'center', padding: '2rem' }
+        : {};
     const tokens: Record<string, string> = {
-      minHeight: '100vh',
-      display: 'grid',
-      placeItems: 'center',
-      padding: '2rem',
+      ...layoutStyle,
       ...idpnThemeToCssVariables(theme, { dir, locale }),
     };
     return tokens as React.CSSProperties;
-  }, [theme, dir, locale]);
+  }, [theme, dir, locale, layout]);
 
   return (
     <Direction.Provider dir={dir}>

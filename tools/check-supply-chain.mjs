@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
  * Supply-chain guards for the design system:
- *  1. every design-system dependency must be an exact version (no ^, ~, latest, *);
+ *  1. every shipped (`dependencies`) entry of every workspace manifest must be an exact
+ *     version (or a `workspace:`/`link:`/`file:` local reference);
  *  2. React and ReactDOM must be one identical version across the workspace (MFE singleton);
  *  3. the approved license allowlist must cover every **production** dependency
  *     (dev-only tooling is recorded in the SBOM but never shipped).
@@ -9,7 +10,7 @@
  * Usage: node tools/check-supply-chain.mjs [--licenses]
  */
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -17,7 +18,7 @@ import { parse } from 'yaml';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-/** Dependencies that must never float. */
+/** Dependencies that must never float, even in `devDependencies`. */
 const PINNED = [
   '@hookform/resolvers',
   '@module-federation/vite',
@@ -50,14 +51,16 @@ const ALLOWED_LICENSES = new Set([
 ]);
 
 const EXACT_VERSION = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/;
+/** Local workspace references are not published, so their range syntax is irrelevant. */
+const LOCAL_REFERENCE = /^(?:workspace|link|file):/;
 const problems = [];
 
-const packageFiles = [
-  join(ROOT, 'package.json'),
-  ...['api', 'web', 'packages/config', 'packages/contracts'].map((dir) =>
-    join(ROOT, dir, 'package.json'),
-  ),
-];
+/**
+ * Every workspace manifest, discovered from `pnpm-workspace.yaml` instead of a hardcoded
+ * list: a new package under `packages/*` or `examples/*` is scanned automatically
+ * (card #71 finding 4).
+ */
+const packageFiles = discoverManifests();
 
 const manifests = packageFiles.map((file) => ({
   file,
@@ -76,8 +79,15 @@ for (const { file, pkg } of manifests) {
         problems.push(`${file}: ${name} must not use the floating range "${version}"`);
         continue;
       }
-      if (PINNED.includes(name) && !EXACT_VERSION.test(version)) {
-        problems.push(`${file}: ${name} must be pinned to an exact version, found "${version}"`);
+      if (LOCAL_REFERENCE.test(version)) {
+        continue;
+      }
+      // A shipped dependency always needs an exact version; the design-system pins must hold
+      // even in devDependencies.
+      if ((section === 'dependencies' || PINNED.includes(name)) && !EXACT_VERSION.test(version)) {
+        problems.push(
+          `${file}: ${name} must be pinned to an exact version in ${section}, found "${version}"`,
+        );
       }
     }
   }
@@ -93,6 +103,18 @@ if (reactVersions.size > 1) {
 
 if (process.argv.includes('--licenses')) {
   const productionVersions = productionClosure();
+  const directCount = manifests.reduce(
+    (total, { pkg }) => total + Object.keys(pkg.dependencies ?? {}).length,
+    0,
+  );
+  // A closure that is not larger than the direct dependency set means the graph walk stopped
+  // at the first level (the lockfile v9 `packages`/`snapshots` trap, card #71 finding 3).
+  if (productionVersions.size <= directCount) {
+    problems.push(
+      `production closure (${productionVersions.size}) is not larger than the direct dependency ` +
+        `count (${directCount}); the lockfile graph was not walked`,
+    );
+  }
   for (const [license, entries] of Object.entries(readLicenseInventory())) {
     if (isAllowedLicense(license)) {
       continue;
@@ -118,7 +140,11 @@ if (problems.length > 0) {
 }
 
 console.log(
-  `Supply-chain check passed: ${PINNED.length} pinned packages, react ${[...reactVersions].join('/')}`,
+  `Supply-chain check passed: ${PINNED.length} pinned packages, react ${[
+    ...reactVersions,
+  ].join('/')}, ${manifests.length} manifests${
+    process.argv.includes('--licenses') ? `, ${productionClosure().size} shipped packages` : ''
+  }`,
 );
 
 function isAllowedLicense(license) {
@@ -127,6 +153,42 @@ function isAllowedLicense(license) {
     .map((part) => part.trim())
     .filter((part) => part.length > 0)
     .every((part) => ALLOWED_LICENSES.has(part));
+}
+
+/** Expands `pnpm-workspace.yaml` patterns into the list of workspace manifests. */
+function discoverManifests() {
+  const workspace = parse(readFileSync(join(ROOT, 'pnpm-workspace.yaml'), 'utf8'));
+  const patterns = workspace.packages ?? [];
+  const files = new Set([join(ROOT, 'package.json')]);
+
+  for (const pattern of patterns) {
+    const normalised = String(pattern).replace(/\/+$/, '');
+    if (normalised.endsWith('*')) {
+      const parent = join(ROOT, normalised.slice(0, -1));
+      for (const entry of readdirSync(parent, { withFileTypes: true })) {
+        if (entry.isDirectory() && !entry.name.startsWith('.')) {
+          // Only directories that are really workspace packages.
+          const candidate = join(parent, entry.name, 'package.json');
+          try {
+            readFileSync(candidate);
+            files.add(candidate);
+          } catch {
+            continue;
+          }
+        }
+      }
+      continue;
+    }
+    const candidate = join(ROOT, normalised, 'package.json');
+    try {
+      readFileSync(candidate);
+      files.add(candidate);
+    } catch {
+      problems.push(`workspace entry "${normalised}" has no package.json`);
+    }
+  }
+
+  return [...files];
 }
 
 /** `name@version` keys may carry peer suffixes: react@19.3.1(react@19.3.1). */
@@ -139,26 +201,56 @@ function splitKey(key) {
   return { name: withoutPeers.slice(0, at), version: withoutPeers.slice(at + 1) };
 }
 
-/** Walks every importer's production dependencies and returns `name@version` entries. */
-function productionClosure() {
-  const lockfile = parse(readFileSync(join(ROOT, 'pnpm-lock.yaml'), 'utf8'));
-  const packages = lockfile.packages ?? {};
-  const byName = new Map();
-  for (const [key, entry] of Object.entries(packages)) {
+/**
+ * Walks every importer's production dependencies and returns `name@version` entries.
+ *
+ * lockfile v9 keeps dependency edges in `snapshots`, not in `packages` — walking `packages`
+ * alone resolved ~20 of ~318 shipped packages and never licence-checked the rest
+ * (card #71 finding 3). A key that cannot be resolved is an error: silently skipping it
+ * would reintroduce the same blind spot.
+ */
+export function productionClosure(lockfilePath = join(ROOT, 'pnpm-lock.yaml')) {
+  const lockfile = parse(readFileSync(lockfilePath, 'utf8'));
+  const graph = lockfile.snapshots ?? lockfile.packages ?? {};
+  const byId = new Map();
+  for (const [key, entry] of Object.entries(graph)) {
     const parsed = splitKey(key);
     if (parsed === null) {
       continue;
     }
-    byName.set(`${parsed.name}@${parsed.version}`, entry);
+    byId.set(`${parsed.name}@${parsed.version}`, entry ?? {});
+  }
+
+  // Packages that only ever appear as devDependencies are tooling (the Prisma CLI, its studio
+  // UI and their transitive peers). They are reachable from a production package through a
+  // peer edge but are never bundled or installed for a production deployment.
+  const runtimeNames = new Set();
+  const devOnlyNames = new Set();
+  for (const importer of Object.values(lockfile.importers ?? {})) {
+    for (const name of Object.keys(importer.dependencies ?? {})) {
+      runtimeNames.add(name);
+    }
+    for (const name of Object.keys(importer.devDependencies ?? {})) {
+      devOnlyNames.add(name);
+    }
+  }
+  for (const name of runtimeNames) {
+    devOnlyNames.delete(name);
   }
 
   const seen = new Set();
   const queue = [];
+  const unresolved = new Set();
   for (const importer of Object.values(lockfile.importers ?? {})) {
     for (const [name, spec] of Object.entries(importer.dependencies ?? {})) {
-      if (spec?.version) {
-        queue.push(`${name}@${spec.version.split('(')[0]}`);
+      const version = spec?.version;
+      if (version === undefined) {
+        continue;
       }
+      if (/^(?:link|file|workspace):/.test(String(version))) {
+        continue;
+      }
+      queue.push(`${name}@${String(version).split('(')[0]}`);
     }
   }
 
@@ -167,16 +259,34 @@ function productionClosure() {
     if (seen.has(id)) {
       continue;
     }
-    seen.add(id);
-    const entry = byName.get(id);
-    for (const [name, version] of Object.entries(entry?.dependencies ?? {})) {
-      queue.push(`${name}@${String(version).split('(')[0]}`);
+    const parsedId = splitKey(id);
+    if (parsedId !== null && devOnlyNames.has(parsedId.name)) {
+      continue;
     }
-    for (const [name, version] of Object.entries(entry?.optionalDependencies ?? {})) {
-      queue.push(`${name}@${String(version).split('(')[0]}`);
+    seen.add(id);
+    const entry = byId.get(id);
+    if (entry === undefined) {
+      unresolved.add(id);
+      continue;
+    }
+    for (const section of ['dependencies', 'optionalDependencies']) {
+      for (const [name, version] of Object.entries(entry[section] ?? {})) {
+        const value = String(version);
+        if (/^(?:link|file|workspace):/.test(value)) {
+          continue;
+        }
+        queue.push(`${name}@${value.split('(')[0]}`);
+      }
     }
   }
 
+  if (unresolved.size > 0) {
+    problems.push(
+      `cannot resolve ${unresolved.size} shipped package(s) in the lockfile: ${[
+        ...unresolved,
+      ].join(', ')}`,
+    );
+  }
   return seen;
 }
 

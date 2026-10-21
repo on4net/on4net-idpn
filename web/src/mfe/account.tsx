@@ -697,7 +697,7 @@ export function AccountRoot({ locale = 'fa-IR', dir, locales, theme, ...props }:
   });
   const direction = resolveDirection(activeLocale, dir ?? locales?.dir?.[activeLocale]);
   return (
-    <IdpnRoot locale={activeLocale} dir={direction} theme={theme}>
+    <IdpnRoot locale={activeLocale} dir={direction} theme={theme} layout="embedded">
       <Account
         {...props}
         locale={activeLocale}

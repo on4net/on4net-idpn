@@ -305,7 +305,7 @@ Tailwind v4 و CSS گلوبال shadcn می‌توانند با Host تداخل 
 
 **تصمیم‌های الزام‌آور حاصل از اسپایک:**
 
-1. Preflight تیلویند در MFE وارد نمی‌شود؛ فقط `tailwindcss/theme.css` و `tailwindcss/utilities.css`.
+1. Preflight تیلویند در MFE وارد نمی‌شود؛ فقط `tailwindcss/utilities.css` ایمپورت می‌شود (`tailwindcss/theme.css` هم وارد نمی‌شود، چون `:root, :host` را به سند میزبان تزریق می‌کند).
 2. توکن‌ها روی `.idpn-root` تعریف می‌شوند، نه `:root`.
 3. `Dialog`/`Select` (و هر Portal آینده) باید `container` از `usePortalContainer()` بگیرند.
 4. ماژول MFE خودکفاست (`UserManagementRoot`): ریشه، جهت و Portal Container را خودش می‌سازد،

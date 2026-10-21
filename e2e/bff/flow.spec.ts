@@ -70,8 +70,10 @@ test.describe('sample BFF end-to-end', () => {
 
     await expect(page.getByTestId('signin-failed')).toBeVisible();
     await expect(page.getByTestId('reason')).toHaveText('invalid_state');
-    // The Hosted page stays available as a manual fallback.
-    await expect(page.getByTestId('hosted-fallback')).toHaveAttribute('href', /.+/);
+    // The Hosted page stays available as a manual fallback, at the configured origin.
+    const hostedOrigin = new URL(process.env.E2E_WEB_URL ?? 'http://127.0.0.1:5180').origin;
+    const href = await page.getByTestId('hosted-fallback').getAttribute('href');
+    expect(new URL(href ?? '', 'http://bff.invalid').origin).toBe(hostedOrigin);
     await expect(page.getByTestId('hosted-fallback')).toContainText('Hosted sign-in page');
     expect(bffSessionCookie(await page.context().cookies())).toBeUndefined();
   });
@@ -89,6 +91,9 @@ test.describe('sample BFF end-to-end', () => {
     expect(location.searchParams.get('state')).toBeTruthy();
     expect(location.searchParams.get('nonce')).toBeTruthy();
     expect(location.toString()).not.toContain('code_verifier');
-    expect(response.headers()['set-cookie']).toBeUndefined();
+    // Only the browser-bound transaction cookie is set; no session exists before login.
+    const setCookie = String(response.headers()['set-cookie'] ?? '');
+    expect(setCookie).toContain('bff_tx=');
+    expect(setCookie).not.toContain('bff_session=');
   });
 });

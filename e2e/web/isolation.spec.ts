@@ -216,7 +216,8 @@ test.describe('web component isolation (spike)', () => {
       second.setAttribute('client-id', 'app-a');
       second.setAttribute('locale', 'fa-IR');
       second.setAttribute('dir', 'rtl');
-      Reflect.set(second, 'theme', { primary: '#ff0000' });
+      // A darker red: pure #ff0000 cannot carry white text at WCAG AA, so the contract drops it.
+      Reflect.set(second, 'theme', { primary: '#b91c1c' });
       document.body.append(second);
     });
 
@@ -225,7 +226,7 @@ test.describe('web component isolation (spike)', () => {
     await expect(secondInvite).toBeVisible();
 
     await expect(firstInvite).toHaveCSS('background-color', 'rgb(0, 0, 255)');
-    await expect(secondInvite).toHaveCSS('background-color', 'rgb(255, 0, 0)');
+    await expect(secondInvite).toHaveCSS('background-color', 'rgb(185, 28, 28)');
 
     const tokens = await page.evaluate(() =>
       ['#mfe', '#second-mfe'].map((selector) => {
@@ -241,7 +242,7 @@ test.describe('web component isolation (spike)', () => {
     );
     expect(tokens).toEqual([
       { primary: '#0000ff', hasPortal: true },
-      { primary: '#ff0000', hasPortal: true },
+      { primary: '#b91c1c', hasPortal: true },
     ]);
   });
 

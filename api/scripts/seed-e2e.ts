@@ -22,9 +22,21 @@ const E2E_REDIRECT_URI =
   process.env['E2E_BFF_REDIRECT_URI'] ?? 'http://127.0.0.1:3200/auth/callback';
 const E2E_POST_LOGOUT_URI =
   process.env['E2E_BFF_POST_LOGOUT_URI'] ?? 'http://127.0.0.1:3200/signed-out';
-const E2E_CLIENT_SECRET = process.env['E2E_BFF_CLIENT_SECRET'] ?? 'e2e-bff-client-secret';
+function requireEnv(name: string): string {
+  const value = process.env[name];
+  if (value === undefined || value === '') {
+    // A committed default would provision a known client secret and reset a real account's
+    // password, so the fixture refuses to run without an explicit value (card #71 finding 7).
+    throw new Error(
+      `${name} is required: the E2E fixture must not provision a credential that is committed to the repository`,
+    );
+  }
+  return value;
+}
+
+const E2E_CLIENT_SECRET = requireEnv('E2E_BFF_CLIENT_SECRET');
 const E2E_USER_IDENTIFIER = process.env['E2E_USER_IDENTIFIER'] ?? 'user@example.com';
-const E2E_USER_PASSWORD = process.env['E2E_USER_PASSWORD'] ?? 'e2e-user-password-123';
+const E2E_USER_PASSWORD = requireEnv('E2E_USER_PASSWORD');
 /**
  * Second app used by the SSO/logout scenario: no second login page is started, the test only
  * proves that `/oauth2/authorize` issues a code for this client from the existing IdP session.

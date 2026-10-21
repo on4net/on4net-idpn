@@ -139,7 +139,7 @@ describe('sanitizeLoginContexts', () => {
         branding: {
           title: 'Admin portal',
           logoUrl: 'javascript:alert(1)',
-          theme: { primary: 'url(javascript:alert(1))', background: '#0b0b0b', unknown: '#fff' },
+          theme: { primary: 'url(javascript:alert(1))', background: '#0b0b0b', foreground: '#f8fafc', unknown: '#fff' },
           rawCss: 'body { display: none }',
         },
       },
@@ -147,7 +147,7 @@ describe('sanitizeLoginContexts', () => {
 
     expect(context?.branding?.logoUrl).toBeUndefined();
     expect(context?.branding?.title).toBe('Admin portal');
-    expect(context?.branding?.theme).toEqual({ background: '#0b0b0b' });
+    expect(context?.branding?.theme).toEqual({ background: '#0b0b0b', foreground: '#f8fafc' });
     expect(JSON.stringify(context)).not.toMatch(/javascript|display|rawcss/i);
   });
 

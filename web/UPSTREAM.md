@@ -33,7 +33,7 @@
 
 ## Patchهای سراسری
 
-1. **Preflight غیرفعال است.** فقط `tailwindcss/theme.css` و `tailwindcss/utilities.css` ایمپورت می‌شوند تا CSS
+1. **Preflight غیرفعال است.** فقط `tailwindcss/utilities.css` ایمپورت می‌شود (`tailwindcss/theme.css` هم وارد نمی‌شود، چون `:root, :host` را به سند میزبان تزریق می‌کند) تا CSS
    به Host نشت نکند (`docs/spikes/shadcn-mfe-spike.md`).
 2. **توکن‌ها روی `.idpn-root`** تعریف می‌شوند، نه `:root`؛ بنابراین چند MFE/تم می‌توانند همزیستی کنند.
 3. **همه Portalها** باید `container` داخل `.idpn-root` بگیرند (Dialog/Select).

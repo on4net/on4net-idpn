@@ -42,11 +42,13 @@ const startLogin = async (harness: Harness) => {
   const response = await harness.app.inject({ method: 'GET', url: '/login' });
   expect(response.statusCode).toBe(302);
   const location = new URL(response.headers.location ?? '');
-  return { response, location };
+  const setCookie = (response.headers['set-cookie'] as string | undefined) ?? '';
+  const tx = /bff_tx=([^;]*)/.exec(setCookie)?.[1] ?? '';
+  return { response, location, tx };
 };
 
 const completeLogin = async (harness: Harness) => {
-  const { location } = await startLogin(harness);
+  const { location, tx } = await startLogin(harness);
   const state = location.searchParams.get('state') ?? '';
   const code = harness.fake.issueCode({
     challenge: location.searchParams.get('code_challenge') ?? '',
@@ -56,17 +58,19 @@ const completeLogin = async (harness: Harness) => {
   const callback = await harness.app.inject({
     method: 'GET',
     url: `/auth/callback?code=${code}&state=${encodeURIComponent(state)}`,
+    cookies: { bff_tx: tx },
   });
   expect(callback.statusCode).toBe(302);
-  const cookie = (callback.headers['set-cookie'] as string | undefined) ?? '';
+  const rawCookie = callback.headers['set-cookie'];
+  const cookie = Array.isArray(rawCookie) ? rawCookie.join('; ') : (rawCookie ?? '');
   const sessionId = /bff_session=([^;]+)/.exec(cookie)?.[1] ?? '';
   return { location, callback, cookie, sessionId };
 };
 
 describe('GET /login', () => {
-  it('redirects with PKCE S256, state and nonce, and never sets a cookie', async () => {
+  it('redirects with PKCE S256, state and nonce, and sets only the transaction cookie', async () => {
     const harness = createHarness();
-    const { response, location } = await startLogin(harness);
+    const { response, location, tx } = await startLogin(harness);
 
     expect(location.origin + location.pathname).toBe('http://127.0.0.1:3100/oauth2/authorize');
     expect(location.searchParams.get('response_type')).toBe('code');
@@ -76,7 +80,14 @@ describe('GET /login', () => {
     expect(location.searchParams.get('code_challenge')).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(location.searchParams.get('state')).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(location.searchParams.get('nonce')).toMatch(/^[A-Za-z0-9_-]{43}$/);
-    expect(response.headers['set-cookie']).toBeUndefined();
+
+    // The state is bound to this browser; no session cookie is issued before authentication.
+    const setCookie = (response.headers['set-cookie'] as string | undefined) ?? '';
+    expect(setCookie).toContain('bff_tx=');
+    expect(setCookie).toContain('HttpOnly');
+    expect(setCookie).toContain('SameSite=Lax');
+    expect(setCookie).not.toContain('bff_session');
+    expect(tx).toBe(location.searchParams.get('state'));
     expect(harness.store.transactionCount).toBe(1);
   });
 
@@ -102,10 +113,16 @@ describe('GET /login', () => {
       method: 'GET',
       url: '/login?return_to=%2Fdashboard',
     });
+    // `/\evil.example` is normalised by browsers to `//evil.example` (card #71 finding 1).
+    const backslash = await harness.app.inject({
+      method: 'GET',
+      url: '/login?return_to=%2F%5Cevil.example',
+    });
     expect(absolute.headers.location).toContain('/oauth2/authorize');
     expect(protocolRelative.headers.location).toContain('/oauth2/authorize');
+    expect(backslash.headers.location).toContain('/oauth2/authorize');
 
-    for (const response of [absolute, protocolRelative, relative]) {
+    for (const response of [absolute, protocolRelative, backslash, relative]) {
       const state = new URL(response.headers.location ?? '').searchParams.get('state') ?? '';
       const stored = await harness.store.takeTransaction(state);
       expect(stored?.returnTo).toBe(response === relative ? '/dashboard' : '/');
@@ -184,25 +201,47 @@ describe('GET /auth/callback', () => {
     const first = await harness.app.inject({
       method: 'GET',
       url: `/auth/callback?code=${code}&state=${encodeURIComponent(state)}`,
+      cookies: { bff_tx: state },
     });
     expect(first.statusCode).toBe(302);
     const replay = await harness.app.inject({
       method: 'GET',
       url: `/auth/callback?code=${code}&state=${encodeURIComponent(state)}`,
+      cookies: { bff_tx: state },
     });
     expect(replay.headers.location).toBe('/signin-failed?reason=invalid_state');
     // One exchange for the successful login only; the forged and replayed states never reached it.
     expect(harness.fake.tokenCallCount()).toBe(2);
   });
 
-  it('reports a token exchange failure and offers the Hosted page as fallback', async () => {
+  it('rejects a callback that was not started by this browser', async () => {
     const harness = createHarness();
     const { location } = await startLogin(harness);
+    const state = location.searchParams.get('state') ?? '';
+    const code = harness.fake.issueCode({
+      challenge: location.searchParams.get('code_challenge') ?? '',
+      redirectUri: idpConfig.redirectUri,
+      nonce: location.searchParams.get('nonce') ?? '',
+    });
+
+    // Valid state, but no transaction cookie: a URL minted for another browser (login CSRF).
+    const stolen = await harness.app.inject({
+      method: 'GET',
+      url: `/auth/callback?code=${code}&state=${encodeURIComponent(state)}`,
+    });
+    expect(stolen.headers.location).toBe('/signin-failed?reason=invalid_state');
+    expect(harness.fake.tokenCallCount()).toBe(0);
+  });
+
+  it('reports a token exchange failure and offers the Hosted page as fallback', async () => {
+    const harness = createHarness();
+    const { location, tx } = await startLogin(harness);
     const state = location.searchParams.get('state') ?? '';
     // The code was never issued by the fake IdP, so the exchange fails.
     const callback = await harness.app.inject({
       method: 'GET',
       url: `/auth/callback?code=unknown-code&state=${encodeURIComponent(state)}`,
+      cookies: { bff_tx: tx },
     });
     expect(callback.headers.location).toBe(
       '/signin-failed?reason=token_exchange_failed%3Ainvalid_grant',
@@ -257,11 +296,12 @@ describe('OIDC client hardening', () => {
 
   it('reports a network failure instead of throwing', async () => {
     const app = buildApp(() => Promise.reject(new Error('ECONNREFUSED')));
-    const { location } = await startLoginOn(app);
+    const { location, tx } = await startLoginOn(app);
     const state = location.searchParams.get('state') ?? '';
     const callback = await app.inject({
       method: 'GET',
       url: `/auth/callback?code=c&state=${encodeURIComponent(state)}`,
+      cookies: { bff_tx: tx },
     });
     expect(callback.headers.location).toBe(
       '/signin-failed?reason=token_exchange_failed%3AECONNREFUSED',
@@ -277,11 +317,12 @@ describe('OIDC client hardening', () => {
           headers: { 'Content-Type': 'application/json' },
         }),
     );
-    const { location } = await startLoginOn(app);
+    const { location, tx } = await startLoginOn(app);
     const state = location.searchParams.get('state') ?? '';
     const callback = await app.inject({
       method: 'GET',
       url: `/auth/callback?code=c&state=${encodeURIComponent(state)}`,
+      cookies: { bff_tx: tx },
     });
     expect(callback.headers.location).toBe(
       '/signin-failed?reason=token_exchange_failed%3Ainvalid_token_response',
@@ -291,11 +332,12 @@ describe('OIDC client hardening', () => {
 
   it('reports the HTTP status when the IdP returns a non-JSON error', async () => {
     const app = buildApp(async () => new Response('upstream down', { status: 503 }));
-    const { location } = await startLoginOn(app);
+    const { location, tx } = await startLoginOn(app);
     const state = location.searchParams.get('state') ?? '';
     const callback = await app.inject({
       method: 'GET',
       url: `/auth/callback?code=c&state=${encodeURIComponent(state)}`,
+      cookies: { bff_tx: tx },
     });
     expect(callback.headers.location).toBe(
       '/signin-failed?reason=token_exchange_failed%3Ahttp_503',
@@ -371,7 +413,9 @@ describe('InMemoryBffStore', () => {
 
 const startLoginOn = async (app: ReturnType<typeof buildBffApp>) => {
   const response = await app.inject({ method: 'GET', url: '/login' });
-  return { response, location: new URL(response.headers.location ?? '') };
+  const setCookie = (response.headers['set-cookie'] as string | undefined) ?? '';
+  const tx = /bff_tx=([^;]*)/.exec(setCookie)?.[1] ?? '';
+  return { response, location: new URL(response.headers.location ?? ''), tx };
 };
 
 describe('session lifecycle', () => {

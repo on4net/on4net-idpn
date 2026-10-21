@@ -60,13 +60,13 @@ importers:
         specifier: 14.0.3
         version: 14.0.3
       argon2:
-        specifier: ^0.45.1
+        specifier: 0.45.1
         version: 0.45.1
       fastify:
         specifier: 5.12.7
         version: 5.12.7
       jose:
-        specifier: ^6.2.12
+        specifier: 6.2.12
         version: 6.2.12
       nodemailer:
         specifier: 10.1.7
