@@ -8,6 +8,7 @@ import {
   contrastRatio,
   idpnThemeSchema,
   idpnThemeToCssVariables,
+  resolveThemeColor,
   sanitizeIdpnColor,
   sanitizeIdpnFont,
   sanitizeIdpnRadius,
@@ -231,6 +232,33 @@ describe('idpnThemeSchema', () => {
   });
 });
 
+describe('theme colour and font edge cases', () => {
+  it('rejects out-of-range channels, alphas and lightness values', () => {
+    expect(sanitizeIdpnColor('rgb(300, 0, 0)')).toBeUndefined();
+    expect(sanitizeIdpnColor('rgba(0, 0, 0, 2)')).toBeUndefined();
+    expect(sanitizeIdpnColor('hsl(0 50% 50% / 2)')).toBeUndefined();
+    expect(sanitizeIdpnColor('oklch(2 0 0)')).toBeUndefined();
+    expect(sanitizeIdpnColor('hsl(400deg 50% 50%)')).toBeUndefined();
+  });
+
+  it('maps font aliases and drops unknown families', () => {
+    expect(sanitizeIdpnFont('system-ui')).toBe('system');
+    expect(sanitizeIdpnFont("'Vazirmatn'")).toBe('vazirmatn');
+    expect(sanitizeIdpnFont('Comic Sans')).toBeUndefined();
+    expect(sanitizeIdpnRadius('12')).toBeUndefined();
+  });
+
+  it('falls back to the locale default when no font is configured', () => {
+    expect(idpnThemeToCssVariables({}, { locale: 'en-US' })['--idpn-font-sans']).toContain("'Inter'");
+    expect(idpnThemeToCssVariables({}, { locale: 'fa-IR' })['--idpn-font-sans']).toContain(
+      "'Vazirmatn'",
+    );
+    expect(idpnThemeToCssVariables({}, {})['--idpn-font-sans']).toContain("'Vazirmatn'");
+    expect(idpnThemeToCssVariables({ fontFamily: { ltr: 'system' } }, { dir: 'ltr' })).toMatchObject(
+      { '--idpn-font-ltr': 'system-ui, -apple-system, sans-serif' },
+    );
+  });
+});
 describe('theme contrast guard', () => {
   it('measures WCAG contrast ratios', () => {
     expect(contrastRatio('#000000', '#ffffff')).toBeCloseTo(21, 5);
@@ -253,6 +281,26 @@ describe('theme contrast guard', () => {
 
   it('drops a failing primary pair on the primary token', () => {
     expect(sanitizeIdpnTheme({ primary: '#ffffff', primaryForeground: '#ffffff' })).toEqual({});
+  });
+
+  it('resolves every supported colour syntax and rejects the rest', () => {    // rgb with percentage channels and an alpha channel.
+    expect(resolveThemeColor('rgb(100% 0% 0% / 50%)')).toMatchObject({ r: 1, g: 0, b: 0 });
+    // hsl with zero saturation is grey; a hue in turns is accepted.
+    expect(resolveThemeColor('hsl(0 0% 50%)')).toMatchObject({ r: 0.5, g: 0.5, b: 0.5 });
+    expect(resolveThemeColor('hsl(0.5turn 100% 50%)')).toMatchObject({ r: 0, b: 1 });
+    // oklch with percentage lightness/chroma (floating point, so compare approximately).
+    const white = resolveThemeColor('oklch(100% 0% 0)');
+    expect(white?.r).toBeCloseTo(1, 5);
+    expect(white?.g).toBeCloseTo(1, 5);
+    expect(white?.b).toBeCloseTo(1, 5);
+    // Shorthand hex and 8-digit hex.
+    expect(resolveThemeColor('#fff')).toMatchObject({ r: 1, g: 1, b: 1 });
+    expect(resolveThemeColor('#000000ff')).toMatchObject({ r: 0, g: 0, b: 0 });
+    // Values whose colour cannot be measured.
+    expect(resolveThemeColor('transparent')).toBeNull();
+    expect(resolveThemeColor('currentcolor')).toBeNull();
+    expect(resolveThemeColor('#12345')).toBeNull();
+    expect(contrastRatio('transparent', '#ffffff')).toBeNull();
   });
 
   it('keeps an accessible pair untouched', () => {
