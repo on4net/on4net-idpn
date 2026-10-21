@@ -133,6 +133,7 @@ export function registerLoginContextAdminRoutes(
     request: FastifyRequest,
     reply: FastifyReply,
     requirement: AdminRequirement,
+    attempted: { action: string; contextKey?: string },
   ): Promise<{ userId: string; clientId: string } | null> => {
     const auth: AdminAuthorization = await authorizeAdminRequest(
       request,
@@ -145,6 +146,29 @@ export function registerLoginContextAdminRoutes(
       requirement,
     );
     if (!auth.ok) {
+      // docs/login-contexts.md 9: a cross-context attempt is a `403` **and** an audit row.
+      // The refused call is recorded before the response so the denial cannot be lost; a
+      // request without a verified token carries no actor instead of a guessed one.
+      await options.audit.record({
+        actorType: auth.actorId === undefined ? 'anonymous' : 'admin',
+        actorId: auth.actorId ?? null,
+        action: 'client.context.denied',
+        targetType: 'login_context',
+        // `target_id` is a UUID column and a context key is not one; the key travels in
+        // metadata next to the client id.
+        targetId: null,
+        clientId: requirement.clientId ?? null,
+        ip: request.ip ?? null,
+        userAgent: request.headers['user-agent'] ?? null,
+        result: 'failure',
+        metadata: {
+          attempted: attempted.action,
+          permission: requirement.permission,
+          status: auth.status,
+          reason: auth.error,
+          ...(attempted.contextKey === undefined ? {} : { key: attempted.contextKey }),
+        },
+      });
       if (auth.status === 401) {
         reply.header('WWW-Authenticate', '******"invalid_token"');
       }
@@ -167,6 +191,7 @@ export function registerLoginContextAdminRoutes(
       | 'client.context.created'
       | 'client.context.updated'
       | 'client.context.disabled'
+      | 'client.context.enabled'
       | 'client.context.deleted',
     clientId: string,
     targetId: string,
@@ -208,7 +233,10 @@ export function registerLoginContextAdminRoutes(
     '/api/v1/clients/:clientId/login-contexts',
     async (request, reply) => {
       const clientId = request.params.clientId;
-      if ((await guard(request, reply, { permission: CONTEXT_READ, clientId })) === null) {
+      if (
+        (await guard(request, reply, { permission: CONTEXT_READ, clientId }, { action: 'list' })) ===
+        null
+      ) {
         return reply;
       }
       const result = await options.contexts.list(clientId);
@@ -223,12 +251,17 @@ export function registerLoginContextAdminRoutes(
     '/api/v1/clients/:clientId/login-contexts',
     async (request, reply) => {
       const clientId = request.params.clientId;
-      const principal = await guard(request, reply, {
-        permission: CONTEXT_WRITE,
-        clientId,
-        // Creating a context always sets allowedRoles/mfaPolicy/loginMethods.
-        stepUp: true,
-      });
+      const principal = await guard(
+        request,
+        reply,
+        {
+          permission: CONTEXT_WRITE,
+          clientId,
+          // Creating a context always sets allowedRoles/mfaPolicy/loginMethods.
+          stepUp: true,
+        },
+        { action: 'create' },
+      );
       if (principal === null) {
         return reply;
       }
@@ -267,7 +300,14 @@ export function registerLoginContextAdminRoutes(
     '/api/v1/clients/:clientId/login-contexts/:key',
     async (request, reply) => {
       const { clientId, key } = request.params;
-      if ((await guard(request, reply, { permission: CONTEXT_READ, clientId })) === null) {
+      if (
+        (await guard(
+          request,
+          reply,
+          { permission: CONTEXT_READ, clientId },
+          { action: 'read', contextKey: key },
+        )) === null
+      ) {
         return reply;
       }
       const result = await options.contexts.find(clientId, key);
@@ -285,11 +325,16 @@ export function registerLoginContextAdminRoutes(
     '/api/v1/clients/:clientId/login-contexts/:key',
     async (request, reply) => {
       const { clientId, key } = request.params;
-      const principal = await guard(request, reply, {
-        permission: CONTEXT_WRITE,
-        clientId,
-        stepUp: bodyTouchesPolicy(request.body),
-      });
+      const principal = await guard(
+        request,
+        reply,
+        {
+          permission: CONTEXT_WRITE,
+          clientId,
+          stepUp: bodyTouchesPolicy(request.body),
+        },
+        { action: 'update', contextKey: key },
+      );
       if (principal === null) {
         return reply;
       }
@@ -340,7 +385,12 @@ export function registerLoginContextAdminRoutes(
     '/api/v1/clients/:clientId/login-contexts/:key/disable',
     async (request, reply) => {
       const { clientId, key } = request.params;
-      const principal = await guard(request, reply, { permission: CONTEXT_WRITE, clientId });
+      const principal = await guard(
+        request,
+        reply,
+        { permission: CONTEXT_WRITE, clientId },
+        { action: 'disable', contextKey: key },
+      );
       if (principal === null) {
         return reply;
       }
@@ -360,11 +410,45 @@ export function registerLoginContextAdminRoutes(
     },
   );
 
+  app.post<{ Params: { clientId: string; key: string } }>(
+    '/api/v1/clients/:clientId/login-contexts/:key/enable',
+    async (request, reply) => {
+      const { clientId, key } = request.params;
+      const principal = await guard(
+        request,
+        reply,
+        { permission: CONTEXT_WRITE, clientId, stepUp: true },
+        { action: 'enable', contextKey: key },
+      );
+      if (principal === null) {
+        return reply;
+      }
+      const enabled = await options.contexts.enable(clientId, key);
+      if (!enabled.ok) {
+        return failure(reply, enabled);
+      }
+      await audit(
+        request,
+        principal,
+        'client.context.enabled',
+        clientId,
+        enabled.value.id,
+        enabled.value.key,
+      );
+      return reply.header('Cache-Control', 'no-store').send(enabled.value);
+    },
+  );
+
   app.delete<{ Params: { clientId: string; key: string } }>(
     '/api/v1/clients/:clientId/login-contexts/:key',
     async (request, reply) => {
       const { clientId, key } = request.params;
-      const principal = await guard(request, reply, { permission: CONTEXT_WRITE, clientId });
+      const principal = await guard(
+        request,
+        reply,
+        { permission: CONTEXT_WRITE, clientId },
+        { action: 'delete', contextKey: key },
+      );
       if (principal === null) {
         return reply;
       }

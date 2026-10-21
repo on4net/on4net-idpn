@@ -98,10 +98,10 @@ function hasControlCharacters(value: string): boolean {
 }
 
 /**
- * Context `branding` is admin-authored JSON and is not shape-validated on write, so only
- * the documented presentation fields are copied: a plain-text title, an `http(s)` logo URL
- * and theme tokens sanitized by the shared contract. Anything else is dropped, so a stored
- * `url(...)`, `javascript:` or unknown field can never reach the browser.
+ * Context `branding` is shape-validated when it is written (docs/login-contexts.md 7.1) and
+ * is sanitized again here, so a row written before that validation existed — or by a direct
+ * database change — still cannot push `url(...)`, `javascript:` or an unknown field into the
+ * browser. Only the documented presentation fields are copied.
  */
 function sanitizeContextBranding(raw: unknown): PublicLoginContextBranding | undefined {
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {

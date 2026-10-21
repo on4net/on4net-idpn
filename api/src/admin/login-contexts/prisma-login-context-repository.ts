@@ -258,7 +258,7 @@ export function createPrismaLoginContextRepository(
         case 'disabled-default':
           return failure(
             'default-context',
-            'a disabled login context cannot become the default; enable another active context instead',
+            'a disabled login context cannot become the default; enable it first or make another active context the default',
           );
         case 'ok':
           return { ok: true, value: toContext(outcome.row) };
@@ -301,6 +301,42 @@ export function createPrismaLoginContextRepository(
           );
         case 'disabled-default':
           return failure('default-context', 'a disabled login context cannot become the default');
+        case 'ok':
+          return { ok: true, value: toContext(outcome.row) };
+      }
+    },
+
+    async enable(clientId, key) {
+      const client = await resolveClient(clientId);
+      if (client === null) {
+        return failure('client-not-found', 'client does not exist');
+      }
+      const outcome = await prisma.$transaction(async (tx): Promise<UpdateOutcome> => {
+        await lockClient(tx, client.id);
+        const existing = await tx.clientLoginContext.findUnique({
+          where: { clientId_key: { clientId: client.id, key } },
+        });
+        if (existing === null) {
+          return { kind: 'missing' };
+        }
+        // Enabling is the inverse of disable and never touches the default pointers: a
+        // disabled context can never be the default, so there is nothing to re-mirror.
+        if (existing.status === 'active') {
+          return { kind: 'ok', row: existing };
+        }
+        const row = await tx.clientLoginContext.update({
+          where: { id: existing.id },
+          data: { status: 'active' },
+        });
+        return { kind: 'ok', row };
+      });
+
+      switch (outcome.kind) {
+        case 'missing':
+          return failure('not-found', 'login context does not exist');
+        case 'default-context':
+        case 'disabled-default':
+          return failure('default-context', 'the login context status cannot be changed this way');
         case 'ok':
           return { ok: true, value: toContext(outcome.row) };
       }

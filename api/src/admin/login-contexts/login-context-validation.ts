@@ -7,6 +7,8 @@
  * still hold after a partial update).
  */
 
+import { loginContextBrandingSchema } from '@idpn/contracts';
+
 import {
   LOGIN_CONTEXT_MFA_POLICIES,
   LOGIN_CONTEXT_REGISTRATION_POLICIES,
@@ -160,6 +162,39 @@ export function sessionTtlProblems(
   return problems;
 }
 
+/**
+ * Validates context `branding` at write time (docs/login-contexts.md 7.1).
+ *
+ * The public config already sanitizes what it publishes, but a row that is only safe
+ * downstream can still be read by another consumer (export, future UI, a second service).
+ * The shared contract therefore decides here: a plain-text `title`, an `http(s)` `logoUrl`
+ * and theme tokens, with unknown keys rejected so a stored `url(...)` or raw CSS can never
+ * appear.
+ */
+export function brandingProblems(branding: Record<string, unknown> | null): string[] {
+  if (branding === null) {
+    return [];
+  }
+  if (!isPlainObject(branding)) {
+    return ['branding: must be an object'];
+  }
+  if (
+    Buffer.byteLength(JSON.stringify(branding), 'utf8') > MAX_LOGIN_CONTEXT_BRANDING_BYTES
+  ) {
+    return [
+      `branding: must be at most ${MAX_LOGIN_CONTEXT_BRANDING_BYTES} bytes when serialized`,
+    ];
+  }
+  const parsed = loginContextBrandingSchema.safeParse(branding);
+  if (parsed.success) {
+    return [];
+  }
+  return parsed.error.issues.map((issue) => {
+    const path = issue.path.map((segment) => String(segment)).join('.');
+    return path === '' ? `branding: ${issue.message}` : `branding.${path}: ${issue.message}`;
+  });
+}
+
 /** Every documented rule that does not need a database lookup beyond the client's roles. */
 export function loginContextInputProblems(
   input: LoginContextValidationInput,
@@ -226,17 +261,7 @@ export function loginContextInputProblems(
 
   problems.push(...sessionTtlProblems(input));
 
-  if (input.branding !== null) {
-    if (!isPlainObject(input.branding)) {
-      problems.push('branding: must be an object');
-    } else if (
-      Buffer.byteLength(JSON.stringify(input.branding), 'utf8') > MAX_LOGIN_CONTEXT_BRANDING_BYTES
-    ) {
-      problems.push(
-        `branding: must be at most ${MAX_LOGIN_CONTEXT_BRANDING_BYTES} bytes when serialized`,
-      );
-    }
-  }
+  problems.push(...brandingProblems(input.branding));
 
   if (
     !Number.isInteger(input.sortOrder) ||

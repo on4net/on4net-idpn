@@ -95,5 +95,7 @@ export interface AdminLoginContextRepository {
   ): Promise<LoginContextResult<AdminLoginContext>>;
   /** Marks the context `disabled`; the row and its memberships are kept. */
   disable(clientId: string, key: string): Promise<LoginContextResult<AdminLoginContext>>;
+  /** Returns a disabled context to `active`; idempotent when it already is. */
+  enable(clientId: string, key: string): Promise<LoginContextResult<AdminLoginContext>>;
   remove(clientId: string, key: string): Promise<LoginContextResult<null>>;
 }

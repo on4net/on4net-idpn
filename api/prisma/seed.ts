@@ -384,13 +384,16 @@ async function seedCatalog(prisma: SeedClient): Promise<void> {
       if (roleId === undefined) {
         throw new Error(`User ${user.email} references unknown role ${roleKey}`);
       }
-      // The unique tuple is enforced with NULLS NOT DISTINCT (migration 0002), so a single
-      // `ON CONFLICT DO NOTHING` replaces the previous check-then-insert race.
+      // The unique tuple is enforced with NULLS NOT DISTINCT and now includes the granting
+      // membership (migrations 0002 and 0011), so a single `ON CONFLICT DO NOTHING` replaces
+      // the previous check-then-insert race for an unattributed seed assignment.
       await prisma.$executeRaw`
         INSERT INTO "assignments"
-          ("subject_type", "subject_id", "role_id", "scope_type", "scope_id", "assigned_by")
-        VALUES ('user', ${record.id}::uuid, ${roleId}::uuid, 'global', NULL, ${record.id}::uuid)
-        ON CONFLICT ("subject_type", "subject_id", "role_id", "scope_type", "scope_id") DO NOTHING
+          ("subject_type", "subject_id", "role_id", "scope_type", "scope_id",
+           "source_membership_id", "assigned_by")
+        VALUES ('user', ${record.id}::uuid, ${roleId}::uuid, 'global', NULL, NULL, ${record.id}::uuid)
+        ON CONFLICT ("subject_type", "subject_id", "role_id", "scope_type", "scope_id",
+                     "source_membership_id") DO NOTHING
       `;
     }
   }

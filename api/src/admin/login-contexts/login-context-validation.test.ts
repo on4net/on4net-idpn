@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  brandingProblems,
   loginContextInputProblems,
   loginContextKeyProblem,
   roleProblems,
@@ -182,6 +183,18 @@ describe('loginContextInputProblems', () => {
     expect(problems[0]).toContain('branding: must be at most 8192 bytes');
   });
 
+  it('rejects branding that is not the documented presentation shape', () => {
+    expect(validate({ branding: { title: 'Admin', rawCss: 'body{}' } })[0]).toContain(
+      'branding:',
+    );
+    expect(validate({ branding: { logoUrl: 'javascript:alert(1)' } })[0]).toContain(
+      'branding.logoUrl',
+    );
+    expect(validate({ branding: { theme: { primary: 'url(javascript:alert(1))' } } })[0]).toContain(
+      'branding.theme',
+    );
+  });
+
   it('aggregates every problem instead of failing on the first', () => {
     const problems = validate({
       key: 'Bad Key',
@@ -190,5 +203,41 @@ describe('loginContextInputProblems', () => {
       sortOrder: 1.5,
     });
     expect(problems).toHaveLength(4);
+  });
+});
+
+describe('brandingProblems', () => {
+  it('accepts the documented presentation fields and a missing branding', () => {
+    expect(brandingProblems(null)).toEqual([]);
+    expect(
+      brandingProblems({
+        title: 'Customer admin',
+        logoUrl: 'https://cdn.example.com/admin.svg',
+        theme: { primary: '#0f766e' },
+      }),
+    ).toEqual([]);
+  });
+
+  it('rejects unknown keys so raw CSS cannot be stored', () => {
+    expect(brandingProblems({ title: 'Admin', rawCss: 'body{}' })[0]).toContain('branding');
+    expect(brandingProblems({ title: 'Admin', rawCss: 'body{}' })[0]).toContain('rawCss');
+  });
+
+  it('rejects a non-http(s) logo and invalid theme tokens', () => {
+    expect(brandingProblems({ logoUrl: 'javascript:alert(1)' })).toEqual([
+      'branding.logoUrl: must be an http(s) URL',
+    ]);
+    expect(brandingProblems({ theme: { primary: 'url(javascript:alert(1))' } })[0]).toContain(
+      'branding.theme.primary',
+    );
+  });
+
+  it('rejects a non-object or oversized branding payload', () => {
+    expect(brandingProblems([] as unknown as Record<string, unknown>)).toEqual([
+      'branding: must be an object',
+    ]);
+    expect(brandingProblems({ title: 'x'.repeat(9 * 1024) })[0]).toContain(
+      'branding: must be at most 8192 bytes',
+    );
   });
 });

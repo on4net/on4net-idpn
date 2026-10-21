@@ -544,11 +544,15 @@ POST /api/v1/users
 | GET    | `/api/v1/clients/{clientId}/login-contexts/{key}`                  | `idp:client-context:read`  | جزئیات                 |
 | PATCH  | `/api/v1/clients/{clientId}/login-contexts/{key}`                  | `idp:client-context:write` | ویرایش سیاست‌ها        |
 | POST   | `/api/v1/clients/{clientId}/login-contexts/{key}/disable`          | `idp:client-context:write` | غیرفعال‌سازی           |
+| POST   | `/api/v1/clients/{clientId}/login-contexts/{key}/enable`           | `idp:client-context:write` | فعال‌سازی دوباره (Step-up) |
 | DELETE | `/api/v1/clients/{clientId}/login-contexts/{key}`                  | `idp:client-context:write` | حذف (بدون عضویت فعال)  |
 | GET    | `/api/v1/clients/{clientId}/login-contexts/{key}/members`          | `idp:client-member:read`   | اعضای همان Context     |
 | POST   | `/api/v1/clients/{clientId}/login-contexts/{key}/members/invite`   | `idp:client-member:invite` | دعوت به Context        |
+| GET    | `/api/v1/clients/{clientId}/login-contexts/{key}/members/{userId}` | `idp:client-member:read`   | عضویت همان Context     |
 | PATCH  | `/api/v1/clients/{clientId}/login-contexts/{key}/members/{userId}` | `idp:client-member:write`  | تغییر وضعیت/ویژگی      |
 | DELETE | `/api/v1/clients/{clientId}/login-contexts/{key}/members/{userId}` | `idp:client-member:write`  | حذف عضویت همان Context |
+| PUT    | `/api/v1/clients/{clientId}/login-contexts/{key}/members/{userId}/roles` | `idp:client-role:assign` + Step-up | جایگزینی نقش‌های همان عضویت |
+| POST   | `/api/v1/clients/{clientId}/login-contexts/{key}/members/{userId}/invite/resend` | `idp:client-member:invite` | ارسال دوباره دعوت |
 
 **ایجاد Context:**
 
@@ -571,6 +575,9 @@ POST /api/v1/users
 - `allowedRoles` فقط نقش‌هایی با `clientId` همین اپ را می‌پذیرد؛ نقش `idp:*` → `422`.
 - فقط یک Context می‌تواند `isDefault=true` باشد.
 - تغییر `allowedRoles`، `mfaPolicy` یا `loginMethods` نیازمند Step-up و Audit است.
+- `branding` فقط `title` (متن ساده)، `logoUrl` (`http(s)`) و `theme` را می‌پذیرد؛ کلید ناشناخته → `422`.
+- `enable` وضعیت را به `active` برمی‌گرداند (Audit: `client.context.enabled`) و نیازمند Step-up است؛ یک Context غیرفعال را نمی‌توان پیش‌فرض کرد.
+- هر رد شدن (401/403) روی این مسیرها با `client.context.denied` و `result=failure` ثبت می‌شود.
 - جزئیات جریان و امنیت: [login-contexts.md](./login-contexts.md).
 
 ### 3.3.4 زبان و ترجمه هر اپ

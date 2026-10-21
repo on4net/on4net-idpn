@@ -79,6 +79,13 @@ export type AdminAuthorization =
       error:
         'invalid_token' | 'insufficient_scope' | 'forbidden' | 'insufficient_user_authentication';
       message: string;
+      /**
+       * Verified token subject when the token itself validated and only the authorization
+       * decision failed. Routes use it to audit a denied call with its actor; it is absent
+       * when no valid token could be read, so an unauthenticated request is never attributed
+       * to a user.
+       */
+      actorId?: string;
     };
 
 /** Extracts the bearer token from an `Authorization` header. */
@@ -115,7 +122,8 @@ const denied = (
   status: 401 | 403,
   error: Extract<AdminAuthorization, { ok: false }>['error'],
   message: string,
-): AdminAuthorization => ({ ok: false, status, error, message });
+  actorId?: string,
+): AdminAuthorization => ({ ok: false, status, error, message, ...(actorId === undefined ? {} : { actorId }) });
 
 /**
  * True when the token proves a multi-factor authentication: the documented ACR plus an AMR
@@ -198,7 +206,12 @@ export async function authorizeAdminRequest(
   const subject = typeof payload['sub'] === 'string' ? payload['sub'] : '';
   const clientId = typeof payload['client_id'] === 'string' ? payload['client_id'] : '';
   if (subject === '' || clientId === '') {
-    return denied(401, 'invalid_token', 'token claims are incomplete');
+    return denied(
+      401,
+      'invalid_token',
+      'token claims are incomplete',
+      subject === '' ? undefined : subject,
+    );
   }
 
   const scopes =
@@ -206,25 +219,30 @@ export async function authorizeAdminRequest(
 
   if (!delegated) {
     if (clientId !== options.adminClientId) {
-      return denied(403, 'insufficient_scope', 'token was issued to a different client');
+      return denied(403, 'insufficient_scope', 'token was issued to a different client', subject);
     }
     if (!scopes.includes(ADMIN_SCOPE)) {
-      return denied(403, 'insufficient_scope', `scope ${ADMIN_SCOPE} is required`);
+      return denied(403, 'insufficient_scope', `scope ${ADMIN_SCOPE} is required`, subject);
     }
   } else {
     if (requirement.clientId !== undefined && clientId !== requirement.clientId) {
-      return denied(403, 'insufficient_scope', 'token was issued to a different client');
+      return denied(403, 'insufficient_scope', 'token was issued to a different client', subject);
     }
     if (!scopes.includes(CLIENT_ADMIN_SCOPE)) {
-      return denied(403, 'insufficient_scope', `scope ${CLIENT_ADMIN_SCOPE} is required`);
+      return denied(403, 'insufficient_scope', `scope ${CLIENT_ADMIN_SCOPE} is required`, subject);
     }
     if (requirement.authenticatedOnly !== true) {
       const delegatedPermission = requirement.delegatedPermission ?? requirement.permission;
       if (!isClientScopedPermission(delegatedPermission)) {
-        return denied(403, 'forbidden', 'delegated tokens cannot perform this operation');
+        return denied(
+          403,
+          'forbidden',
+          'delegated tokens cannot perform this operation',
+          subject,
+        );
       }
       if (options.permissions.clientPermissionsForUser === undefined) {
-        return denied(403, 'forbidden', 'delegated administration is not configured');
+        return denied(403, 'forbidden', 'delegated administration is not configured', subject);
       }
     }
   }
@@ -238,6 +256,7 @@ export async function authorizeAdminRequest(
         403,
         'insufficient_user_authentication',
         'recent authentication is required for this operation',
+        subject,
       );
     }
     // A fresh password entry is not proof of MFA: the token must carry the MFA ACR and an
@@ -247,6 +266,7 @@ export async function authorizeAdminRequest(
         403,
         'insufficient_user_authentication',
         'multi-factor authentication is required for this operation',
+        subject,
       );
     }
   }
@@ -272,7 +292,7 @@ export async function authorizeAdminRequest(
     : await options.permissions.globalPermissionsForUser(subject);
   const permissionSet = new Set(held);
   if (!permissionSet.has(requiredPermission)) {
-    return denied(403, 'forbidden', `permission ${requiredPermission} is required`);
+    return denied(403, 'forbidden', `permission ${requiredPermission} is required`, subject);
   }
 
   return {

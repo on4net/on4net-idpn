@@ -397,6 +397,8 @@ model ClientMembership {
   loginContext ClientLoginContext? @relation(fields: [loginContextId], references: [id], onDelete: Restrict)
   user         User                @relation("MembershipUser", fields: [userId], references: [id], onDelete: Restrict)
   inviter      User?               @relation("MembershipInviter", fields: [invitedBy], references: [id], onDelete: SetNull)
+  /// Role grants this membership is the source of (docs/domain-model.md 2.11).
+  assignments  Assignment[]
 
   // The migration creates this constraint with NULLS NOT DISTINCT so that a single
   // default-context membership (login_context_id IS NULL) is enforced per client and user.
@@ -458,17 +460,24 @@ model Assignment {
   roleId      String                @map("role_id") @db.Uuid
   scopeType   AssignmentScopeType   @default(global) @map("scope_type")
   scopeId     String?               @map("scope_id") @db.Uuid
+  /// Membership that granted this assignment; removing the membership removes the grant
+  /// (docs/domain-model.md 2.11). Null for directly administered assignments.
+  sourceMembershipId String?        @map("source_membership_id") @db.Uuid
   expiresAt   DateTime?             @map("expires_at") @db.Timestamptz(6)
   assignedBy  String                @map("assigned_by") @db.Uuid
   createdAt   DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
 
   role Role @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  sourceMembership ClientMembership? @relation(fields: [sourceMembershipId], references: [id], onDelete: Cascade)
 
   // subject_id / scope_id / assigned_by are polymorphic (user, group, service, organization)
-  // and therefore intentionally not foreign keys.
-  @@unique([subjectType, subjectId, roleId, scopeType, scopeId])
+  // and therefore intentionally not foreign keys. The migration creates this unique key with
+  // NULLS NOT DISTINCT so an unattributed assignment stays unique while two memberships may
+  // hold the same role independently.
+  @@unique([subjectType, subjectId, roleId, scopeType, scopeId, sourceMembershipId])
   @@index([roleId])
   @@index([subjectType, subjectId])
+  @@index([sourceMembershipId])
   @@map("assignments")
 }
 

@@ -17,7 +17,7 @@ import {
   replaceMemberRolesSchema,
   updateMemberSchema,
 } from './member-schemas.js';
-import type { AdminMemberRepository, MemberResult } from './member-types.js';
+import type { AdminMemberRepository, MemberResult, MemberScope } from './member-types.js';
 
 export interface MemberRoutesOptions {
   issuer: string;
@@ -309,6 +309,94 @@ export function registerMemberAdminRoutes(
     },
   );
 
+  /**
+   * Re-sends a pending invitation (docs/api.md 3.3.1 and 3.3.3). Shared by the client-wide
+   * and the context endpoint so a context invitation whose delivery failed has a recovery
+   * path of its own; the limiter is keyed per membership (and per context), and the audit row
+   * carries the context key.
+   */
+  const resendInvitation = async (
+    request: FastifyRequest,
+    reply: FastifyReply,
+    principal: { userId: string },
+    clientId: string,
+    userId: string,
+    scope?: MemberScope,
+  ): Promise<FastifyReply> => {
+    const member = await options.members.find(clientId, userId, scope);
+    if (member === null) {
+      return sendProblem(reply, 404, 'not-found', 'Not found', 'membership does not exist');
+    }
+    if (member.status !== 'invited') {
+      return sendProblem(
+        reply,
+        409,
+        'conflict',
+        'Conflict',
+        'only a pending invitation can be resent',
+      );
+    }
+    // 5 resends per hour per membership (docs/security.md 3.2, email sending limit).
+    const bucket =
+      scope?.loginContext === undefined
+        ? `member-invite-resend:${clientId}:${userId}`
+        : `member-invite-resend:${clientId}:${scope.loginContext}:${userId}`;
+    if (!(await resendLimiter.consume(bucket, { windowSeconds: 3600, max: 5 }))) {
+      reply.header('Retry-After', '3600');
+      return sendProblem(reply, 429, 'rate-limited', 'Too many requests', 'try again later');
+    }
+    if (options.notifications === undefined) {
+      return sendProblem(
+        reply,
+        503,
+        'service-unavailable',
+        'Service unavailable',
+        'mail delivery is not configured',
+      );
+    }
+
+    let delivery: 'invitation' | 'notification' | 'skipped';
+    try {
+      delivery = await options.notifications.sendInvite(userId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'unknown error';
+      console.error(`invite resend mail failed: ${message}`);
+      await audit(
+        request,
+        principal,
+        'member.invite.resend_failed',
+        clientId,
+        member.membershipId,
+        {
+          userId,
+          ...(member.loginContextKey === null ? {} : { loginContext: member.loginContextKey }),
+        },
+      );
+      return sendProblem(
+        reply,
+        503,
+        'service-unavailable',
+        'Service unavailable',
+        'invitation mail could not be sent',
+      );
+    }
+    if (delivery === 'skipped') {
+      return sendProblem(
+        reply,
+        409,
+        'conflict',
+        'Conflict',
+        'the invited account is no longer available',
+      );
+    }
+    await audit(request, principal, 'member.invite.resend', clientId, member.membershipId, {
+      userId,
+      delivery,
+      ...(member.loginContextKey === null ? {} : { loginContext: member.loginContextKey }),
+    });
+    return reply.code(202).send({ status: 'accepted', delivery });
+  };
+
   app.post<{ Params: { clientId: string; userId: string } }>(
     '/api/v1/clients/:clientId/members/:userId/invite/resend',
     async (request, reply) => {
@@ -320,77 +408,7 @@ export function registerMemberAdminRoutes(
       if (principal === null) {
         return reply;
       }
-      const member = await options.members.find(clientId, userId);
-      if (member === null) {
-        return sendProblem(reply, 404, 'not-found', 'Not found', 'membership does not exist');
-      }
-      if (member.status !== 'invited') {
-        return sendProblem(
-          reply,
-          409,
-          'conflict',
-          'Conflict',
-          'only a pending invitation can be resent',
-        );
-      }
-      // 5 resends per hour per membership (docs/security.md 3.2, email sending limit).
-      if (
-        !(await resendLimiter.consume(`member-invite-resend:${clientId}:${userId}`, {
-          windowSeconds: 3600,
-          max: 5,
-        }))
-      ) {
-        reply.header('Retry-After', '3600');
-        return sendProblem(reply, 429, 'rate-limited', 'Too many requests', 'try again later');
-      }
-      if (options.notifications === undefined) {
-        return sendProblem(
-          reply,
-          503,
-          'service-unavailable',
-          'Service unavailable',
-          'mail delivery is not configured',
-        );
-      }
-
-      let delivery: 'invitation' | 'notification' | 'skipped';
-      try {
-        delivery = await options.notifications.sendInvite(userId);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'unknown error';
-        console.error(`invite resend mail failed: ${message}`);
-        await audit(
-          request,
-          principal,
-          'member.invite.resend_failed',
-          clientId,
-          member.membershipId,
-          {
-            userId,
-          },
-        );
-        return sendProblem(
-          reply,
-          503,
-          'service-unavailable',
-          'Service unavailable',
-          'invitation mail could not be sent',
-        );
-      }
-      if (delivery === 'skipped') {
-        return sendProblem(
-          reply,
-          409,
-          'conflict',
-          'Conflict',
-          'the invited account is no longer available',
-        );
-      }
-      await audit(request, principal, 'member.invite.resend', clientId, member.membershipId, {
-        userId,
-        delivery,
-      });
-      return reply.code(202).send({ status: 'accepted', delivery });
+      return resendInvitation(request, reply, principal, clientId, userId);
     },
   );
 
@@ -641,6 +659,22 @@ export function registerMemberAdminRoutes(
         loginContext: key,
       });
       return reply.code(201).send({ member, createdUser, invited: true });
+    },
+  );
+
+  app.post<{ Params: { clientId: string; key: string; userId: string } }>(
+    '/api/v1/clients/:clientId/login-contexts/:key/members/:userId/invite/resend',
+    async (request, reply) => {
+      const { clientId, key, userId } = request.params;
+      const principal = await guardContext(request, reply, clientId, key, {
+        permission: MEMBER_INVITE,
+      });
+      if (principal === null) {
+        return reply;
+      }
+      return resendInvitation(request, reply, principal, clientId, userId, {
+        loginContext: key,
+      });
     },
   );
 

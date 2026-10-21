@@ -381,39 +381,47 @@ describe('initial schema', () => {
 
   it('rolls back and re-applies the migrations', async () => {
     const latest = await rollbackLatestMigration({ connectionString, confirm: true });
-    expect(latest).toBe('0010_missing_fk_indexes');
+    expect(latest).toBe('0011_assignment_source_membership');
+    const sourceColumn = await client.query<{ column: string | null }>(
+      `SELECT column_name AS "column" FROM information_schema.columns
+        WHERE table_name = 'assignments' AND column_name = 'source_membership_id'`,
+    );
+    expect(sourceColumn.rows[0]?.column ?? null).toBeNull();
+
+    const second = await rollbackLatestMigration({ connectionString, confirm: true });
+    expect(second).toBe('0010_missing_fk_indexes');
     const runtimeIndex = await client.query<{ indexname: string | null }>(
       `SELECT to_regclass('public.refresh_tokens_client_id_idx') AS indexname`,
     );
     expect(runtimeIndex.rows[0]?.indexname).toBeNull();
 
-    const second = await rollbackLatestMigration({ connectionString, confirm: true });
-    expect(second).toBe('0009_session_login_context');
+    const third = await rollbackLatestMigration({ connectionString, confirm: true });
+    expect(third).toBe('0009_session_login_context');
     const contextColumn = await client.query<{ column: string | null }>(
       `SELECT column_name AS "column" FROM information_schema.columns
         WHERE table_name = 'sessions' AND column_name = 'login_context'`,
     );
     expect(contextColumn.rows[0]?.column ?? null).toBeNull();
 
-    const third = await rollbackLatestMigration({ connectionString, confirm: true });
-    expect(third).toBe('0008_client_translations');
+    const fourth = await rollbackLatestMigration({ connectionString, confirm: true });
+    expect(fourth).toBe('0008_client_translations');
     const translationTable = await client.query<{ translations: string | null }>(
       `SELECT to_regclass('public.client_translations') AS translations`,
     );
     expect(translationTable.rows[0]?.translations).toBeNull();
 
-    const fourth = await rollbackLatestMigration({ connectionString, confirm: true });
-    expect(fourth).toBe('0007_login_context_binding');
     const fifth = await rollbackLatestMigration({ connectionString, confirm: true });
-    expect(fifth).toBe('0006_webauthn_credentials');
+    expect(fifth).toBe('0007_login_context_binding');
     const sixth = await rollbackLatestMigration({ connectionString, confirm: true });
-    expect(sixth).toBe('0005_account_tokens');
+    expect(sixth).toBe('0006_webauthn_credentials');
     const seventh = await rollbackLatestMigration({ connectionString, confirm: true });
-    expect(seventh).toBe('0004_mfa_factors');
+    expect(seventh).toBe('0005_account_tokens');
     const eighth = await rollbackLatestMigration({ connectionString, confirm: true });
-    expect(eighth).toBe('0003_audit_events_append_only');
+    expect(eighth).toBe('0004_mfa_factors');
     const ninth = await rollbackLatestMigration({ connectionString, confirm: true });
-    expect(ninth).toBe('0002_assignments_nulls_not_distinct');
+    expect(ninth).toBe('0003_audit_events_append_only');
+    const tenth = await rollbackLatestMigration({ connectionString, confirm: true });
+    expect(tenth).toBe('0002_assignments_nulls_not_distinct');
     const rolledBack = await rollbackLatestMigration({ connectionString, confirm: true });
     expect(rolledBack).toBe('0001_init');
 
@@ -421,7 +429,7 @@ describe('initial schema', () => {
     const history = await client.query<{ migration_name: string; rolled_back_at: Date | null }>(
       `SELECT "migration_name", "rolled_back_at" FROM "_prisma_migrations"`,
     );
-    expect(history.rows).toHaveLength(10);
+    expect(history.rows).toHaveLength(11);
     expect(history.rows.every((row) => row.rolled_back_at !== null)).toBe(true);
 
     const afterRollback = await client.query<{ users: string | null }>(

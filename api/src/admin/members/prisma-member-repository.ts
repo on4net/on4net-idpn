@@ -300,7 +300,17 @@ export function createPrismaMemberRepository(
     return resolved.ok ? resolved.roles.map((role) => role.id) : [];
   };
 
-  const assignRoles = async (userId: string, roleIds: string[], assignedBy: string) => {
+  /**
+   * Grants roles on behalf of one membership (docs/domain-model.md 2.11). `sourceMembershipId`
+   * is what makes the grant removable without touching a sibling context that allows the same
+   * role; `null` is reserved for directly administered assignments.
+   */
+  const assignRoles = async (
+    userId: string,
+    roleIds: string[],
+    assignedBy: string,
+    sourceMembershipId: string | null,
+  ) => {
     if (roleIds.length === 0) {
       return;
     }
@@ -311,6 +321,7 @@ export function createPrismaMemberRepository(
         roleId: { in: roleIds },
         scopeType: 'global',
         scopeId: null,
+        sourceMembershipId,
       },
       select: { roleId: true },
     });
@@ -324,6 +335,7 @@ export function createPrismaMemberRepository(
           roleId,
           scopeType: 'global',
           scopeId: null,
+          sourceMembershipId,
           assignedBy,
         })),
         skipDuplicates: true,
@@ -462,19 +474,22 @@ export function createPrismaMemberRepository(
       }
 
       const at = now();
+      let membershipId: string;
       try {
-        await prisma.clientMembership.create({
-          data: {
-            clientId: client.id,
-            loginContextId: context?.id ?? null,
-            userId,
-            status: 'invited',
-            attributes: input.attributes as never,
-            invitedBy: input.invitedBy,
-            invitedAt: at,
-          },
-          select: { id: true },
-        });
+        membershipId = (
+          await prisma.clientMembership.create({
+            data: {
+              clientId: client.id,
+              loginContextId: context?.id ?? null,
+              userId,
+              status: 'invited',
+              attributes: input.attributes as never,
+              invitedBy: input.invitedBy,
+              invitedAt: at,
+            },
+            select: { id: true },
+          })
+        ).id;
       } catch (error) {
         // The NULLS NOT DISTINCT unique index closes the race between the lookup and insert.
         if (isUniqueViolation(error)) {
@@ -488,6 +503,7 @@ export function createPrismaMemberRepository(
         userId,
         [...roleCheck.roles.map((role) => role.id), ...contextDefaults],
         input.invitedBy,
+        membershipId,
       );
       if (context === null && options.rbac !== undefined) {
         await options.rbac.assignDefaultRoles({
@@ -598,10 +614,13 @@ export function createPrismaMemberRepository(
         return 'not-found';
       }
 
-      // A context membership may only remove roles that context could grant. Role
-      // assignments are user-level (docs/domain-model.md 2.11), so a role listed by two
-      // contexts is shared between them; contexts with disjoint role sets stay independent.
-      const removableRoles = await prisma.role.findMany({
+      // Grants made through this membership are owned by it and disappear with it
+      // (`assignments.source_membership_id` → `ON DELETE CASCADE`). A role that a sibling
+      // context of the same client allows and still grants therefore survives: deleting a
+      // membership in context A no longer revokes access in context B (docs/domain-model.md
+      // 2.11). Rows written before that column existed have no owner and are still matched by
+      // the role set this scope governs, which keeps the pre-migration cleanup working.
+      const legacyRoles = await prisma.role.findMany({
         where: {
           clientId: client.id,
           ...(context === null ? {} : { key: { in: context.allowedRoles } }),
@@ -613,7 +632,8 @@ export function createPrismaMemberRepository(
           where: {
             subjectType: 'user',
             subjectId: userId,
-            roleId: { in: removableRoles.map((role) => role.id) },
+            sourceMembershipId: null,
+            roleId: { in: legacyRoles.map((role) => role.id) },
           },
         }),
         prisma.clientMembership.delete({ where: { id: membership.id } }),
@@ -647,9 +667,10 @@ export function createPrismaMemberRepository(
         }
       }
 
-      // Replace only the roles this scope governs: a context cannot strip another context's
-      // roles when their `allowed_roles` are disjoint, and the context-less endpoint keeps
-      // its client-wide replacement semantics. Shared role keys stay shared by design.
+      // Replace only the grants this membership owns, and only within the role set this scope
+      // governs: a sibling context that also allows a role keeps its own row, while a default
+      // role granted outside `allowed_roles` keeps working as before. Unattributed rows
+      // (written before `source_membership_id`) are matched by the governed role set.
       const governedRoles = await prisma.role.findMany({
         where: {
           clientId: client.id,
@@ -662,12 +683,14 @@ export function createPrismaMemberRepository(
           subjectType: 'user',
           subjectId: userId,
           roleId: { in: governedRoles.map((role) => role.id) },
+          OR: [{ sourceMembershipId: membership.id }, { sourceMembershipId: null }],
         },
       });
       await assignRoles(
         userId,
         roleCheck.roles.map((role) => role.id),
         assignedBy,
+        membership.id,
       );
 
       const member = await loadMember(client.id, userId, context);

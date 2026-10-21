@@ -3,6 +3,7 @@ export {
   localeBundleSchema,
   localeCodeSchema,
   localeDirSchema,
+  loginContextBrandingSchema,
   loginContextSummarySchema,
   loginMethodSchema,
   mfaPolicySchema,
@@ -11,7 +12,12 @@ export {
   socialProviderSchema,
   socialProviderSummarySchema,
 } from './public-config.js';
-export type { LocaleBundle, LoginContextSummary, PublicClientConfig } from './public-config.js';
+export type {
+  LocaleBundle,
+  LoginContextBranding,
+  LoginContextSummary,
+  PublicClientConfig,
+} from './public-config.js';
 
 export {
   MFE_LOGIN_METHODS,

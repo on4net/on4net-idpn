@@ -366,13 +366,16 @@ Scopeها سطح دسترسی درخواستی کلاینت را مشخص می�
 | `scope_id` | UUID? | برای `global` خالی؛ برای `organization` شناسه سازمان |
 | `expires_at` | timestamp? | تخصیص موقت |
 | `assigned_by` | UUID | ادمین |
+| `source_membership_id` | UUID? | عضویتی که این تخصیص را داده است |
 | `created_at` | timestamp | — |
 
 **قواعد:**
 
 - دامنه پلتفرم از خودِ Role می‌آید (`Role.client_id`)؛ بنابراین برای نقش‌های پلتفرمی نیازی به Scope جداگانه نیست.
 - `scope_type=organization` فقط برای نقش‌هایی است که باید به اعضای یک سازمان محدود شوند.
-- یکتایی: `(subject_type, subject_id, role_id, scope_type, scope_id)`.
+- یکتایی: `(subject_type, subject_id, role_id, scope_type, scope_id, source_membership_id)` با `NULLS NOT DISTINCT` — دو عضویت می‌توانند مستقل همان نقش را داشته باشند، ولی یک تخصیص بدون منبع (`NULL`) تکراری نمی‌شود.
+- `source_membership_id` مالکیت تخصیص را مشخص می‌کند: حذف عضویت، تخصیص‌های همان عضویت را با `ON DELETE CASCADE` برمی‌دارد. بنابراین وقتی دو Context یک اپ هر دو یک نقش را در `allowed_roles` دارند، حذف عضویت در یکی، دسترسی Context دیگر را لغو نمی‌کند.
+- تخصیص بدون منبع (تخصیص مستقیم ادمین یا ردیف‌های پیش از این ستون) با مجموعه نقش‌هایی که همان دامنه مدیریت می‌کند پاک می‌شود.
 - تخصیص منقضی در محاسبه مجوزها نادیده گرفته می‌شود.
 - حذف نقش باید ابتدا تخصیص‌ها را بررسی کند (یا Cascade کنترل‌شده).
 - تخصیص نقش حساس (`idp:superadmin`) نیازمند MFA تازه (Step-up) و ثبت Audit است.

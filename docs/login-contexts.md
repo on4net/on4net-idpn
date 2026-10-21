@@ -76,6 +76,7 @@ flowchart TB
 - `allowed_roles` فقط می‌تواند نقش‌هایی با `Role.client_id = client_id` را شامل شود؛ نقش سراسری `idp:*` ممنوع است.
 - Context غیرفعال در صفحه ورود نمایش داده نمی‌شود و در `/authorize` رد می‌شود.
 - حذف Context وقتی عضویت فعال دارد ممنوع است؛ ابتدا باید `disabled` شود.
+- `branding` در زمان نوشتن اعتبارسنجی می‌شود: فقط `title` (متن ساده، حداکثر ۱۲۰ کاراکتر)، `logoUrl` (فقط `http(s)`) و `theme` با توکن‌های معتبر؛ کلید ناشناخته یا CSS خام → `422`.
 
 ### 3.2 ClientMembership (به‌روزرسانی)
 
@@ -92,6 +93,7 @@ flowchart TB
 ### 3.3 Assignment
 
 - تخصیص نقش همچنان در سطح کاربر/گروه/سرویس است.
+- **مالکیت تخصیص:** هر تخصیصی که از مسیر عضویت داده می‌شود، `source_membership_id` همان عضویت را دارد؛ حذف عضویت فقط تخصیص‌های خودش را برمی‌دارد (Cascade). بنابراین دو Context که هر دو یک نقش را در `allowed_roles` دارند، مستقل می‌مانند.
 - **فیلتر Context** در زمان صدور توکن اعمال می‌شود: فقط نقش‌هایی که در `allowed_roles` همان Context هستند در Claim می‌آیند.
 - نقش‌های خارج از Context نادیده گرفته می‌شوند حتی اگر به کاربر تخصیص داده شده باشند.
 
@@ -218,6 +220,7 @@ filter: permission.client_id is null OR permission.client_id = context.client_id
 - نقش خارج از `allowed_roles` در توکن نمی‌آید.
 - نقش `idp:*` هرگز در Context اپلیکیشنی قرار نمی‌گیرد.
 - `default_roles` در اولین عضویت همان Context تخصیص می‌یابد.
+- نقش‌های تخصیص‌یافته از مسیر یک عضویت به همان عضویت تعلق دارند (`assignments.source_membership_id`)؛ اگر دو Context از یک اپ هر دو یک نقش را مجاز بدانند، حذف عضویت یکی، نقش Context دیگر را لغو **نمی‌کند**. `PUT …/roles` هم فقط تخصیص‌های همان عضویت را جایگزین می‌کند.
 - تغییر `allowed_roles` بلافاصله روی توکن‌های جدید اثر دارد؛ توکن‌های قبلی تا انقضا معتبرند.
 - برای اعمال فوری، اپ می‌تواند `/userinfo` را دوباره بخواند یا توکن را تازه کند.
 
@@ -287,7 +290,12 @@ filter: permission.client_id is null OR permission.client_id = context.client_id
 | GET | `/api/v1/clients/{clientId}/login-contexts/{key}` | `idp:client-context:read` |
 | PATCH | `/api/v1/clients/{clientId}/login-contexts/{key}` | `idp:client-context:write` |
 | POST | `/api/v1/clients/{clientId}/login-contexts/{key}/disable` | `idp:client-context:write` |
+| POST | `/api/v1/clients/{clientId}/login-contexts/{key}/enable` | `idp:client-context:write` + Step-up |
 | DELETE | `/api/v1/clients/{clientId}/login-contexts/{key}` | `idp:client-context:write` |
+
+- `disable` فقط `status` را `disabled` می‌کند؛ عضویت‌ها و ردیف Context می‌مانند.
+- `enable` همان Context را به `active` برمی‌گرداند (idempotent)، Audit با `client.context.enabled` ثبت می‌شود و نیازمند احراز هویت تازه است. فقط ارتقای یک Context غیرفعال به پیش‌فرض ممنوع است؛ ابتدا آن را فعال کنید.
+- رد شدن هر درخواست (401/403) با `client.context.denied` و `result=failure` در Audit ثبت می‌شود.
 
 **ایجاد:**
 
@@ -308,15 +316,21 @@ filter: permission.client_id is null OR permission.client_id = context.client_id
 
 ### 7.3 عضویت
 
-| متد | مسیر | توضیح |
-|---|---|---|
-| GET | `/api/v1/clients/{clientId}/login-contexts/{key}/members` | اعضای همان Context |
-| POST | `/api/v1/clients/{clientId}/login-contexts/{key}/members/invite` | دعوت به Context |
-| PATCH | `/api/v1/clients/{clientId}/login-contexts/{key}/members/{userId}` | تغییر وضعیت/ویژگی |
-| DELETE | `/api/v1/clients/{clientId}/login-contexts/{key}/members/{userId}` | حذف عضویت همان Context |
+| متد | مسیر | مجوز | توضیح |
+|---|---|---|---|
+| GET | `/api/v1/clients/{clientId}/login-contexts/{key}/members` | `idp:client-member:read` | اعضای همان Context |
+| POST | `/api/v1/clients/{clientId}/login-contexts/{key}/members/invite` | `idp:client-member:invite` | دعوت به Context |
+| GET | `/api/v1/clients/{clientId}/login-contexts/{key}/members/{userId}` | `idp:client-member:read` | عضویت همان Context |
+| PATCH | `/api/v1/clients/{clientId}/login-contexts/{key}/members/{userId}` | `idp:client-member:write` | تغییر وضعیت/ویژگی |
+| DELETE | `/api/v1/clients/{clientId}/login-contexts/{key}/members/{userId}` | `idp:client-member:write` | حذف عضویت همان Context |
+| PUT | `/api/v1/clients/{clientId}/login-contexts/{key}/members/{userId}/roles` | `idp:client-role:assign` + Step-up | جایگزینی نقش‌های همین عضویت |
+| POST | `/api/v1/clients/{clientId}/login-contexts/{key}/members/{userId}/invite/resend` | `idp:client-member:invite` | ارسال دوباره دعوت Context |
 
 - `suspended` فقط همان Context را قطع می‌کند.
 - ادمین Context فقط به همان Context دسترسی دارد.
+- `PUT …/roles` تخصیص‌های همان عضویت را جایگزین می‌کند؛ نقش مشترک با Context دیگر باقی می‌ماند.
+- `POST …/invite/resend` فقط برای عضویت `invited` است؛ محدودیت ۵ بار در ساعت به‌ازای همان عضویت Context، و `202` با `delivery` برمی‌گرداند.
+- خطاها: `404` برای Context یا عضویت ناموجود در همان Context، `409` برای عضویت تکراری یا دعوت غیرقابل‌ارسال، `422` برای نقش خارج از `allowed_roles` یا داده نامعتبر، `403` برای Step-up نامعتبر.
 
 ## 8. ادمین واگذارشده (Delegated Admin)
 
