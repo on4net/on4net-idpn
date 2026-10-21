@@ -36,12 +36,14 @@ const connectionString = (): string => connectionStringValue;
 
 const token = async (
   userId: string,
-  options: { clientId?: string; scope?: string; audience?: string } = {},
+  options: { clientId?: string; scope?: string; audience?: string; authTime?: number } = {},
 ) =>
   keys.signAccessToken(
     {
       scope: options.scope ?? 'openid idp.admin',
       client_id: options.clientId ?? adminClientId,
+      // Real admin tokens carry the authentication time, which step-up checks require.
+      auth_time: options.authTime ?? Math.floor(Date.now() / 1000),
     },
     {
       issuer,
@@ -229,6 +231,26 @@ describe('signing key Admin API authorization', () => {
 });
 
 describe('signing key rotation', () => {
+  it('requires a fresh authentication to rotate', async () => {
+    const stale = await keys.signAccessToken(
+      {
+        scope: 'openid idp.admin',
+        client_id: adminClientId,
+        auth_time: Math.floor(Date.now() / 1000) - 3600,
+      },
+      { issuer, audience: adminClientId, subject: adminUserId, expiresInSeconds: 300 },
+    );
+
+    const response = await request(app.server)
+      .post('/api/v1/keys/rotate')
+      .set('Authorization', `Bearer ${stale}`)
+      .send({});
+
+    // A stolen `idp:key:write` token must not be able to revoke every issued token.
+    expect(response.status).toBe(403);
+    expect(response.body.detail).toContain('recent authentication');
+  });
+
   it('lists keys and rotation health without private material', async () => {
     const response = await request(app.server)
       .get('/api/v1/keys')

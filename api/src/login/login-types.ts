@@ -46,21 +46,37 @@ export function normalizeIdentifier(identifier: string): string {
  * Only same-origin relative paths or URLs on the IdP origin are accepted as a post-login
  * redirect. Anything else (protocol-relative, `javascript:`, foreign hosts) is rejected so
  * the login page cannot be used as an open redirector.
+ *
+ * Control characters and backslashes are rejected outright: a browser normalises `\\` to `/`
+ * and strips tabs/newlines, so `/<TAB>/evil.example` or `/\evil.example` would be read as
+ * `//evil.example` by the location parser while passing a prefix check.
  */
+/** Control characters and backslashes are normalised by the URL parser, e.g. `/<TAB>/host`. */
+const hasUnsafeRedirectCharacter = (value: string): boolean =>
+  value.includes('\\') ||
+  [...value].some((character) => {
+    const code = character.codePointAt(0) ?? 0;
+    return code < 0x20 || code === 0x7f;
+  });
+
 export function sanitizeReturnTo(returnTo: string | undefined, appUrl: string): string | undefined {
   if (returnTo === undefined || returnTo.trim() === '') {
     return undefined;
   }
   const value = returnTo.trim();
-
-  if (value.startsWith('/') && !value.startsWith('//') && !value.startsWith('/\\')) {
-    return value;
+  if (hasUnsafeRedirectCharacter(value)) {
+    return undefined;
   }
 
   try {
-    const candidate = new URL(value);
     const origin = new URL(appUrl).origin;
-    return candidate.origin === origin ? candidate.toString() : undefined;
+    const resolved = new URL(value, origin);
+    if (resolved.origin !== origin) {
+      return undefined;
+    }
+    return value.startsWith('/')
+      ? `${resolved.pathname}${resolved.search}${resolved.hash}`
+      : resolved.toString();
   } catch {
     return undefined;
   }

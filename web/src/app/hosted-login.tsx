@@ -425,23 +425,36 @@ async function defaultConfirmEmail(token: string): Promise<AccountFlowResult> {
  * already validates `return_to`, but re-checking here keeps `javascript:` payloads and
  * off-site redirects from ever reaching `window.location` (docs/security.md T5, T15).
  */
+const hasUnsafeCharacter = (value: string): boolean =>
+  value.includes('\\') ||
+  [...value].some((character) => {
+    const code = character.codePointAt(0) ?? 0;
+    return code < 0x20 || code === 0x7f;
+  });
+
 export function safeRedirectTarget(value: string | undefined): string {
   if (value === undefined || value === '') {
     return '/';
   }
   const trimmed = value.trim();
-  if (trimmed.startsWith('/') && !trimmed.startsWith('//') && !trimmed.startsWith('/\\')) {
-    return trimmed;
+  // A control character or backslash is normalised by the URL parser (`/<TAB>/host` and
+  // `/\host` both become a protocol-relative `//host`), so it can never be a safe target.
+  if (hasUnsafeCharacter(trimmed)) {
+    return '/';
   }
   try {
-    const candidate = new URL(trimmed);
-    if (typeof window !== 'undefined' && candidate.origin === window.location.origin) {
-      return candidate.toString();
+    const origin =
+      typeof window === 'undefined' ? 'http://localhost' : window.location.origin;
+    const resolved = new URL(trimmed, origin);
+    if (resolved.origin !== origin) {
+      return '/';
     }
+    return trimmed.startsWith('/')
+      ? `${resolved.pathname}${resolved.search}${resolved.hash}`
+      : resolved.toString();
   } catch {
-    // Not an absolute URL: fall through to the safe default.
+    return '/';
   }
-  return '/';
 }
 
 /**

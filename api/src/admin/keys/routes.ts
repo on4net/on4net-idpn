@@ -41,7 +41,7 @@ export function registerKeyAdminRoutes(app: FastifyInstance, options: KeyRoutesO
   const guard = async (
     request: FastifyRequest,
     reply: FastifyReply,
-    permission: string,
+    requirement: string | { permission: string; stepUp?: boolean },
   ): Promise<{ userId: string; clientId: string } | null> => {
     const auth: AdminAuthorization = await authorizeAdminRequest(
       request,
@@ -51,7 +51,7 @@ export function registerKeyAdminRoutes(app: FastifyInstance, options: KeyRoutesO
         verifier: options.verifier,
         permissions: options.permissions,
       },
-      permission,
+      requirement,
     );
     if (!auth.ok) {
       if (auth.status === 401) {
@@ -124,7 +124,12 @@ export function registerKeyAdminRoutes(app: FastifyInstance, options: KeyRoutesO
   });
 
   app.post('/api/v1/keys/rotate', async (request, reply) => {
-    const principal = await guard(request, reply, KEY_WRITE_PERMISSION);
+    // `revokePrevious` invalidates every issued token, so the operation needs a fresh
+    // authentication on top of the permission (docs/security.md 191/328).
+    const principal = await guard(request, reply, {
+      permission: KEY_WRITE_PERMISSION,
+      stepUp: true,
+    });
     if (principal === null) {
       return reply;
     }
