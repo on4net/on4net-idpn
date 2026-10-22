@@ -36,10 +36,12 @@ export default defineConfig({
   use: { trace: 'off', screenshot: 'off', video: 'off' },
   expect: {
     timeout: 15_000,
-    // `maxDiffPixelRatio` stays at 1 %: on this host a freshly generated baseline differs from
-    // its own re-run by ~1 % of pixels (system font fallback, no webfont is shipped), so a
-    // tighter budget is flaky rather than stricter. The per-pixel colour tolerance is halved
-    // to 0.1 so a token/colour change is still caught inside that budget (card #56 finding 3).
+    // `maxDiffPixelRatio` stays at 1 %: this host's rasterisation of a freshly generated
+    // baseline differs from its own re-run by up to ~1 % of pixels (font antialiasing), so a
+    // tighter budget is flaky rather than stricter. Webfonts are shipped since card #76, so the
+    // diff now comes from hinting/antialiasing rather than from a system fallback. The
+    // per-pixel colour tolerance is 0.1, so a token/colour change is still caught inside that
+    // budget (card #56 finding 3).
     toHaveScreenshot: {
       animations: 'disabled',
       caret: 'hide',

@@ -167,7 +167,9 @@ const IdpnAccount = React.lazy(() => import('idpn/AccountApp'));
 - MFE هیچ فونتی دانلود نمی‌کند و روی صفحه میزبان درخواست `@font-face` نمی‌سازد. اگر ظاهر MFE باید
   با تایپوگرافی IdP یکی باشد، میزبان فایل‌های `vazirmatn-arabic.woff2`، `vazirmatn-latin.woff2` و
   `inter-latin.woff2` را از `web/public/fonts/` در دامنه خود سرو می‌کند و با `font-display: swap`
-  اعلان می‌کند (CSP: `font-src 'self'`). در غیر این صورت پشته فونت به فونت سیستم برمی‌گردد.
+  اعلان می‌کند (CSP: `font-src 'self'`). فایل `web/public/fonts/OFL.txt` (متن کامل SIL OFL 1.1 و
+  کپی‌رایت هر دو فونت) باید همراه همان فایل‌ها در بستهٔ میزبان منتشر شود. در غیر این صورت پشته فونت
+  به فونت سیستم برمی‌گردد.
 - جزئیات توکن‌ها، RTL و ایزولاسیون: [design-system.md](./design-system.md).
 
 ## 4. الگوی BFF (توصیه‌شده)

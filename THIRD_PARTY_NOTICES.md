@@ -1,7 +1,11 @@
 # Third-party notices
 
 This project vendors UI component source into `web/src/components/ui` instead of depending on a UI runtime.
-The following projects are used and are distributed under the MIT license.
+It also self-hosts two webfonts. The notices are grouped by license:
+
+- **MIT** — shadcn/ui, Radix UI, Tailwind CSS (below).
+- **SIL Open Font License 1.1** — Vazirmatn and Inter (sections after the MIT block; the full
+  license text follows the notices).
 
 ## shadcn/ui
 

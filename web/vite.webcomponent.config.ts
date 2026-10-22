@@ -7,6 +7,9 @@ import { defineConfig } from 'vite';
 /** Web Component bundle: one ES module that registers `<on4net-idpn-user-management>`. */
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  // The Web Component never loads IdP webfonts: a host page must not fetch `/fonts/*` from
+  // the IdP origin, and the embedded bundle should not ship 154 KB it never references.
+  publicDir: false,
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),

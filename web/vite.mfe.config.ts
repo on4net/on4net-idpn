@@ -20,6 +20,9 @@ const ALLOWED_ORIGINS = parseOrigins(process.env.MFE_ALLOWED_ORIGINS, [
 
 /** Module Federation remote exposing the authenticated MFE modules. */
 export default defineConfig({
+  // The federated remote bundles `globals.css` only; it must not publish the IdP webfonts,
+  // so an embedding host never requests `/fonts/*` from the IdP origin.
+  publicDir: false,
   plugins: [
     react(),
     tailwindcss(),

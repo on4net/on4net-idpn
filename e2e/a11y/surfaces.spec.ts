@@ -65,9 +65,12 @@ async function expectScopedFont(page: Page, family: 'Vazirmatn' | 'Inter'): Prom
   expect(token).toContain(family);
 
   await page.evaluate(() => document.fonts.ready);
+  // Probe with text from the locale, not the default `BESbswy`: otherwise the Persian surface
+  // only exercises the Latin subset and never proves the Arabic file loads.
+  const probe = family === 'Vazirmatn' ? 'ورود به حساب' : 'Sign in';
   const available = await page.evaluate(
-    (name) => document.fonts.check(`16px "${name}"`),
-    family,
+    ({ name, text }) => document.fonts.check(`16px "${name}"`, text),
+    { name: family, text: probe },
   );
   expect(available).toBe(true);
 
@@ -79,7 +82,9 @@ async function expectScopedFont(page: Page, family: 'Vazirmatn' | 'Inter'): Prom
     family,
   );
   expect(faces.length).toBeGreaterThan(0);
-  expect(faces.every((status) => status === 'loaded')).toBe(true);
+  // A subset the locale does not use stays `unloaded` by design; only failures matter.
+  expect(faces.filter((status) => status === 'loaded').length).toBeGreaterThan(0);
+  expect(faces).not.toContain('error');
 }
 
 async function submitPasswordStep(page: Page, locale: 'fa-IR' | 'en-US'): Promise<void> {
