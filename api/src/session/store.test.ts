@@ -220,6 +220,58 @@ describe('RedisSessionStore', () => {
     expect(sets.get('idpn:user-sessions:user-1')).toEqual(new Set([current.sid]));
   });
 
+  it('writes the session and its user index entry in one cache call', async () => {
+    const { cache, values, sets } = createMemoryCache();
+    const writes: Parameters<NonNullable<SessionCache['setWithIndex']>>[0][] = [];
+    const store = new RedisSessionStore({
+      cache: {
+        ...cache,
+        async setWithIndex(write) {
+          writes.push(write);
+          await cache.set(write.key, write.value, write.ttlSeconds);
+          await cache.setAdd(write.indexKey, write.member, write.indexTtlSeconds);
+        },
+      },
+      policy,
+    });
+
+    const session = await store.create({ userId: 'user-1', amr: ['pwd'], acr: 'pwd' });
+
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toMatchObject({
+      key: `idpn:sess:${session.sid}`,
+      indexKey: 'idpn:user-sessions:user-1',
+      member: session.sid,
+      indexTtlSeconds: policy.absoluteTtlSeconds,
+    });
+    expect(values.has(`idpn:sess:${session.sid}`)).toBe(true);
+    expect(sets.get('idpn:user-sessions:user-1')).toEqual(new Set([session.sid]));
+  });
+
+  it('rejects a session that the user index lost after a global revocation', async () => {
+    const { cache, sets } = createMemoryCache();
+    const store = new RedisSessionStore({ cache, policy });
+    const session = await store.create({ userId: 'user-1', amr: ['pwd'], acr: 'pwd' });
+
+    // An evicted index key: the session record survives, the index no longer lists it, so the
+    // index walk alone would never revoke it (card #70 finding 5b).
+    sets.delete('idpn:user-sessions:user-1');
+    await expect(store.revokeAllForUser('user-1', 'global_logout')).resolves.toBe(0);
+
+    await expect(store.read(session.sid)).resolves.toBeNull();
+  });
+
+  it('lets the spared session outlive a global revocation whose index it lost', async () => {
+    const { cache, sets } = createMemoryCache();
+    const store = new RedisSessionStore({ cache, policy });
+    const current = await store.create({ userId: 'user-1', amr: ['pwd'], acr: 'pwd' });
+
+    sets.delete('idpn:user-sessions:user-1');
+    await store.revokeAllForUserExcept('user-1', current.sid, 'password_change');
+
+    await expect(store.read(current.sid)).resolves.not.toBeNull();
+  });
+
   it('revokes the oldest sessions when the concurrent limit is exceeded', async () => {
     const { cache } = createMemoryCache();
     let now = new Date('2026-10-18T10:00:00Z');

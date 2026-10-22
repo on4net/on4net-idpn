@@ -9,6 +9,7 @@ import {
 } from './client-auth.js';
 import type { SigningKeyManager } from './keys.js';
 import { hashRefreshToken, type RefreshTokenRepository } from './refresh-token.js';
+import type { TokenDenyList } from './token-denylist.js';
 
 export interface RevokeIntrospectOptions {
   issuer: string;
@@ -22,6 +23,11 @@ export interface RevokeIntrospectOptions {
    * password change) is inactive even though its own row is untouched.
    */
   sessions?: { read(sid: string): Promise<unknown | null> };
+  /**
+   * Revoked access tokens. A JWT cannot be un-issued, so revoking one records its `jti` here
+   * and introspection reports it inactive (docs/api.md 2.5).
+   */
+  denyList?: TokenDenyList;
   now?: () => Date;
 }
 
@@ -93,10 +99,45 @@ export function registerRevokeIntrospectRoutes(
     const record = await options.refreshTokens.findByHash(hashRefreshToken(payload.token));
     if (record !== null && record.clientId === client.clientId) {
       await options.refreshTokens.revokeFamily(record.familyId, now());
+      return noStore(reply).code(200).send({});
     }
+
+    // Not a refresh token this client owns: it may be an access token (RFC 7009 allows either).
+    await denyAccessToken(payload.token, client.clientId);
 
     return noStore(reply).code(200).send({});
   });
+
+  /**
+   * Records the `jti` of one of our own access tokens so `/userinfo` and introspection stop
+   * accepting it. A token that does not verify for this client, or belongs to another client,
+   * is ignored — the answer stays `200` so revocation cannot be used to probe token validity.
+   */
+  async function denyAccessToken(token: string, clientId: string): Promise<void> {
+    if (options.denyList === undefined) {
+      return;
+    }
+    try {
+      const claims = await options.keys.verify(token, {
+        issuer: options.issuer,
+        audience: clientId,
+      });
+      const jti = claims.jti;
+      if (claims.token_use !== 'access' || typeof jti !== 'string' || jti === '') {
+        return;
+      }
+      if (typeof claims.client_id !== 'string' || claims.client_id !== clientId) {
+        return;
+      }
+      const expiresAt = claims.exp;
+      if (typeof expiresAt !== 'number') {
+        return;
+      }
+      await options.denyList.deny(jti, expiresAt);
+    } catch {
+      // Not our token or not a JWT: nothing to revoke.
+    }
+  }
 
   app.post('/oauth2/introspect', async (request, reply) => {
     const client = await authenticate(request, reply);
@@ -114,6 +155,14 @@ export function registerRevokeIntrospectRoutes(
         issuer: options.issuer,
         audience: client.clientId,
       });
+      const jti = claims.jti;
+      const denied =
+        options.denyList !== undefined &&
+        typeof jti === 'string' &&
+        (await options.denyList.isDenied(jti));
+      if (denied) {
+        return noStore(reply).send({ active: false });
+      }
       return noStore(reply).send({
         active: true,
         ...claims,

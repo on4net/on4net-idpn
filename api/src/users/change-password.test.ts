@@ -12,8 +12,9 @@ interface FakeStore extends PasswordStore {
   audits: Parameters<PasswordStore['recordAudit']>[0][];
   updatedHash?: string;
   changedAt?: Date;
-  revokeOptions?: Parameters<PasswordStore['revokeSessions']>[3];
-  refreshOptions?: Parameters<PasswordStore['revokeRefreshTokens']>[2];
+  revokeOptions?: Parameters<PasswordStore['revokeLiveSessions']>[2];
+  liveRevokedBefore?: boolean;
+  liveRevocationError?: Error;
 }
 
 function createStore(user: PasswordChangeUser): FakeStore {
@@ -23,18 +24,18 @@ function createStore(user: PasswordChangeUser): FakeStore {
     async findUser() {
       return store.user;
     },
-    async updatePassword(_id, hash, changedAt) {
-      store.updatedHash = hash;
-      store.changedAt = changedAt;
-      store.user = { ...store.user, passwordHash: hash };
-    },
-    async revokeSessions(_id, _revokedAt, _reason, options) {
+    async revokeLiveSessions(_id, _reason, options) {
+      if (store.liveRevocationError !== undefined) {
+        throw store.liveRevocationError;
+      }
+      store.liveRevokedBefore = store.updatedHash === undefined;
       store.revokeOptions = options;
-      return 2;
     },
-    async revokeRefreshTokens(_id, _revokedAt, options) {
-      store.refreshOptions = options;
-      return 3;
+    async commitPasswordChange(commit) {
+      store.updatedHash = commit.passwordHash;
+      store.changedAt = commit.changedAt;
+      store.user = { ...store.user, passwordHash: commit.passwordHash };
+      return { revokedSessions: 2, revokedRefreshTokens: 3 };
     },
     async recordAudit(event) {
       store.audits.push(event);
@@ -199,8 +200,36 @@ describe('changePassword', () => {
 
     expect(result.ok).toBe(true);
     expect(store.revokeOptions).toEqual({ keepSessionId: 'session-current' });
-    expect(store.refreshOptions).toEqual({ keepSessionId: 'session-current' });
     expect(store.audits[0]?.metadata).toMatchObject({ keptCurrentSession: true });
+  });
+
+  it('revokes the live sessions before the password is written', async () => {
+    const store = createStore(activeUser());
+    await changePassword(
+      store,
+      hashPassword,
+      { userId: 'user-1', newPassword: 'ordering-check-1', keepSessionId: 'session-current' },
+      now,
+    );
+
+    expect(store.liveRevokedBefore).toBe(true);
+  });
+
+  it('aborts the change when the live sessions cannot be revoked', async () => {
+    const store = createStore(activeUser({ passwordHash: null }));
+    store.liveRevocationError = new Error('redis down');
+
+    await expect(
+      changePassword(store, hashPassword, {
+        userId: 'user-1',
+        newPassword: 'redis-down-check-1',
+      }),
+    ).rejects.toThrow('redis down');
+
+    // Nothing was written and no success was audited, so the password and the sessions
+    // cannot disagree (card #70 finding 3).
+    expect(store.updatedHash).toBeUndefined();
+    expect(store.audits).toHaveLength(0);
   });
 });
 

@@ -24,8 +24,9 @@ import {
 } from './login-context-access.js';
 import { oauthError, type OAuthError } from './oauth-error.js';
 import {
+  commitRefreshRotation,
   issueRefreshToken,
-  rotateRefreshToken,
+  validateRefreshToken,
   type RefreshTokenRepository,
 } from './refresh-token.js';
 import {
@@ -266,42 +267,24 @@ async function refreshTokenGrant(
     return tokenError(reply, oauthError('invalid_request', 'refresh_token is required'));
   }
 
-  const rotation = await rotateRefreshToken(options.refreshTokens, {
+  const validation = await validateRefreshToken(options.refreshTokens, {
     token: payload.refresh_token,
     clientId: client.clientId,
-    ttlSeconds: client.refreshTokenTtl,
     now: at,
   });
 
-  if (!rotation.ok) {
-    // Reuse revokes the whole family inside rotateRefreshToken; the client only sees invalid_grant.
-    if (rotation.reason === 'reuse_detected') {
-      options.metrics?.recordRefreshReuse();
-      // The presenter of a reused token is unauthenticated; record the client and the fact
-      // without the token itself. An audit failure must not change the OAuth response.
-      if (options.audit !== undefined) {
-        try {
-          await options.audit.record({
-            actorType: 'anonymous',
-            action: 'token.refresh.reuse_detected',
-            targetType: 'refresh_token',
-            targetId: null,
-            clientId: client.clientId,
-            result: 'failure',
-            metadata: {
-              reason: 'reuse_detected',
-              revokedFamily: rotation.revokedFamily,
-            },
-          });
-        } catch {
-          // Never turn an audit write failure into a different OAuth error.
-        }
-      }
+  if (!validation.ok) {
+    // Reuse revokes the whole family inside validateRefreshToken; the client only sees
+    // invalid_grant.
+    if (validation.reason === 'reuse_detected') {
+      await recordReuse(client, options, validation.revokedFamily);
     }
     return tokenError(reply, oauthError('invalid_grant', 'refresh token is not valid'));
   }
 
-  const profile = await options.users.findProfile(rotation.record.userId);
+  const issued = validation.record;
+
+  const profile = await options.users.findProfile(issued.userId);
   if (profile === null) {
     return tokenError(reply, oauthError('invalid_grant', 'unknown subject'));
   }
@@ -309,21 +292,21 @@ async function refreshTokenGrant(
   // A refresh token stays bound to the context it was issued for: the request cannot ask
   // for another one, and the context/membership is re-evaluated on every rotation
   // (docs/domain-model.md 2.6.2). A revoked context burns the family.
-  if (rotation.record.loginContext !== undefined) {
+  if (issued.loginContext !== undefined) {
     const decision = await resolveContextAccess(
       options,
       profile.id,
       client.clientId,
-      rotation.record.loginContext,
+      issued.loginContext,
     );
     if (!decision.ok) {
-      await options.refreshTokens.revokeFamily(rotation.record.familyId, at);
+      await options.refreshTokens.revokeFamily(issued.familyId, at);
       return tokenError(reply, oauthError('invalid_grant', 'refresh token is not valid'));
     }
   }
 
   if (
-    rotation.record.scope.includes(CLIENT_ADMIN_SCOPE) &&
+    issued.scope.includes(CLIENT_ADMIN_SCOPE) &&
     options.isClientAdminEligible !== undefined &&
     !(await options.isClientAdminEligible(profile.id, client.clientId))
   ) {
@@ -334,17 +317,20 @@ async function refreshTokenGrant(
   }
 
   const session =
-    options.sessions === undefined ? null : await options.sessions.read(rotation.record.sessionId);
+    options.sessions === undefined ? null : await options.sessions.read(issued.sessionId);
   if (options.sessions !== undefined && session === null) {
     return tokenError(reply, oauthError('invalid_grant', 'session is no longer valid'));
   }
 
+  // Every check above passed, so only now is the token material built and the successor
+  // written (in that order): a rejected request writes nothing, and a signing failure cannot
+  // spend a refresh token the client never gets a successor for (card #70 finding 3).
   const issuedAt = Math.floor(at.getTime() / 1000);
   const access = await resolveAccess(
     options,
     profile.id,
     client.clientId,
-    rotation.record.loginContext,
+    issued.loginContext,
   );
   const accessToken = await options.keys.signAccessToken(
     {
@@ -359,13 +345,13 @@ async function refreshTokenGrant(
       auth_time: Math.floor(new Date(session?.authTime ?? at.toISOString()).getTime() / 1000),
       acr: session?.acr ?? 'urn:on4net:acr:pwd',
       amr: session?.amr ?? ['pwd'],
-      sid: rotation.record.sessionId,
+      sid: issued.sessionId,
       jti: randomUUID(),
-      scope: rotation.record.scope.join(' '),
+      scope: issued.scope.join(' '),
       tenant_id: profile.tenantId,
-      ...(rotation.record.loginContext === undefined
+      ...(issued.loginContext === undefined
         ? {}
-        : { login_context: rotation.record.loginContext }),
+        : { login_context: issued.loginContext }),
       ...accessClaimsFor(access),
     },
     {
@@ -376,15 +362,54 @@ async function refreshTokenGrant(
     },
   );
 
-  // Rotation already wrote the successor (same family, same context) and linked it from the
-  // presented token; issuing another one here would orphan that row.
+  // Rotation writes the successor (same family, same context) and links it from the presented
+  // token; issuing another one here would orphan that row.
+  const rotation = await commitRefreshRotation(options.refreshTokens, {
+    record: issued,
+    ttlSeconds: client.refreshTokenTtl,
+    now: at,
+  });
+  if (!rotation.ok) {
+    await recordReuse(client, options, rotation.revokedFamily);
+    return tokenError(reply, oauthError('invalid_grant', 'refresh token is not valid'));
+  }
+
   return tokenSuccess(reply, {
     access_token: accessToken,
     token_type: 'Bearer',
     expires_in: client.accessTokenTtl,
     refresh_token: rotation.successor.token,
-    scope: rotation.record.scope.join(' '),
+    scope: issued.scope.join(' '),
   });
+}
+
+/**
+ * Records a refresh-token replay. The presenter is unauthenticated, so only the client and the
+ * fact are stored — never the token. Neither the metric nor the audit write may change the
+ * OAuth response.
+ */
+async function recordReuse(
+  client: AuthenticatedClient,
+  options: TokenRouteOptions,
+  revokedFamily: number | undefined,
+): Promise<void> {
+  options.metrics?.recordRefreshReuse();
+  if (options.audit === undefined) {
+    return;
+  }
+  try {
+    await options.audit.record({
+      actorType: 'anonymous',
+      action: 'token.refresh.reuse_detected',
+      targetType: 'refresh_token',
+      targetId: null,
+      clientId: client.clientId,
+      result: 'failure',
+      metadata: { reason: 'reuse_detected', revokedFamily },
+    });
+  } catch {
+    // Never turn an audit write failure into a different OAuth error.
+  }
 }
 
 async function clientCredentialsGrant(

@@ -15,6 +15,10 @@ import {
   type RefreshTokenRepository,
 } from '../src/oidc/refresh-token.js';
 import { registerRevokeIntrospectRoutes } from '../src/oidc/revoke-introspect.js';
+import {
+  createMemoryTokenDenyList,
+  type TokenDenyList,
+} from '../src/oidc/token-denylist.js';
 
 const issuer = 'https://auth.example.com';
 const secret = 'super-secret-value';
@@ -64,7 +68,9 @@ function memoryRefreshTokens() {
   return repository;
 }
 
-async function harness(options: { liveSessions?: Set<string> } = {}) {
+async function harness(
+  options: { liveSessions?: Set<string>; denyList?: TokenDenyList } = {},
+) {
   const app = Fastify({ logger: false });
   const refreshTokens = memoryRefreshTokens();
   const liveSessions = options.liveSessions ?? new Set(['session-1']);
@@ -97,6 +103,7 @@ async function harness(options: { liveSessions?: Set<string> } = {}) {
       },
     },
     now: () => new Date('2026-10-18T12:00:00Z'),
+    ...(options.denyList === undefined ? {} : { denyList: options.denyList }),
   });
   await app.ready();
   return { app, refreshTokens, keys, liveSessions, clientId: client.clientId };
@@ -240,6 +247,74 @@ describe('POST /oauth2/revoke', () => {
       .send({ token: 'unknown-token' })
       .expect(200);
 
+    await app.close();
+  });
+
+  it('revokes an access token so introspection and userinfo stop accepting it', async () => {
+    const denyList = createMemoryTokenDenyList(() => new Date('2026-10-18T12:00:00Z'));
+    const { app, keys, clientId } = await harness({ denyList });
+    const token = await keys.signAccessToken(
+      {
+        iss: issuer,
+        sub: 'user-1',
+        aud: clientId,
+        client_id: clientId,
+        token_use: 'access',
+        jti: 'jti-1',
+        sid: 'session-1',
+        scope: 'openid',
+      },
+      { issuer, audience: clientId, subject: 'user-1', expiresInSeconds: 600 },
+    );
+
+    const before = await request(app.server)
+      .post('/oauth2/introspect')
+      .set('Authorization', basic(clientId, secret))
+      .send({ token })
+      .expect(200);
+    expect(before.body).toMatchObject({ active: true, jti: 'jti-1' });
+
+    await request(app.server)
+      .post('/oauth2/revoke')
+      .set('Authorization', basic(clientId, secret))
+      .send({ token })
+      .expect(200);
+
+    const after = await request(app.server)
+      .post('/oauth2/introspect')
+      .set('Authorization', basic(clientId, secret))
+      .send({ token })
+      .expect(200);
+    expect(after.body).toEqual({ active: false });
+
+    await expect(denyList.isDenied('jti-1')).resolves.toBe(true);
+    await app.close();
+  });
+
+  it('leaves a token of another client alive when one client revokes it', async () => {
+    const denyList = createMemoryTokenDenyList(() => new Date('2026-10-18T12:00:00Z'));
+    const { app, keys, clientId } = await harness({ denyList });
+    const foreign = await keys.signAccessToken(
+      {
+        iss: issuer,
+        sub: 'user-1',
+        aud: 'other-app',
+        client_id: 'other-app',
+        token_use: 'access',
+        jti: 'jti-foreign',
+        scope: 'openid',
+      },
+      { issuer, audience: 'other-app', subject: 'user-1', expiresInSeconds: 600 },
+    );
+
+    await request(app.server)
+      .post('/oauth2/revoke')
+      .set('Authorization', basic(clientId, secret))
+      .send({ token: foreign })
+      .expect(200);
+
+    // A client can only revoke what it received; the audience check rejects the token above.
+    await expect(denyList.isDenied('jti-foreign')).resolves.toBe(false);
     await app.close();
   });
 });

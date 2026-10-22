@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 
 import type { EffectiveAccessSource } from './effective-access.js';
 import type { SigningKeyManager } from './keys.js';
+import type { TokenDenyList } from './token-denylist.js';
 import { buildUserInfo } from './userinfo.js';
 
 export interface UserProfileSource {
@@ -21,6 +22,11 @@ export interface UserInfoRouteOptions {
   users: { findUserInfoProfile(userId: string): Promise<UserProfileSource | null> };
   /** Used only when the token says `permissions_source=userinfo`. */
   access?: EffectiveAccessSource;
+  /**
+   * Revoked access tokens. A token the client explicitly revoked through `/oauth2/revoke` must
+   * stop working here before `exp` (card #70 finding 14e).
+   */
+  denyList?: TokenDenyList;
 }
 
 /**
@@ -82,8 +88,21 @@ export function registerUserInfoRoute(app: FastifyInstance, options: UserInfoRou
         .send({ error: 'invalid_token' });
     }
 
-    const response = buildUserInfo(claims, profile);
+    // A revoked access token stays cryptographically valid until `exp`, so the deny-list is what
+    // makes `/oauth2/revoke` meaningful for it (card #70 finding 14e).
+    if (
+      options.denyList !== undefined &&
+      typeof claims.jti === 'string' &&
+      (await options.denyList.isDenied(claims.jti))
+    ) {
+      return reply
+        .code(401)
+        .header('WWW-Authenticate', '******"invalid_token"')
+        .header('Cache-Control', 'no-store')
+        .send({ error: 'invalid_token' });
+    }
 
+    const response = buildUserInfo(claims, profile);
     if (
       claims.permissions_source === 'userinfo' &&
       options.access !== undefined &&

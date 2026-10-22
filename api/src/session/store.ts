@@ -21,6 +21,14 @@ export interface SessionStoreOptions {
 
 const SESSION_KEY = 'idpn:sess:';
 const USER_SESSIONS_KEY = 'idpn:user-sessions:';
+const USER_REVOKED_KEY = 'idpn:user-revoked:';
+
+/** Per-user revocation marker: `at` is epoch-ms, `keep` the one sid the revocation spared. */
+interface UserRevocation {
+  at: number;
+  reason: RevokeReason;
+  keep?: string;
+}
 
 /** Revoked sessions stay readable for this long so the reason is observable. */
 const REVOKE_GRACE_SECONDS = 60;
@@ -74,8 +82,7 @@ export class RedisSessionStore implements ClientSessionRevoker {
       acr: input.acr,
     };
 
-    await this.persist(session);
-    await this.cache.setAdd(userKey(session.userId), session.sid, this.policy.absoluteTtlSeconds);
+    await this.persistIndexed(session);
     await this.enforceConcurrentLimit(session.userId);
     return session;
   }
@@ -94,6 +101,18 @@ export class RedisSessionStore implements ClientSessionRevoker {
     if (isExpired(session, now)) {
       await this.delete(session);
       return null;
+    }
+
+    // A global revocation also kills sessions the user index lost (an evicted index key, an
+    // older writer). One extra GET per read buys that guarantee (card #70 finding 5b).
+    const revocation = await this.userRevocation(session.userId);
+    if (revocation !== null && revocation.keep !== session.sid) {
+      // `<=` on purpose: a session created in the same millisecond as the revocation is treated
+      // as revoked. Dying too eagerly costs one login, surviving costs a valid session.
+      if (Date.parse(session.createdAt) <= revocation.at) {
+        await this.markRevoked(session, revocation.reason);
+        return null;
+      }
     }
 
     const idleExpiresAt = new Date(now.getTime() + this.policy.idleTtlSeconds * 1000);
@@ -215,6 +234,9 @@ export class RedisSessionStore implements ClientSessionRevoker {
 
   /** Revokes every session of a user (global logout, password change, admin action). */
   async revokeAllForUser(userId: string, reason: RevokeReason): Promise<number> {
+    // The epoch is written first: from this instant on, even a session the index does not
+    // list is rejected when it is read.
+    await this.writeUserRevocation(userId, { at: this.now().getTime(), reason });
     const sids = await this.cache.setMembers(userKey(userId));
     let revoked = 0;
     for (const sid of sids) {
@@ -237,6 +259,11 @@ export class RedisSessionStore implements ClientSessionRevoker {
     keepSid: string,
     reason: RevokeReason,
   ): Promise<number> {
+    await this.writeUserRevocation(userId, {
+      at: this.now().getTime(),
+      reason,
+      keep: keepSid,
+    });
     const sids = await this.cache.setMembers(userKey(userId));
     let revoked = 0;
     for (const sid of sids) {
@@ -370,12 +397,73 @@ export class RedisSessionStore implements ClientSessionRevoker {
   }
 
   private async persist(session: IdpSession): Promise<void> {
-    const idleRemaining = secondsBetween(this.now(), new Date(session.idleExpiresAt));
-    const absoluteRemaining = secondsBetween(this.now(), new Date(session.absoluteExpiresAt));
     await this.cache.set(
       sessionKey(session.sid),
       JSON.stringify(session),
-      Math.min(idleRemaining, absoluteRemaining),
+      this.sessionTtlSeconds(session),
+    );
+  }
+
+  /**
+   * Stores the session and its user-index membership in one step when the cache supports it.
+   * The index is what `revokeAllForUser` walks, so a session that never made it into the index
+   * would survive a global logout.
+   */
+  private async persistIndexed(session: IdpSession): Promise<void> {
+    if (this.cache.setWithIndex === undefined) {
+      await this.persist(session);
+      await this.cache.setAdd(userKey(session.userId), session.sid, this.policy.absoluteTtlSeconds);
+      return;
+    }
+    await this.cache.setWithIndex({
+      key: sessionKey(session.sid),
+      value: JSON.stringify(session),
+      ttlSeconds: this.sessionTtlSeconds(session),
+      indexKey: userKey(session.userId),
+      member: session.sid,
+      indexTtlSeconds: this.policy.absoluteTtlSeconds,
+    });
+  }
+
+  private sessionTtlSeconds(session: IdpSession): number {
+    const idleRemaining = secondsBetween(this.now(), new Date(session.idleExpiresAt));
+    const absoluteRemaining = secondsBetween(this.now(), new Date(session.absoluteExpiresAt));
+    return Math.min(idleRemaining, absoluteRemaining);
+  }
+
+  /**
+   * Per-user revocation marker. Sessions older than `at` are dead even when the user index no
+   * longer lists them; `keep` names the one session the revocation spared.
+   */
+  private async userRevocation(userId: string): Promise<UserRevocation | null> {
+    const raw = await this.cache.get(userRevokedKey(userId));
+    if (raw === null) {
+      return null;
+    }
+    try {
+      const parsed = JSON.parse(raw) as Partial<UserRevocation>;
+      if (typeof parsed.at !== 'number' || typeof parsed.reason !== 'string') {
+        return null;
+      }
+      return {
+        at: parsed.at,
+        reason: parsed.reason as RevokeReason,
+        ...(parsed.keep === undefined ? {} : { keep: parsed.keep }),
+      };
+    } catch {
+      // A corrupt marker must not block logins; the index-based revocation still applies.
+      return null;
+    }
+  }
+
+  private async writeUserRevocation(
+    userId: string,
+    revocation: UserRevocation,
+  ): Promise<void> {
+    await this.cache.set(
+      userRevokedKey(userId),
+      JSON.stringify(revocation),
+      this.policy.absoluteTtlSeconds,
     );
   }
 
@@ -409,6 +497,10 @@ function sessionKey(sid: string): string {
 
 function userKey(userId: string): string {
   return `${USER_SESSIONS_KEY}${userId}`;
+}
+
+function userRevokedKey(userId: string): string {
+  return `${USER_REVOKED_KEY}${userId}`;
 }
 
 function definedOptional<K extends keyof IdpSession>(

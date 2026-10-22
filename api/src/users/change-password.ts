@@ -5,6 +5,7 @@ import {
   type PasswordSubject,
 } from '../auth/password-policy.js';
 import type { AuditEventInput } from '../audit/sanitize.js';
+import type { RevokeReason } from '../session/types.js';
 
 export interface PasswordChangeUser extends PasswordSubject {
   id: string;
@@ -18,20 +19,39 @@ export interface RevokeSessionOptions {
   keepSessionId?: string;
 }
 
+export interface PasswordChangeCommit {
+  userId: string;
+  passwordHash: string;
+  changedAt: Date;
+  reason: RevokeReason;
+  /** Session that keeps working (the caller's own device for a self-service change). */
+  keepSessionId?: string;
+}
+
+export interface PasswordChangeCounts {
+  revokedSessions: number;
+  revokedRefreshTokens: number;
+}
+
 export interface PasswordStore {
   findUser(userId: string): Promise<PasswordChangeUser | null>;
-  updatePassword(userId: string, passwordHash: string, changedAt: Date): Promise<void>;
-  revokeSessions(
+  /**
+   * Revokes the user's live (Redis) sessions. It runs **before** the write transaction on
+   * purpose: over-revoking is recoverable, a session that outlives the password it was created
+   * with is not. A rejection aborts the change before the password is written
+   * (card #70 finding 3).
+   */
+  revokeLiveSessions(
     userId: string,
-    revokedAt: Date,
-    reason: string,
+    reason: RevokeReason,
     options?: RevokeSessionOptions,
-  ): Promise<number>;
-  revokeRefreshTokens(
-    userId: string,
-    revokedAt: Date,
-    options?: RevokeSessionOptions,
-  ): Promise<number>;
+  ): Promise<void>;
+  /**
+   * One transaction for the three writes a password change needs: the password itself, the
+   * session rows and the refresh-token rows. A partial application would leave usable refresh
+   * tokens next to a new password (card #70 finding 3).
+   */
+  commitPasswordChange(commit: PasswordChangeCommit): Promise<PasswordChangeCounts>;
   recordAudit(event: AuditEventInput): Promise<void>;
 }
 
@@ -104,17 +124,19 @@ export async function changePassword(
 
   const changedAt = now();
   const passwordHash = await hashPasswordFn(input.newPassword, params);
-  await store.updatePassword(user.id, passwordHash, changedAt);
+  const reason: RevokeReason = 'password_change';
 
-  const revokeOptions: RevokeSessionOptions =
-    input.keepSessionId === undefined ? {} : { keepSessionId: input.keepSessionId };
-  const revokedSessions = await store.revokeSessions(
-    user.id,
+  // Live sessions first (see `PasswordStore.revokeLiveSessions`): if this rejects, nothing was
+  // written, so the password and the sessions can never disagree.
+  await store.revokeLiveSessions(user.id, reason, revokeOptions(input));
+
+  const { revokedSessions, revokedRefreshTokens } = await store.commitPasswordChange({
+    userId: user.id,
+    passwordHash,
     changedAt,
-    'password_change',
-    revokeOptions,
-  );
-  const revokedRefreshTokens = await store.revokeRefreshTokens(user.id, changedAt, revokeOptions);
+    reason,
+    ...(input.keepSessionId === undefined ? {} : { keepSessionId: input.keepSessionId }),
+  });
 
   await store.recordAudit({
     actorType: input.actorType ?? 'user',
@@ -134,6 +156,9 @@ export async function changePassword(
 
   return { ok: true, revokedSessions, revokedRefreshTokens };
 }
+
+const revokeOptions = (input: ChangePasswordInput): RevokeSessionOptions =>
+  input.keepSessionId === undefined ? {} : { keepSessionId: input.keepSessionId };
 
 async function recordFailure(
   store: PasswordStore,

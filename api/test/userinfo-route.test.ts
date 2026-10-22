@@ -4,6 +4,10 @@ import { beforeAll, describe, expect, it } from 'vitest';
 
 import type { EffectiveAccessSource } from '../src/oidc/effective-access.js';
 import { MemorySigningKeyRepository, SigningKeyManager } from '../src/oidc/keys.js';
+import {
+  createMemoryTokenDenyList,
+  type TokenDenyList,
+} from '../src/oidc/token-denylist.js';
 import { registerUserInfoRoute } from '../src/oidc/userinfo-route.js';
 
 const issuer = 'https://auth.example.com';
@@ -37,7 +41,7 @@ beforeAll(async () => {
   await keys.ensureKey();
 });
 
-async function build(accessSource?: EffectiveAccessSource) {
+async function build(accessSource?: EffectiveAccessSource, denyList?: TokenDenyList) {
   const app = Fastify({ logger: false });
   registerUserInfoRoute(app, {
     issuer,
@@ -48,6 +52,7 @@ async function build(accessSource?: EffectiveAccessSource) {
       },
     },
     ...(accessSource === undefined ? {} : { access: accessSource }),
+    ...(denyList === undefined ? {} : { denyList }),
   });
   await app.ready();
   return app;
@@ -86,6 +91,39 @@ describe('GET /oauth2/userinfo token binding', () => {
       .get('/oauth2/userinfo')
       .set('Authorization', 'Bearer ' + (await token({}, 'app-b')))
       .expect(401);
+    await app.close();
+  });
+});
+
+describe('GET /oauth2/userinfo revoked tokens', () => {
+  it('rejects an access token whose jti was revoked', async () => {
+    const denyList = createMemoryTokenDenyList();
+    const app = await build(undefined, denyList);
+    const bearer = await token({ jti: 'jti-revoked' });
+
+    await request(app.server)
+      .get('/oauth2/userinfo')
+      .set('Authorization', 'Bearer ' + bearer)
+      .expect(200);
+
+    await denyList.deny('jti-revoked', Math.floor(Date.now() / 1000) + 300);
+
+    await request(app.server)
+      .get('/oauth2/userinfo')
+      .set('Authorization', 'Bearer ' + bearer)
+      .expect(401);
+    await app.close();
+  });
+
+  it('keeps accepting a token that was never revoked', async () => {
+    const denyList = createMemoryTokenDenyList();
+    const app = await build(undefined, denyList);
+    await denyList.deny('another-jti', Math.floor(Date.now() / 1000) + 300);
+
+    await request(app.server)
+      .get('/oauth2/userinfo')
+      .set('Authorization', 'Bearer ' + (await token({ jti: 'jti-live' })))
+      .expect(200);
     await app.close();
   });
 });

@@ -70,6 +70,7 @@ import { sanitizeLogMessage } from './observability/logging.js';
 import { ApiMetrics } from './observability/metrics.js';
 import { createPrismaSessionRevocationHook } from './session/prisma-revocation.js';
 import { createPrismaSessionSlideMirror } from './session/prisma-slide.js';
+import { createTokenDenyList } from './oidc/token-denylist.js';
 import { RedisSessionCache } from './session/redis-cache.js';
 import { RedisSessionStore } from './session/store.js';
 
@@ -149,8 +150,10 @@ const keys = new SigningKeyManager(
 );
 await keys.ensureKey();
 
+const sessionCache = new RedisSessionCache(redis);
+
 const sessions = new RedisSessionStore({
-  cache: new RedisSessionCache(redis),
+  cache: sessionCache,
   policy: {
     idleTtlSeconds: env.SESSION_IDLE_TTL_SECONDS,
     absoluteTtlSeconds: env.SESSION_ABSOLUTE_TTL_SECONDS,
@@ -163,6 +166,12 @@ const sessions = new RedisSessionStore({
   // real expiry instead of the creation-time one (throttled per sid inside the store).
   onSlide: createPrismaSessionSlideMirror(prisma),
 });
+
+/**
+ * Revoked access tokens outlive the request that revoked them, so the `jti` deny-list lives in
+ * Redis with the token's own remaining lifetime (`docs/api.md` 2.5).
+ */
+const tokenDenyList = createTokenDenyList(sessionCache);
 
 const clientsRepository = createPrismaClientRepository(prisma);
 /**
@@ -355,7 +364,7 @@ const app = buildServer({
     metrics,
     audit: createPrismaAdminAudit(prisma),
   },
-  userInfo: { users: usersRepository, access: effectiveAccess },
+  userInfo: { users: usersRepository, access: effectiveAccess, denyList: tokenDenyList },
   authorize: {
     clients: clientsRepository,
     loginUrl: `${(env.HOSTED_UI_URL ?? env.APP_URL).replace(/\/+$/, '')}/`,

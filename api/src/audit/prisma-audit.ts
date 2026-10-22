@@ -28,7 +28,9 @@ export async function recordAuditEvent(
  *
  * `sessions` must be supplied in production so a password change also invalidates the Redis
  * sessions that `/oauth2/authorize` and refresh grants read (the database row alone is not
- * enough to reject the next request).
+ * enough to reject the next request). The Redis revocation happens **before** the write
+ * transaction: nothing is written when it fails, so the password and the live sessions can
+ * never disagree.
  */
 export function createPrismaPasswordStore(
   prisma: PrismaClient,
@@ -53,42 +55,44 @@ export function createPrismaPasswordStore(
       });
     },
 
-    async updatePassword(userId, passwordHash, changedAt) {
-      await prisma.user.update({
-        where: { id: userId },
-        data: { passwordHash, passwordChangedAt: changedAt, mustChangePassword: false },
-      });
-    },
-
-    async revokeSessions(userId, revokedAt, reason, revokeOptions) {
+    async revokeLiveSessions(userId, revokeReason, revokeOptions) {
       const keepSessionId = revokeOptions?.keepSessionId;
-      const result = await prisma.session.updateMany({
-        where: {
-          userId,
-          revokedAt: null,
-          ...(keepSessionId === undefined ? {} : { id: { not: keepSessionId } }),
-        },
-        data: { revokedAt, revokeReason: reason },
-      });
       if (keepSessionId !== undefined && options.sessions?.revokeAllForUserExcept !== undefined) {
-        await options.sessions.revokeAllForUserExcept(userId, keepSessionId, 'password_change');
-      } else {
-        await options.sessions?.revokeAllForUser(userId, 'password_change');
+        await options.sessions.revokeAllForUserExcept(userId, keepSessionId, revokeReason);
+        return;
       }
-      return result.count;
+      await options.sessions?.revokeAllForUser(userId, revokeReason);
     },
 
-    async revokeRefreshTokens(userId, revokedAt, revokeOptions) {
-      const keepSessionId = revokeOptions?.keepSessionId;
-      const result = await prisma.refreshToken.updateMany({
-        where: {
-          userId,
-          revokedAt: null,
-          ...(keepSessionId === undefined ? {} : { sessionId: { not: keepSessionId } }),
-        },
-        data: { revokedAt },
-      });
-      return result.count;
+    async commitPasswordChange(commit) {
+      const keepSessionId = commit.keepSessionId;
+      const [, sessions, refreshTokens] = await prisma.$transaction([
+        prisma.user.update({
+          where: { id: commit.userId },
+          data: {
+            passwordHash: commit.passwordHash,
+            passwordChangedAt: commit.changedAt,
+            mustChangePassword: false,
+          },
+        }),
+        prisma.session.updateMany({
+          where: {
+            userId: commit.userId,
+            revokedAt: null,
+            ...(keepSessionId === undefined ? {} : { id: { not: keepSessionId } }),
+          },
+          data: { revokedAt: commit.changedAt, revokeReason: commit.reason },
+        }),
+        prisma.refreshToken.updateMany({
+          where: {
+            userId: commit.userId,
+            revokedAt: null,
+            ...(keepSessionId === undefined ? {} : { sessionId: { not: keepSessionId } }),
+          },
+          data: { revokedAt: commit.changedAt },
+        }),
+      ]);
+      return { revokedSessions: sessions.count, revokedRefreshTokens: refreshTokens.count };
     },
 
     async recordAudit(event) {

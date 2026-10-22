@@ -105,6 +105,36 @@ export async function rotateRefreshToken(
   repository: RefreshTokenRepository,
   input: RotateRefreshInput,
 ): Promise<RefreshResult> {
+  const validation = await validateRefreshToken(repository, input);
+  if (!validation.ok) {
+    return validation;
+  }
+  return commitRefreshRotation(repository, {
+    record: validation.record,
+    ttlSeconds: input.ttlSeconds,
+    ...(input.now === undefined ? {} : { now: input.now }),
+  });
+}
+
+export type RefreshValidation =
+  | { ok: true; record: RefreshTokenRecord }
+  | { ok: false; reason: RefreshFailure; revokedFamily?: number };
+
+/**
+ * First half of a rotation: decides whether the presented token may still be exchanged, and
+ * writes nothing that the client could observe.
+ *
+ * Reuse is the exception — it revokes the family immediately, because the only safe answer to
+ * a replayed token is to burn the chain.
+ *
+ * The caller runs its session, context and permission checks between this and
+ * `commitRefreshRotation`, so a dead session never leaves a successor row behind
+ * (card #70 finding 3).
+ */
+export async function validateRefreshToken(
+  repository: RefreshTokenRepository,
+  input: Pick<RotateRefreshInput, 'token' | 'clientId' | 'now'>,
+): Promise<RefreshValidation> {
   const now = input.now ?? new Date();
   const current = await repository.findByHash(hashRefreshToken(input.token));
   if (current === null) {
@@ -125,23 +155,50 @@ export async function rotateRefreshToken(
     return { ok: false, reason: 'expired' };
   }
 
+  return { ok: true, record: current };
+}
+
+export type RotationCommit =
+  | {
+      ok: true;
+      record: RefreshTokenRecord;
+      successor: { token: string; record: RefreshTokenRecord };
+    }
+  | { ok: false; reason: 'reuse_detected'; revokedFamily: number };
+
+export interface CommitRotationInput {
+  record: RefreshTokenRecord;
+  ttlSeconds: number;
+  now?: Date;
+}
+
+/**
+ * Second half of a rotation: writes the successor of an already validated record. Losing the
+ * `markRotated` race means another exchange got there first, which is reuse by definition.
+ */
+export async function commitRefreshRotation(
+  repository: RefreshTokenRepository,
+  input: CommitRotationInput,
+): Promise<RotationCommit> {
+  const now = input.now ?? new Date();
+  const { record } = input;
+
   const next = await issueRefreshToken(repository, {
-    clientId: current.clientId,
-    userId: current.userId,
-    sessionId: current.sessionId,
-    scope: current.scope,
+    clientId: record.clientId,
+    userId: record.userId,
+    sessionId: record.sessionId,
+    scope: record.scope,
     ttlSeconds: input.ttlSeconds,
-    familyId: current.familyId,
-    ...(current.loginContext === undefined ? {} : { loginContext: current.loginContext }),
+    familyId: record.familyId,
+    ...(record.loginContext === undefined ? {} : { loginContext: record.loginContext }),
     now,
   });
 
-  const rotated = await repository.markRotated(current.tokenHash, now, next.record.id);
+  const rotated = await repository.markRotated(record.tokenHash, now, next.record.id);
   if (!rotated) {
-    // Lost the race with another exchange of the same token: treat it as reuse.
-    const revokedFamily = await repository.revokeFamily(current.familyId, now);
+    const revokedFamily = await repository.revokeFamily(record.familyId, now);
     return { ok: false, reason: 'reuse_detected', revokedFamily };
   }
 
-  return { ok: true, record: current, successor: { token: next.token, record: next.record } };
+  return { ok: true, record, successor: { token: next.token, record: next.record } };
 }

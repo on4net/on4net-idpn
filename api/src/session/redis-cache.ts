@@ -1,4 +1,4 @@
-import type { SessionCache } from './cache.js';
+import type { IndexedSessionWrite, SessionCache } from './cache.js';
 
 /** Subset of the Redis client used here, declared structurally to avoid leaking ioredis types. */
 export interface RedisLike {
@@ -9,7 +9,20 @@ export interface RedisLike {
   srem(key: string, member: string): Promise<number>;
   smembers(key: string): Promise<string[]>;
   expire(key: string, seconds: number): Promise<number>;
+  eval(script: string, numKeys: number, ...args: (string | number)[]): Promise<unknown>;
 }
+
+/**
+ * Session write plus user-index membership in one round trip. `redis.call` failures inside a
+ * script abort the whole script, so the pair is all-or-nothing (card #70 finding 5b).
+ */
+const SET_WITH_INDEX = `
+local ttl = tonumber(ARGV[2])
+redis.call('SET', KEYS[1], ARGV[1], 'EX', ttl)
+redis.call('SADD', KEYS[2], ARGV[3])
+redis.call('EXPIRE', KEYS[2], tonumber(ARGV[4]))
+return 1
+`;
 
 /** Redis-backed cache used by the session store. */
 export class RedisSessionCache implements SessionCache {
@@ -25,6 +38,19 @@ export class RedisSessionCache implements SessionCache {
 
   async delete(key: string): Promise<void> {
     await this.redis.del(key);
+  }
+
+  async setWithIndex(write: IndexedSessionWrite): Promise<void> {
+    await this.redis.eval(
+      SET_WITH_INDEX,
+      2,
+      write.key,
+      write.indexKey,
+      write.value,
+      Math.max(1, Math.ceil(write.ttlSeconds)),
+      write.member,
+      Math.max(1, Math.ceil(write.indexTtlSeconds)),
+    );
   }
 
   async setAdd(key: string, member: string, ttlSeconds: number): Promise<void> {

@@ -608,8 +608,8 @@ describe('POST /oauth2/token — refresh_token', () => {
     await app.close();
   });
 
-  it('rejects refresh when the session was revoked', async () => {
-    const { app, codes } = await harness({ sessionValid: false });
+  it('rejects refresh when the session was revoked and writes no successor', async () => {
+    const { app, codes, refreshTokens } = await harness({ sessionValid: false });
     const code = await seedCode(codes, ['openid', 'offline_access']);
     const issued = await request(app.server)
       .post('/oauth2/token')
@@ -622,6 +622,8 @@ describe('POST /oauth2/token — refresh_token', () => {
       })
       .expect(200);
 
+    const before = refreshTokens.records.size;
+
     await request(app.server)
       .post('/oauth2/token')
       .send({
@@ -631,6 +633,13 @@ describe('POST /oauth2/token — refresh_token', () => {
       })
       .expect(400)
       .expect((response) => expect(response.body.error).toBe('invalid_grant'));
+
+    // Rotation runs only after every check passed, so a dead session leaves no live successor
+    // and the presented token is still unspent (card #70 finding 3).
+    expect(refreshTokens.records.size).toBe(before);
+    expect(refreshTokens.records.get(hashRefreshToken(issued.body.refresh_token))?.rotatedAt).toBe(
+      null,
+    );
 
     await app.close();
   });
