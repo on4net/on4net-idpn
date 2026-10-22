@@ -16,7 +16,16 @@ import { fileURLToPath } from 'node:url';
 
 import { parse } from 'yaml';
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+/**
+ * `--root <dir>` points the checks at a fixture instead of the repository. The failure paths
+ * must be exercised by a test that is expected to fail, otherwise a broken guard looks green
+ * forever (card #71 finding 4).
+ */
+const rootArgument = process.argv.indexOf('--root');
+const ROOT =
+  rootArgument === -1
+    ? resolve(dirname(fileURLToPath(import.meta.url)), '..')
+    : resolve(process.argv[rootArgument + 1] ?? '.');
 
 /** Dependencies that must never float, even in `devDependencies`. */
 const PINNED = [

@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -25,9 +26,18 @@ const isCI = process.env.CI === 'true';
 const databaseURL = process.env.DATABASE_URL ?? 'postgres://postgres:postgres@127.0.0.1:5432/idpn';
 const redisURL = process.env.REDIS_URL ?? 'redis://127.0.0.1:6379';
 const bffClientId = process.env.E2E_BFF_CLIENT_ID ?? 'sample-bff';
-const bffClientSecret = process.env.E2E_BFF_CLIENT_SECRET ?? 'e2e-bff-client-secret';
+/**
+ * The E2E fixture refuses committed credentials (card #71 finding 7), so every run that does
+ * not receive real values mints fresh ones. They are exported through `process.env` as well:
+ * the seed webServer inherits them and the test workers read the same values.
+ */
+const randomSecret = (prefix: string): string =>
+  `${prefix}-${randomBytes(24).toString('base64url')}`;
+const bffClientSecret = process.env.E2E_BFF_CLIENT_SECRET ?? randomSecret('e2e-bff');
 const e2eUserIdentifier = process.env.E2E_USER_IDENTIFIER ?? 'user@example.com';
-const e2eUserPassword = process.env.E2E_USER_PASSWORD ?? 'e2e-user-password-123';
+const e2eUserPassword = process.env.E2E_USER_PASSWORD ?? randomSecret('e2e-user');
+process.env.E2E_BFF_CLIENT_SECRET ??= bffClientSecret;
+process.env.E2E_USER_PASSWORD ??= e2eUserPassword;
 const secondClientId = process.env.E2E_SECOND_CLIENT_ID ?? 'sample-bff-b';
 const secondRedirectUri =
   process.env.E2E_SECOND_REDIRECT_URI ?? 'http://127.0.0.1:3201/auth/callback';

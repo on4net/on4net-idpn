@@ -1,7 +1,10 @@
-import { readFile, rm, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -22,6 +25,9 @@ import {
 } from '../scripts/ops/ops-lib.js';
 import { parseArguments as parseRestoreArguments } from '../scripts/ops/restore.js';
 import { readBackupStatus } from '../src/observability/backup-status.js';
+
+const execFileAsync = promisify(execFile);
+const REPO_ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 
 let directory: string;
 
@@ -226,5 +232,63 @@ describe('backup status bridge', () => {
     const status = await readBackupStatus(statusFile);
     expect(status?.lastSuccessAt.toISOString()).toBe('2026-10-20T00:15:00.000Z');
     expect(status?.targets).toEqual(['postgres']);
+  });
+});
+
+describe('supply-chain gate', () => {
+  const runGate = async (): Promise<{ code: number; stderr: string }> => {
+    try {
+      const result = await execFileAsync(process.execPath, [
+        join(REPO_ROOT, 'tools/check-supply-chain.mjs'),
+        '--root',
+        directory,
+      ]);
+      return { code: 0, stderr: String(result.stderr) };
+    } catch (error) {
+      const failed = error as { code?: number; stderr?: string };
+      return { code: failed.code ?? 1, stderr: String(failed.stderr ?? '') };
+    }
+  };
+
+  const writeWorkspace = async (
+    root: Record<string, unknown>,
+    packages: Record<string, Record<string, unknown>> = {},
+  ): Promise<void> => {
+    await writeFile(join(directory, 'pnpm-workspace.yaml'), "packages:\n  - 'packages/*'\n");
+    await writeFile(join(directory, 'package.json'), JSON.stringify(root));
+    await mkdir(join(directory, 'packages'), { recursive: true });
+    for (const [name, pkg] of Object.entries(packages)) {
+      await mkdir(join(directory, 'packages', name), { recursive: true });
+      await writeFile(join(directory, 'packages', name, 'package.json'), JSON.stringify(pkg));
+    }
+  };
+
+  // A gate whose failure paths are never exercised looks green even when it stops working.
+  it('fails on a floating dependency range', async () => {
+    await writeWorkspace({ name: 'fixture', dependencies: { vite: 'latest' } });
+
+    const result = await runGate();
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain('must not use the floating range');
+  });
+
+  it('fails when react is not one exact version across the workspace', async () => {
+    await writeWorkspace({ name: 'fixture', dependencies: { react: '19.0.0' } }, {
+      a: { name: 'a', dependencies: { react: '19.1.0' } },
+    });
+
+    const result = await runGate();
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain('must share one exact version');
+  });
+
+  it('passes a pinned fixture', async () => {
+    await writeWorkspace({ name: 'fixture', dependencies: { vite: '7.1.0' } }, {
+      a: { name: 'a', dependencies: { react: '19.1.0' } },
+    });
+
+    const result = await runGate();
+    expect(result.code).toBe(0);
+    expect(result.stderr).toBe('');
   });
 });

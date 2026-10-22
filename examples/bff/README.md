@@ -54,6 +54,7 @@ pnpm --filter @idpn/example-bff run dev
 | `BFF_SCOPES`            | `openid profile email offline_access` | Requested scopes                             |
 | `BFF_PORT` / `BFF_HOST` | `3200` / `127.0.0.1`                  | Listen address                               |
 | `BFF_PUBLIC_URL`        | `http://${BFF_HOST}:${BFF_PORT}`      | Public origin of the sample                  |
+| `BFF_COOKIE_SECURE`     | `true` when `BFF_PUBLIC_URL` is https | Force the `Secure` flag on BFF cookies      |
 | `HOSTED_UI_URL`         | `${IDP_URL}/`                         | Fallback link on the failure page            |
 
 ## Tests

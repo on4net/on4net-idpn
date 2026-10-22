@@ -118,11 +118,30 @@ describe('GET /login', () => {
       method: 'GET',
       url: '/login?return_to=%2F%5Cevil.example',
     });
+    // `..` segments collapse to a leading `//` only after normalisation, so guarding the raw
+    // string is not enough (card #71 finding 1, second round).
+    const dotSegments = await harness.app.inject({
+      method: 'GET',
+      url: '/login?return_to=%2F..%2F%2Fevil.example',
+    });
+    const encodedDotSegments = await harness.app.inject({
+      method: 'GET',
+      url: '/login?return_to=%2Fa%2F..%2F%2Fevil.example',
+    });
     expect(absolute.headers.location).toContain('/oauth2/authorize');
     expect(protocolRelative.headers.location).toContain('/oauth2/authorize');
     expect(backslash.headers.location).toContain('/oauth2/authorize');
+    expect(dotSegments.headers.location).toContain('/oauth2/authorize');
+    expect(encodedDotSegments.headers.location).toContain('/oauth2/authorize');
 
-    for (const response of [absolute, protocolRelative, backslash, relative]) {
+    for (const response of [
+      absolute,
+      protocolRelative,
+      backslash,
+      dotSegments,
+      encodedDotSegments,
+      relative,
+    ]) {
       const state = new URL(response.headers.location ?? '').searchParams.get('state') ?? '';
       const stored = await harness.store.takeTransaction(state);
       expect(stored?.returnTo).toBe(response === relative ? '/dashboard' : '/');

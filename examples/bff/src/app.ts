@@ -145,8 +145,19 @@ export function buildBffApp(options: BffAppOptions): FastifyInstance {
     try {
       const base = 'http://bff.invalid';
       const resolved = new URL(value, base);
-      // Resolving must stay on the placeholder origin; anything else escaped the path.
-      return resolved.origin === base ? `${resolved.pathname}${resolved.search}${resolved.hash}` : '/';
+      const target = `${resolved.pathname}${resolved.search}${resolved.hash}`;
+      // Resolving must stay on the placeholder origin, and the guard has to run on the
+      // *normalised* result: `..` segments collapse `/..//evil.example` to `//evil.example`,
+      // which every check on the raw input above let through (card #71 finding 1).
+      if (
+        resolved.origin !== base ||
+        !target.startsWith('/') ||
+        target.startsWith('//') ||
+        target.includes('\\')
+      ) {
+        return '/';
+      }
+      return target;
     } catch {
       return '/';
     }
