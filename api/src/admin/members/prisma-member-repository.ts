@@ -75,7 +75,9 @@ const toMember = (row: MemberRow, roleKeys: string[]): AdminMember => ({
   status: row.status as MembershipStatus,
   attributes: toAttributes(row.attributes),
   loginContextKey: row.loginContext?.key ?? null,
-  roleKeys: [...roleKeys].sort(),
+  // Two memberships may now grant the same role by design, so the rows repeat it; the member
+  // representation must not (card #72 finding 4).
+  roleKeys: [...new Set(roleKeys)].sort(),
   invitedAt: row.invitedAt?.toISOString() ?? null,
   joinedAt: row.joinedAt?.toISOString() ?? null,
   lastAccessAt: row.lastAccessAt?.toISOString() ?? null,
@@ -618,22 +620,69 @@ export function createPrismaMemberRepository(
       // (`assignments.source_membership_id` → `ON DELETE CASCADE`). A role that a sibling
       // context of the same client allows and still grants therefore survives: deleting a
       // membership in context A no longer revokes access in context B (docs/domain-model.md
-      // 2.11). Rows written before that column existed have no owner and are still matched by
-      // the role set this scope governs, which keeps the pre-migration cleanup working.
+      // 2.11).
+      //
+      // Rows written before that column existed have no owner. Deleting them by role set is
+      // only safe when no sibling still grants the role; a covered row is attributed to the
+      // sibling instead, so a later removal there cannot revoke the other context either
+      // (card #72 finding 2).
       const legacyRoles = await prisma.role.findMany({
         where: {
           clientId: client.id,
           ...(context === null ? {} : { key: { in: context.allowedRoles } }),
         },
-        select: { id: true },
+        select: { id: true, key: true },
       });
+      const siblings = await prisma.clientMembership.findMany({
+        where: { clientId: client.id, userId, id: { not: membership.id } },
+        select: { id: true, loginContext: { select: { allowedRoles: true } } },
+      });
+      const siblingIds = siblings.map((sibling) => sibling.id);
+      const coveredRoleKeys = new Set(
+        siblings.flatMap((sibling) => sibling.loginContext?.allowedRoles ?? []),
+      );
+      if (siblingIds.length > 0) {
+        const owned = await prisma.assignment.findMany({
+          where: {
+            subjectType: 'user',
+            subjectId: userId,
+            sourceMembershipId: { in: siblingIds },
+          },
+          select: { role: { select: { key: true } } },
+        });
+        for (const row of owned) {
+          coveredRoleKeys.add(row.role.key);
+        }
+      }
+      const covered = legacyRoles.filter((role) => coveredRoleKeys.has(role.key));
+      const uncovered = legacyRoles.filter((role) => !coveredRoleKeys.has(role.key));
+
+      for (const role of covered) {
+        const owner =
+          siblings.find((sibling) =>
+            (sibling.loginContext?.allowedRoles ?? []).includes(role.key),
+          )?.id ?? siblingIds[0];
+        if (owner === undefined) {
+          continue;
+        }
+        await prisma.assignment.updateMany({
+          where: {
+            subjectType: 'user',
+            subjectId: userId,
+            sourceMembershipId: null,
+            roleId: role.id,
+          },
+          data: { sourceMembershipId: owner },
+        });
+      }
+
       await prisma.$transaction([
         prisma.assignment.deleteMany({
           where: {
             subjectType: 'user',
             subjectId: userId,
             sourceMembershipId: null,
-            roleId: { in: legacyRoles.map((role) => role.id) },
+            roleId: { in: uncovered.map((role) => role.id) },
           },
         }),
         prisma.clientMembership.delete({ where: { id: membership.id } }),

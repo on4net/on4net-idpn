@@ -410,7 +410,10 @@ describe('initial schema', () => {
 
   it('rolls back and re-applies the migrations', async () => {
     const newest = await rollbackLatestMigration({ connectionString, confirm: true });
-    expect(newest).toBe('0016_user_login_lookup_indexes');
+    expect(newest).toBe('0017_backfill_assignment_membership');
+
+    const afterBackfill = await rollbackLatestMigration({ connectionString, confirm: true });
+    expect(afterBackfill).toBe('0016_user_login_lookup_indexes');
     const loginIndex = await client.query<{ email: string | null; username: string | null }>(
       `SELECT to_regclass('public.users_email_lookup_idx') AS email,
               to_regclass('public.users_username_lookup_idx') AS username`,
@@ -496,7 +499,7 @@ describe('initial schema', () => {
     const history = await client.query<{ migration_name: string; rolled_back_at: Date | null }>(
       `SELECT "migration_name", "rolled_back_at" FROM "_prisma_migrations"`,
     );
-    expect(history.rows).toHaveLength(16);
+    expect(history.rows).toHaveLength(17);
     expect(history.rows.every((row) => row.rolled_back_at !== null)).toBe(true);
 
     const afterRollback = await client.query<{ users: string | null }>(

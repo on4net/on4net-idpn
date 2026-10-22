@@ -582,7 +582,10 @@ POST /api/v1/users
 - تغییر `allowedRoles`، `mfaPolicy` یا `loginMethods` نیازمند Step-up و Audit است.
 - `branding` فقط `title` (متن ساده)، `logoUrl` (`http(s)`) و `theme` را می‌پذیرد؛ کلید ناشناخته → `422`.
 - `enable` وضعیت را به `active` برمی‌گرداند (Audit: `client.context.enabled`) و نیازمند Step-up است؛ یک Context غیرفعال را نمی‌توان پیش‌فرض کرد.
-- هر رد شدن (401/403) روی این مسیرها با `client.context.denied` و `result=failure` ثبت می‌شود.
+- هر رد شدن یک ادمین احرازشده (403) روی این مسیرها با `client.context.denied` و
+  `result=failure` ثبت می‌شود؛ درخواست بدون توکن معتبر فقط لاگ می‌شود (بدون نوشتن در پایگاه‌داده).
+- مسیرهای `/members` رد شدن را با `member.context.denied` / `member.scope.denied` ثبت می‌کنند،
+  نه با `client.context.denied`.
 - جزئیات جریان و امنیت: [login-contexts.md](./login-contexts.md).
 
 ### 3.3.4 زبان و ترجمه هر اپ

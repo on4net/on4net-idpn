@@ -9,6 +9,7 @@ import {
   type PermissionReader,
   type TokenVerifier,
 } from '../authorize.js';
+import type { RateLimiter, RateLimitPolicy } from '../../http/rate-limit.js';
 import { sendProblem } from '../routes.js';
 import { loginContextInputProblems } from './login-context-validation.js';
 import type {
@@ -25,7 +26,12 @@ export interface LoginContextRoutesOptions {
   permissions: PermissionReader;
   contexts: AdminLoginContextRepository;
   audit: AdminAudit;
+  /** Per-address limiter: refused admin calls used to be free to amplify (card #72). */
+  rateLimit?: RateLimiter;
 }
+
+/** Admin context calls per address; the console issues a handful per action. */
+const ADMIN_CONTEXT_RATE_LIMIT: RateLimitPolicy = { windowSeconds: 60, max: 60 };
 
 const CONTEXT_READ = 'idp:client-context:read';
 const CONTEXT_WRITE = 'idp:client-context:write';
@@ -135,6 +141,25 @@ export function registerLoginContextAdminRoutes(
     requirement: AdminRequirement,
     attempted: { action: string; contextKey?: string },
   ): Promise<{ userId: string; clientId: string } | null> => {
+    if (options.rateLimit !== undefined) {
+      const allowed = await options.rateLimit.consume(
+        `admin:contexts:${request.ip}`,
+        ADMIN_CONTEXT_RATE_LIMIT,
+      );
+      if (!allowed) {
+        // A refused call is not free: without this an unauthenticated client could make the
+        // server do a token check and an audit insert per request (card #72 finding 1).
+        sendProblem(
+          reply,
+          429,
+          'rate-limited',
+          'Too many requests',
+          'too many admin context calls from this address',
+        );
+        return null;
+      }
+    }
+
     const auth: AdminAuthorization = await authorizeAdminRequest(
       request,
       {
@@ -146,29 +171,44 @@ export function registerLoginContextAdminRoutes(
       requirement,
     );
     if (!auth.ok) {
-      // docs/login-contexts.md 9: a cross-context attempt is a `403` **and** an audit row.
-      // The refused call is recorded before the response so the denial cannot be lost; a
-      // request without a verified token carries no actor instead of a guessed one.
-      await options.audit.record({
-        actorType: auth.actorId === undefined ? 'anonymous' : 'admin',
-        actorId: auth.actorId ?? null,
-        action: 'client.context.denied',
-        targetType: 'login_context',
-        // `target_id` is a UUID column and a context key is not one; the key travels in
-        // metadata next to the client id.
-        targetId: null,
-        clientId: requirement.clientId ?? null,
-        ip: request.ip ?? null,
-        userAgent: request.headers['user-agent'] ?? null,
-        result: 'failure',
-        metadata: {
-          attempted: attempted.action,
-          permission: requirement.permission,
-          status: auth.status,
-          reason: auth.error,
-          ...(attempted.contextKey === undefined ? {} : { key: attempted.contextKey }),
-        },
-      });
+      // docs/login-contexts.md 9: a cross-context attempt by an authenticated admin is a
+      // `403` **and** an audit row. A request without a verified token has no actor to
+      // attribute, so it must not cost a database write and a client lookup: a log line
+      // keeps it observable without giving unauthenticated callers an amplification path
+      // (card #72 finding 1).
+      if (auth.actorId !== undefined) {
+        await options.audit.record({
+          actorType: 'admin',
+          actorId: auth.actorId,
+          action: 'client.context.denied',
+          targetType: 'login_context',
+          // `target_id` is a UUID column and a context key is not one; the key travels in
+          // metadata next to the client id.
+          targetId: null,
+          clientId: requirement.clientId ?? null,
+          ip: request.ip ?? null,
+          userAgent: request.headers['user-agent'] ?? null,
+          result: 'failure',
+          metadata: {
+            attempted: attempted.action,
+            permission: requirement.permission,
+            status: auth.status,
+            reason: auth.error,
+            ...(attempted.contextKey === undefined ? {} : { key: attempted.contextKey }),
+          },
+        });
+      } else {
+        request.log.warn(
+          {
+            component: 'admin',
+            attempted: attempted.action,
+            permission: requirement.permission,
+            status: auth.status,
+            reason: auth.error,
+          },
+          'admin request denied without a verified token',
+        );
+      }
       if (auth.status === 401) {
         reply.header('WWW-Authenticate', '******"invalid_token"');
       }
@@ -357,8 +397,12 @@ export function registerLoginContextAdminRoutes(
       }
       // Validate the merged result, not just the patch: a PATCH that shrinks allowedRoles
       // must not leave a defaultRole outside it.
+      // `branding` written before the stricter schema is not re-validated unless the patch
+      // touches it: otherwise one legacy value made every field of the context uneditable
+      // (card #72 finding 3). The cross-field checks (allowedRoles/defaultRoles) still run on
+      // the merged row.
       const problems = loginContextInputProblems(
-        { ...existing.value, ...patch },
+        { ...existing.value, ...patch, ...(patch.branding === undefined ? { branding: null } : {}) },
         { clientId, clientRoleKeys: new Set(roles.value) },
       );
       if (problems.length > 0) {

@@ -9,6 +9,9 @@ import type { AdminAudit } from './admin-types.js';
  * token is translated to the internal UUID first; an unknown client is recorded as null
  * instead of dropping the event.
  */
+/** Bounded so an attacker-supplied `clientId` cannot grow the map without limit. */
+const MAX_CACHED_CLIENTS = 500;
+
 export function createPrismaAdminAudit(prisma: PrismaClient): AdminAudit {
   const cache = new Map<string, string | null>();
 
@@ -24,6 +27,13 @@ export function createPrismaAdminAudit(prisma: PrismaClient): AdminAudit {
       select: { id: true },
     });
     cache.set(clientId, row?.id ?? null);
+    if (cache.size > MAX_CACHED_CLIENTS) {
+      // Insertion order = age; drop the oldest entry (card #72 finding 1).
+      const oldest = cache.keys().next().value;
+      if (oldest !== undefined) {
+        cache.delete(oldest);
+      }
+    }
     return row?.id ?? null;
   };
 

@@ -473,6 +473,7 @@ const app = buildServer({
     permissions: permissionReader,
     contexts: createPrismaLoginContextRepository(prisma),
     audit: createPrismaAdminAudit(prisma),
+    rateLimit: accountRateLimiter,
   },
   audit: {
     adminClientId: env.ADMIN_CLIENT_ID,
