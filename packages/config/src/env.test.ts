@@ -49,6 +49,7 @@ describe('parseServerEnv', () => {
       ...minimalEnv,
       NODE_ENV: 'production',
       CLIENT_SECRET_PEPPER: 'production-client-secret-pepper-value',
+      SIGNING_KEY_REF: 'file:///var/lib/idpn/signing-keys.json',
       PORT: '8080',
       LOG_LEVEL: 'debug',
       MFE_ALLOWED_ORIGINS: 'https://app-a.example.com, https://app-b.example.com',
@@ -170,6 +171,11 @@ describe('parseServerEnv', () => {
       {
         key: 'CLIENT_SECRET_PEPPER',
         message: 'is required in production (supply it from KMS/Vault)',
+      },
+      {
+        key: 'SIGNING_KEY_REF',
+        message:
+          'is required in production (file:// on a shared volume, or a KMS/Vault reference)',
       },
     ]);
 

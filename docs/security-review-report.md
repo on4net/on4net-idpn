@@ -154,7 +154,7 @@ by the owner-backed rule set (H4). The main OIDC flows pass the available confor
   requests, keep a documented allowance for server-to-server callers, and add negative tests.
 - **Status:** accepted for this card, owner action.
 
-### M2 — Signing key store ignores `SIGNING_KEY_REF` (owner decision)
+### M2 — Signing key store ignores `SIGNING_KEY_REF` (fail-closed part fixed in card #70)
 
 - **Evidence:** `api/src/index.ts` always constructs
   `new SigningKeyManager(new FileSigningKeyRepository('.idpn-keys.json'))`;
@@ -165,6 +165,11 @@ by the owner-backed rule set (H4). The main OIDC flows pass the available confor
 - **Required owner decision:** implement a KMS/Vault repository, or fail production startup
   when `SIGNING_KEY_REF` is set to an unsupported scheme. Rotation: plan re-signing known
   tokens / accepting overlap via JWKS.
+- **Status (card #70):** the reference is now consumed
+  (`api/src/oidc/signing-key-source.ts`): production startup requires `SIGNING_KEY_REF`, a
+  `file://` reference is honoured, and every other scheme fails closed instead of falling back to
+  a per-replica key file. **Still open:** the KMS/Vault adapter itself, which needs the backend
+  choice.
 
 ### M3 — Token endpoint client-auth error (fixed)
 

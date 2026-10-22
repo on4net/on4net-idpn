@@ -68,7 +68,7 @@ Copy-Item .env.example .env
 | `DATABASE_URL`             | **بله**              | `postgresql://…`                                      | اتصال PostgreSQL (باید `postgres://` یا `postgresql://` باشد)     |
 | `REDIS_URL`                | **بله**              | `redis://localhost:6379`                              | اتصال Redis (باید `redis://` یا `rediss://` باشد)                 |
 | `SESSION_SECRET`           | **بله**              | —                                                     | حداقل ۳۲ کاراکتر؛ امضای کوکی/CSRF                                 |
-| `SIGNING_KEY_REF`          | خیر                  | `vault://idpn/signing`                                | مرجع کلید امضا؛ در توسعه خالی می‌ماند                             |
+| `SIGNING_KEY_REF`          | در production **بله** | `file:///var/lib/idpn/signing-keys.json`              | مرجع کلید امضا؛ در توسعه خالی می‌ماند؛ نبودنش در production باعث توقف راه‌اندازی می‌شود |
 | `MFE_PUBLIC_URL`           | خیر                  | `https://cdn.example.com/idpn-mfe`                    | آدرس پایه Remoteهای MFE                                           |
 | `MFE_ALLOWED_ORIGINS`      | خیر                  | `https://app-a.example.com,https://app-b.example.com` | فهرست Originهای مجاز Host (با کاما)                               |
 | `SOCIAL_CALLBACK_BASE_URL` | خیر                  | `https://auth.example.com`                            | پایه Callback سوشال                                               |

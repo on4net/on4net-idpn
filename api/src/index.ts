@@ -38,7 +38,7 @@ import { LogoutTokenSigner, RedisLogoutTokenJtiRegistry } from './oidc/logout-to
 import { createPrismaLogoutRepository } from './oidc/prisma-logout-repository.js';
 import { createPrismaAdminUserRepository } from './admin/prisma-user-repository.js';
 import { PrismaClient } from './generated/prisma/client.js';
-import { FileSigningKeyRepository } from './oidc/file-key-repository.js';
+import { createSigningKeyRepository } from './oidc/signing-key-source.js';
 import { KeyRotationScheduler } from './oidc/key-rotation-scheduler.js';
 import { DEFAULT_ROTATION_DUE_DAYS, SigningKeyManager } from './oidc/keys.js';
 import { createPrismaClientRepository } from './oidc/prisma-client-repository.js';
@@ -132,11 +132,12 @@ redis.on('error', (error: unknown) => {
   logError({ component: 'redis' }, `redis error: ${sanitizeLogMessage(error)}`);
 });
 
-// Development key store (git-ignored). Production points SIGNING_KEY_REF at KMS/Vault.
+// The store is resolved from `SIGNING_KEY_REF`: production refuses to start without one, so a
+// per-replica key file can never silently become the production signing key.
 // When scheduled rotation is disabled the health flag still reports a rotation after the
 // documented 90-day threshold, so operators keep getting an alert.
 const keys = new SigningKeyManager(
-  new FileSigningKeyRepository('.idpn-keys.json'),
+  createSigningKeyRepository(env),
   () => new Date(),
   {
     retiredRetentionSeconds: env.KEY_RETIRED_RETENTION_SECONDS,

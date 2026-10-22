@@ -237,7 +237,7 @@ Reverse Proxy / WAF (TLS termination)
 | `DATABASE_URL` | `postgres://...` | اتصال PostgreSQL |
 | `REDIS_URL` | `redis://...` | اتصال Redis |
 | `SESSION_SECRET` | تصادفی 32 بایت | امضای کوکی/CSRF |
-| `SIGNING_KEY_REF` | `vault://...` | مرجع کلید امضا |
+| `SIGNING_KEY_REF` | `file:///var/lib/idpn/signing-keys.json` | مرجع کلید امضا (در production الزامی؛ فعلاً فقط `file://`، سایر schemeها fail-closed) |
 | `MFE_PUBLIC_URL` | `https://cdn.example.com/idpn-mfe` | آدرس پایه Remoteها و Manifest |
 | `MFE_ALLOWED_ORIGINS` | دامنه‌های Host | Originهای مجاز برای CORS/PostMessage |
 | `SOCIAL_CALLBACK_BASE_URL` | `https://auth.example.com` | پایه Callback سوشال |

@@ -225,8 +225,9 @@ const serverEnvBase = z.object({
 
 /**
  * Validated server configuration. The extra refinement fails closed: production must never
- * store client secrets under the public development pepper, and the check reports with every
- * other configuration error at startup.
+ * store client secrets under the public development pepper, nor sign tokens with a key file
+ * that belongs to a single replica. The check reports with every other configuration error at
+ * startup.
  */
 export const serverEnvSchema = serverEnvBase.superRefine((value, ctx) => {
   if (value.NODE_ENV === 'production' && value.CLIENT_SECRET_PEPPER === undefined) {
@@ -234,6 +235,13 @@ export const serverEnvSchema = serverEnvBase.superRefine((value, ctx) => {
       code: 'custom',
       path: ['CLIENT_SECRET_PEPPER'],
       message: 'is required in production (supply it from KMS/Vault)',
+    });
+  }
+  if (value.NODE_ENV === 'production' && value.SIGNING_KEY_REF === undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['SIGNING_KEY_REF'],
+      message: 'is required in production (file:// on a shared volume, or a KMS/Vault reference)',
     });
   }
 });
