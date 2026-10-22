@@ -111,8 +111,31 @@ test.describe('hosted login', () => {
     ).toEqual([]);
   });
 
-  test('stores no token in browser-readable storage', async ({ page }) => {
+  test('stores no token in browser-readable storage after signing in', async ({ page }) => {
+    // The property is only meaningful after a real sign-in: reading storage on a blank form
+    // could never fail (card #18 finding 5).
+    await page.route('**/api/v1/login', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        headers: { 'set-cookie': 'idpn_session=session-abc; HttpOnly; Path=/; SameSite=Lax' },
+        body: JSON.stringify({ ok: true, redirectTo: '/dashboard' }),
+      }),
+    );
+
+    // The successful login navigates to the returned target; serve it so the assertion runs
+    // on the destination page instead of racing the navigation.
+    await page.route('**/dashboard', (route) =>
+      route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>ok</title>' }),
+    );
+
     await page.goto(loginUrl);
+    const response = page.waitForResponse('**/api/v1/login');
+    await page.getByLabel('ایمیل یا نام کاربری').fill('admin');
+    await page.getByLabel('رمز عبور').fill('a-very-long-password');
+    await page.getByRole('button', { name: 'ورود', exact: true }).click();
+    await response;
+    await page.waitForURL('**/dashboard');
 
     const storage = await page.evaluate(() => ({
       localStorage: { ...localStorage },
@@ -124,6 +147,7 @@ test.describe('hosted login', () => {
     expect(serialized).not.toContain('access_token');
     expect(serialized).not.toContain('refresh_token');
     expect(serialized).not.toContain('id_token');
+    // The session cookie is HttpOnly, so script cannot read it at all.
     expect(storage.cookie).not.toContain('idpn_session');
   });
 });

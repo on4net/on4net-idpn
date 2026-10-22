@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { z } from 'zod';
 
 import { sanitizeAuditMetadata } from '../audit/sanitize.js';
 import { authenticateWithPassword } from '../auth/authenticate.js';
@@ -33,6 +34,22 @@ const ACR_PASSWORD = 'urn:on4net:acr:pwd';
  * costs a full Argon2id verification.
  */
 const LOGIN_RATE_LIMIT: RateLimitPolicy = { windowSeconds: 60, max: 10 };
+/** Address-wide limit from `docs/security.md` 3.2: 20 attempts per 10 minutes. */
+const LOGIN_IP_RATE_LIMIT: RateLimitPolicy = { windowSeconds: 600, max: 20 };
+
+/**
+ * The body is validated before use: `{"identifier":123}` used to throw on `.trim()` and
+ * surface as a 500. Unknown keys are preserved so a future field is ignored, not rejected.
+ */
+const loginBodySchema = z
+  .object({
+    identifier: z.string().max(320).optional(),
+    password: z.string().max(128).optional(),
+    clientId: z.string().max(128).optional(),
+    returnTo: z.string().max(2048).optional(),
+    loginContext: z.string().max(64).optional(),
+  })
+  .passthrough();
 const LOGIN_THROTTLED_CODE = 'too_many_requests';
 const LOGIN_THROTTLED_MESSAGE = 'تعداد تلاش‌ها بیش از حد مجاز است؛ کمی بعد دوباره تلاش کنید.';
 
@@ -114,32 +131,47 @@ export function registerLoginRoute(app: FastifyInstance, options: LoginRouteOpti
   const now = options.now ?? (() => new Date());
 
   app.post('/api/v1/login', async (request: FastifyRequest, reply: FastifyReply) => {
-    const body = (request.body ?? {}) as LoginBody;
+    const parsed = loginBodySchema.safeParse(request.body ?? {});
+    if (!parsed.success) {
+      // `{"identifier":123}` used to throw a TypeError and surface as a 500.
+      return reply
+        .code(400)
+        .header('Cache-Control', 'no-store')
+        .send({ error: 'invalid_request', message: 'request is malformed' });
+    }
+    const body = parsed.data as LoginBody;
     const identifier = body.identifier?.trim() ?? '';
     const password = body.password ?? '';
     /** Login context key from the hosted UI; only selects the MFA policy. */
     const loginContext = optionalLoginContext(body.loginContext);
-
-    if (identifier === '' || password === '') {
-      return reject(reply, options, request, body, undefined, 'missing_credentials');
-    }
-
     const normalized = normalizeIdentifier(identifier);
 
     // Throttle before any hashing: unknown identifiers would otherwise be free to spray and
     // every attempt would cost a full Argon2id verification (docs/security.md T1, T20).
+    // Two buckets, because they close different holes: the identifier bucket slows a targeted
+    // guess, the address bucket stops one client spraying one password across many accounts
+    // (docs/security.md 3.2: 20 attempts / 10 min per IP).
     if (options.rateLimiter !== undefined) {
-      const allowed = await options.rateLimiter.consume(
-        `login:${request.ip}:${normalized}`,
-        LOGIN_RATE_LIMIT,
-      );
-      if (!allowed) {
+      const [identifierAllowed, addressAllowed] = await Promise.all([
+        options.rateLimiter.consume(`login:${request.ip}:${normalized}`, LOGIN_RATE_LIMIT),
+        options.rateLimiter.consume(`login:ip:${request.ip}`, LOGIN_IP_RATE_LIMIT),
+      ]);
+      if (!identifierAllowed || !addressAllowed) {
+        // Report the window of the bucket that actually blocked the attempt.
+        const retryAfter = Math.max(
+          identifierAllowed ? 0 : LOGIN_RATE_LIMIT.windowSeconds,
+          addressAllowed ? 0 : LOGIN_IP_RATE_LIMIT.windowSeconds,
+        );
         return reply
           .code(429)
           .header('Cache-Control', 'no-store')
-          .header('Retry-After', String(LOGIN_RATE_LIMIT.windowSeconds))
+          .header('Retry-After', String(retryAfter))
           .send({ error: LOGIN_THROTTLED_CODE, message: LOGIN_THROTTLED_MESSAGE });
       }
+    }
+
+    if (identifier === '' || password === '') {
+      return reject(reply, options, request, body, undefined, 'missing_credentials');
     }
 
     const user = await options.users.findByIdentifier(normalized);
@@ -149,10 +181,13 @@ export function registerLoginRoute(app: FastifyInstance, options: LoginRouteOpti
       return reject(reply, options, request, body, undefined, 'unknown_user');
     }
 
+    const at = now();
     const result = await authenticateWithPassword(user, password, {
       ...(options.passwordParams === undefined ? {} : { params: options.passwordParams }),
+      // The lock decision must use the route clock, otherwise an injected `now` (tests,
+      // deterministic deployments) would read a different lock state than the failure branch.
+      now: () => at,
     });
-    const at = now();
 
     if (!result.ok) {
       if (result.reason !== 'invalid_credentials') {

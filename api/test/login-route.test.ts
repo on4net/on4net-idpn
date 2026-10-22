@@ -161,6 +161,54 @@ describe('POST /api/v1/login', () => {
     await app.close();
   });
 
+  it('limits attempts per address across identifiers', async () => {
+    const { app } = await harness(null, undefined, {
+      rateLimiter: createMemoryRateLimiter(),
+      passwordParams: FAST,
+    });
+
+    const statuses: number[] = [];
+    for (let attempt = 0; attempt < 21; attempt += 1) {
+      const response = await request(app.server)
+        .post('/api/v1/login')
+        .send({ identifier: `user${attempt}@example.com`, password });
+      statuses.push(response.status);
+    }
+
+    // A single address may spend 20 attempts in ten minutes whatever identifiers it uses.
+    expect(statuses.slice(0, 20).every((status) => status === 401)).toBe(true);
+    expect(statuses[20]).toBe(429);
+    await app.close();
+  });
+
+  it('does not slide an active lock on further attempts', async () => {
+    const lockedUntil = new Date('2026-10-18T12:10:00Z');
+    const { app, failures } = await harness(
+      await user({ failedLoginCount: 5, lockedUntil }),
+      new Date('2026-10-18T12:05:00Z'),
+      { passwordParams: FAST },
+    );
+
+    await request(app.server)
+      .post('/api/v1/login')
+      .send({ identifier: 'sara@example.com', password })
+      .expect(401);
+
+    expect(failures.at(-1)?.lockedUntil?.toISOString()).toBe(lockedUntil.toISOString());
+    await app.close();
+  });
+
+  it('rejects a malformed body instead of throwing', async () => {
+    const { app } = await harness(await user());
+
+    await request(app.server)
+      .post('/api/v1/login')
+      .send({ identifier: 123, password })
+      .expect(400);
+
+    await app.close();
+  });
+
   it('upgrades the stored hash when the current policy is stronger', async () => {
     const current = await user();
     const stronger: Argon2Params = { memoryCost: 16_384, timeCost: 2, parallelism: 1 };

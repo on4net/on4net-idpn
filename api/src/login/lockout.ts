@@ -27,8 +27,17 @@ export function isAccountLocked(lockedUntil: Date | null, now: Date): boolean {
  * cannot keep the account locked with a single attempt per window.
  */
 export function nextFailureState(current: LockoutState, now: Date): FailureState {
+  // A lock in progress never slides: otherwise every new attempt pushed `locked_until` forward
+  // and the account stayed locked for as long as the attacker kept trying (card #18 finding 2).
+  if (isAccountLocked(current.lockedUntil, now)) {
+    return {
+      attempts: current.failedLoginCount,
+      lockedUntil: current.lockedUntil,
+      locked: true,
+    };
+  }
   // Only an elapsed lock restarts the window; without a lock the counter simply continues.
-  const lockExpired = current.lockedUntil !== null && !isAccountLocked(current.lockedUntil, now);
+  const lockExpired = current.lockedUntil !== null;
   const previous = lockExpired ? 0 : current.failedLoginCount;
   const attempts = previous + 1;
   const locked = attempts >= MAX_FAILED_ATTEMPTS;

@@ -169,6 +169,10 @@ model User {
 
   @@unique([tenantId, username])
   @@unique([tenantId, email])
+  // The login lookup has no tenant filter, so these standalone indexes serve it
+  // (migration 0016); the tenant-prefixed uniques cannot.
+  @@index([email])
+  @@index([username])
   @@unique([tenantId, phone])
   @@index([tenantId, status])
   @@map("users")
