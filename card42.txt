@@ -1,0 +1,137 @@
+﻿Publish MFE SDK and integration documentation
+['phase:5', 'frontend', 'mfe', 'docs', 'P0']
+## هدف
+
+بسته مصرف‌شدنی و مستندات اتصال برای تیم‌های اپ.
+
+
+
+## تحویل‌شدنی‌ها
+
+- [ ] پکیج SDK با Typeهای Config/Event
+
+- [ ] خروجی Module Federation و Web Component
+
+- [ ] SemVer و Manifest نسخه
+
+- [ ] نمونه React/Vue/HTML
+
+- [ ] Contract Test نسخه‌ها
+
+
+
+## معیار پذیرش
+
+- [ ] اپ نمونه پکیج را مصرف می‌کند.
+
+- [ ] تغییر ناسازگار در Contract CI را می‌شکند.
+
+- [ ] مستندات کامل و قابل اجراست.
+
+
+
+## ارجاع
+
+Epic: #6
+
+سند: `docs/micro-frontend.md` و `docs/integration-guide.md`
+
+
+=== COMMENT on4nettec ===
+﻿## Plan
+
+**Scope:** publishable `@idpn/mfe-sdk` workspace package, Web Component parity for the `account` module, and integration docs. No backend/API changes.
+
+**Files / areas**
+- `packages/mfe-sdk/` (new): `src/contract.ts` (IdpnMfeConfig, IdpnEvent union, module/mode/direction/theme types), `src/validate.ts` (boundary validation + token-key guard), `src/mount.ts` (`mountIdpnModule`, `unmountIdpnModule`), `src/version.ts` (SDK + contract version constants), `src/index.ts`, tests, tsconfigs, vitest config, README.
+- `web/src/mfe/web-component.tsx`: one element class registered as `on4net-idpn-user-management` (unchanged default), `on4net-idpn-account` (new) and `on4net-idpn-mfe` (`module` attribute). `module` attribute/property; `theme` property.
+- `web/src/mfe/{user-management,account}.tsx`: roots accept `theme` and pass it to `IdpnRoot` (needed for SDK theme tokens).
+- `web/src/mfe/web-component.test.tsx`: account/module/theme tests.
+- `docs/mfe-sdk.md` (new) linked from clean `docs/README.md`; root `package.json` `test:unit` includes the new package.
+- Pre-existing modified docs are untouched; no hunks from them staged.
+
+**Data model / API:** none. SDK types mirror `MFE_SCHEMA_VERSION` and are kept in sync by a contract-parity test against `@idpn/contracts` schemas.
+
+**Security**
+- SDK never writes a token into attributes, DOM text or events; SPA token getter is an in-memory JS property only and is cleared in `bff` mode.
+- Config runtime guard rejects `accessToken`/`refreshToken`/`idToken`/`token`/`clientSecret`.
+- `clientId`/`apiBaseUrl` come from host config only; no globals, no storage, no `postMessage`.
+- Element still scopes all CSS in Shadow DOM; no host tokens leak.
+
+**Compatibility**
+- Legacy `<on4net-idpn-user-management>` keeps working with no `module` attribute.
+- New tag `<on4net-idpn-account>`; generic `<on4net-idpn-mfe module="...">`.
+- `Unmount` clears element callbacks and removes the node; re-mount creates a fresh React root.
+
+**Tests**
+- SDK unit (jsdom): attributes vs properties, no token leakage, bff clears getter, re-mount/update, module switch, unmount, invalid config, contract/version parity.
+- Web: both modules through the Web Component element, `module` property, theme token, legacy element test still green.
+- Builds: `@idpn/mfe-sdk` build; `@idpn/web` typecheck/test:coverage/build/build:wc/build:mfe; workspace typecheck; eslint + prettier on changed files; `contract:check`.
+
+**Acceptance criteria verified in this card:** SDK package with Config/Event types; MF + WC outputs remain buildable; SemVer/manifest policy documented; React + Vue/HTML examples; contract/version test; docs linkable from `docs/README.md`. Sample-app consumption and CI workflow wiring are covered by #43/#44, so those boxes stay unticked here.
+
+
+=== COMMENT on4nettec ===
+## Implementation report
+
+Commit: `8a30012` on `a-main` (single commit, no push performed).
+Scope: `@idpn/mfe-sdk`, Web Component account/module selection, integration docs. No API, schema or generated-contract changes. Pre-existing uncommitted modifications in `.github/*` and the other `docs/*` files were left untouched and unstaged.
+
+### What changed
+
+**New package `packages/mfe-sdk` (`@idpn/mfe-sdk@0.1.0`, no runtime dependencies)**
+- `IdpnMfeConfig`, `IdpnEvent` (exactly the 7 documented events, no token fields), `IdpnMfeModule` (`user-management` | `account`), `IdpnMfeMode` (`bff` | `spa`), `IdpnDirection`, `IdpnThemeTokens`, `IdpnMfeElementProps`, `IdpnReactModuleProps`.
+- `mountIdpnModule(container, config)` creates `<on4net-idpn-user-management>` / `<on4net-idpn-account>` with `client-id`, `api-base`, `locale`, `dir` attributes and in-memory `getAccessToken` / `onEvent` / `theme` properties; idempotent re-mount, `update()`, module switch, `unmount()` + `unmountIdpnModule()`.
+- Runtime boundary validation rejects empty ids, unknown module/mode/dir and `accessToken` / `refreshToken` / `idToken` / `token` / `clientSecret` before touching the DOM. BFF mode clears any token getter.
+- `IDPN_MFE_SDK_VERSION = 0.1.0`, `IDPN_MFE_CONTRACT_VERSION = 1`; package configured for `pnpm pack`/publish (`dist` + README only).
+- Tests: mount/unmount attributes vs properties, no token in attributes/DOM/events, BFF clears getter, theme, update/re-mount/module switch, invalid configs, SSR guard, contract parity against `@idpn/contracts`, SemVer/package-version parity.
+
+**Web Component (`web/src/mfe/web-component.tsx`)**
+- One element class registered as `<on4net-idpn-user-management>` (legacy default), `<on4net-idpn-account>` (new) and `<on4net-idpn-mfe module="…">` (explicit).
+- `module` attribute **and** property; property wins. Properties `theme`, `onEvent`, `getAccessToken` are accessors and re-render when set after mount.
+- `dir` now falls back to the locale-derived direction when the attribute is absent (user-management keeps its `rtl` default).
+- `UserManagementRoot` / `AccountRoot` accept `theme` and forward it to `IdpnRoot` as `--<name>` / `--idpn-<name>`.
+
+**Docs**
+- New `docs/mfe-sdk.md`: install, Module Federation + Web Component setups, config/attribute tables, event contract, BFF vs SPA security rules, CSP/headers, versioning/publishing, troubleshooting, complete React + vanilla HTML + Vue 3 examples.
+- Linked from the clean `docs/README.md`; `packages/mfe-sdk/README.md` added.
+- Root `test:unit` now includes `@idpn/mfe-sdk` (CI already runs `pnpm test:unit`).
+
+### Checks actually run
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @idpn/mfe-sdk run typecheck` | pass |
+| `pnpm --filter @idpn/mfe-sdk run test:coverage` | 39 tests / 3 files pass; 100% stmts, 98.57% branches, 100% funcs/lines |
+| `pnpm --filter @idpn/mfe-sdk run build` | pass (`dist/*.js`, `*.d.ts`) |
+| `pnpm --filter @idpn/web run typecheck` | pass |
+| `pnpm --filter @idpn/web run test:coverage` | 261 tests / 14 files pass; 92.64% stmts / 86.42% branches (thresholds 90/85) |
+| `pnpm --filter @idpn/web run build` | pass (437.51 kB JS, 131.80 kB gzip) |
+| `pnpm --filter @idpn/web run build:wc` | pass (`dist-wc/web-component.js`, 292.89 kB gzip) |
+| `pnpm --filter @idpn/web run build:mfe` | pass (`remoteEntry.js` 21.25 kB, `./UserManagement`, `./Account`, `mf-manifest.json`) |
+| `pnpm typecheck` (workspace) | pass, 6 projects |
+| `pnpm exec eslint <changed files>` | pass, no output |
+| `pnpm exec prettier --check <changed files>` | pass |
+| `pnpm contract:check` | pass, 3 artifacts |
+| `pnpm pack` of `@idpn/mfe-sdk` | pass; tarball contains `dist/*`, `package.json`, `README.md` only |
+
+**Contract-breaking proof (executed, then reverted):** temporarily added `auth:token-refreshed` to `mfeEventTypeSchema` in `packages/contracts/src/mfe.ts`; `src/contract.test.ts` failed (`exposes exactly the documented event types` diff). Restored the file (`git diff` clean) and re-ran: 8/8 pass. The test runs through `pnpm test:unit`, which CI executes.
+
+### Verified vs unverified
+
+- Verified locally: types, runtime behavior, no token leakage into attributes/DOM/events, build artifacts, contract/version parity, formatting/lint.
+- Unverified: actual publication to the internal registry and CDN manifest upload (no registry/CDN credentials in this environment); package is only `pnpm pack`-verified. Sample host apps consuming the package are out of this card (#43 React MF, #44 non-React WC).
+- Account module is cookie/BFF-only by design; SPA mode is documented as `user-management`-only.
+
+### Acceptance criteria
+
+- [x] پکیج SDK با Typeهای Config/Event
+- [x] خروجی Module Federation و Web Component
+- [x] SemVer و Manifest نسخه (version constants, package-version test, `mf-manifest.json` build output, documented CDN manifest)
+- [x] نمونه React/Vue/HTML (in `docs/mfe-sdk.md`)
+- [x] Contract Test نسخهها
+- [ ] اپ نمونه پکیج را مصرف میکند — belongs to #43 / #44
+- [x] تغییر ناسازگار در Contract CI را میشکند (demonstrated + wired into `pnpm test:unit`)
+- [ ] مستندات کامل و قابل اجراست — content is complete, but "runnable" is only proven once the sample hosts in #43/#44 consume the package/examples
+
+Remaining unticked boxes are intentionally left for the host-integration cards; nothing in this card is blocked.

@@ -33,7 +33,7 @@ describe('parseServerEnv', () => {
 
     expect(env).toMatchObject({
       NODE_ENV: 'development',
-      PORT: 3000,
+      PORT: 6000,
       LOG_LEVEL: 'info',
       MFE_ALLOWED_ORIGINS: [],
       WEBAUTHN_ALLOWED_ORIGINS: [],

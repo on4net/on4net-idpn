@@ -84,7 +84,7 @@ const booleanFlag = (defaultValue: boolean) =>
 const serverEnvBase = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   HOST: z.string().min(1).default('127.0.0.1'),
-  PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+  PORT: z.coerce.number().int().min(1).max(65535).default(6000),
   APP_URL: requiredUrl(),
   ADMIN_URL: optionalUrl(),
   /** Public client id of the admin panel; the only client allowed to hold the `idp.admin` scope. */

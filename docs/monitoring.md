@@ -85,7 +85,7 @@ idpn_backchannel_queue_depth 0
 
 ## 4. اجرای محلی Prometheus / Grafana / Loki
 
-پیش‌نیاز: API روی `127.0.0.1:3000` با `METRICS_ENABLED=true` در حال اجرا باشد و `docker compose up -d postgres redis` سرویس‌های stateful را بالا آورده باشد.
+پیش‌نیاز: API روی `127.0.0.1:6000` با `METRICS_ENABLED=true` در حال اجرا باشد و `docker compose up -d postgres redis` سرویس‌های stateful را بالا آورده باشد.
 
 ```powershell
 $env:METRICS_ENABLED = 'true'

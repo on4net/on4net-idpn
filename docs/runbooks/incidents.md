@@ -19,8 +19,8 @@
 
 1. **تأیید حادثه**: `IdpnApiUnavailable` یا `IdpnDependencyDown` را با Scrape واقعی تأیید کنید، نه فقط Dashboard.
    ```powershell
-   curl -fsS http://127.0.0.1:3000/healthz
-   curl -fsS -o readyz.json -w '%{http_code}' http://127.0.0.1:3000/readyz
+   curl -fsS http://127.0.0.1:6000/healthz
+   curl -fsS -o readyz.json -w '%{http_code}' http://127.0.0.1:6000/readyz
    docker compose ps
    docker logs --tail 200 idpn-postgres
    docker logs --tail 200 idpn-redis
@@ -147,7 +147,7 @@ curl -X POST https://auth.example.com/api/v1/keys/rotate `
 
 ```powershell
 docker exec idpn-redis redis-cli LLEN idpn:logout-queue
-curl -s -H "Authorization: Bearer <metrics-token>" http://127.0.0.1:3000/metrics | Select-String backchannel
+curl -s -H "Authorization: Bearer <metrics-token>" http://127.0.0.1:6000/metrics | Select-String backchannel
 ```
 
 لاگ‌های `component=backchannel-logout` را برای `phase=send|queue` ببینید (بدون توکن).

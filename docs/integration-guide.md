@@ -299,7 +299,7 @@ app.post('/auth/backchannel-logout', async (req, res) => {
 | ------------ | ------------------------------------------------------------- |
 | دامنه        | `localhost` برای IdP و پلتفرم‌ها با پورت‌های مختلف            |
 | HTTPS        | mkcert یا self-signed                                         |
-| Redirect URI | `http://localhost:3001/auth/callback` (فقط در حالت توسعه)     |
+| Redirect URI | `http://localhost:6001/auth/callback` (فقط در حالت توسعه)     |
 | Cookie       | در `localhost` پرچم `Secure` می‌تواند غیرفعال شود (فقط توسعه) |
 | داده         | کاربر تست و کلاینت توسعه با Seed ایجاد شود                    |
 

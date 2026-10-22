@@ -59,9 +59,11 @@ Copy-Item .env.example .env
 | متغیر                      | الزامی               | نمونه                                                 | توضیح                                                             |
 | -------------------------- | -------------------- | ----------------------------------------------------- | ----------------------------------------------------------------- |
 | `NODE_ENV`                 | خیر                  | `development`                                         | یکی از `development`، `test`، `production`؛ پیش‌فرض `development` |
-| `PORT`                     | خیر                  | `3000`                                                | پورت سرور API؛ پیش‌فرض `3000`                                     |
+| `PORT`                     | خیر                  | `6000`                                                | پورت سرور API؛ پیش‌فرض `6000`                                     |
 | `APP_URL`                  | **بله**              | `https://auth.example.com`                            | Issuer و Base URL سامانه                                          |
-| `VITE_APP_URL`             | **بله** (برای `web`) | `http://localhost:3000`                               | همان `APP_URL` که در Build فرانت‌اند قابل استفاده است             |
+| `VITE_APP_URL`             | **بله** (برای `web`) | `http://localhost:6000`                               | همان `APP_URL` که در Build فرانت‌اند قابل استفاده است             |
+| `VITE_PORT`                | خیر                  | `6001`                                                | پورت سرور توسعه/پیش‌نمایش Hosted UI؛ پیش‌فرض `6001`               |
+| `VITE_API_PROXY`           | خیر                  | `http://127.0.0.1:6000`                               | مقصد Proxy درخواست‌های API در حالت توسعه؛ پیش‌فرض از `PORT`       |
 | `ADMIN_URL`                | خیر                  | `https://admin.example.com`                           | آدرس پنل مدیریت                                                   |
 | `DATABASE_URL`             | **بله**              | `postgresql://…`                                      | اتصال PostgreSQL (باید `postgres://` یا `postgresql://` باشد)     |
 | `REDIS_URL`                | **بله**              | `redis://localhost:6379`                              | اتصال Redis (باید `redis://` یا `rediss://` باشد)                 |

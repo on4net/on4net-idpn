@@ -11,7 +11,7 @@ tests:
   - name: API unavailable fires
     interval: 1m
     input_series:
-      - series: 'up{job="idpn-api",instance="host.docker.internal:3000"}'
+      - series: 'up{job="idpn-api",instance="host.docker.internal:6000"}'
         values: '0x10'
     alert_rule_test:
       - eval_time: 5m
@@ -21,7 +21,7 @@ tests:
               severity: critical
               team: idpn
               job: idpn-api
-              instance: host.docker.internal:3000
+              instance: host.docker.internal:6000
             exp_annotations:
               summary: 'IDPN API is not answering Prometheus scrapes'
               runbook: 'docs/runbooks/incidents.md#2-api-down-or-unavailable'
@@ -209,7 +209,7 @@ tests:
   - name: missing backup metric fires after six hours
     interval: 1m
     input_series:
-      - series: 'up{job="idpn-api",instance="host.docker.internal:3000"}'
+      - series: 'up{job="idpn-api",instance="host.docker.internal:6000"}'
         values: '1x500'
     alert_rule_test:
       - eval_time: 7h

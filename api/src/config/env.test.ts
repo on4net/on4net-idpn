@@ -14,7 +14,7 @@ describe('loadApiEnv', () => {
     const env = loadApiEnv(validEnv);
 
     expect(env.APP_URL).toBe('https://auth.example.com');
-    expect(env.PORT).toBe(3000);
+    expect(env.PORT).toBe(6000);
   });
 
   it('throws a readable error naming every invalid key', () => {

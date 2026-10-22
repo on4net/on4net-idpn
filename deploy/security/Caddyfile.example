@@ -19,9 +19,9 @@ auth.example.com {
 		Reporting-Endpoints `csp="https://auth.example.com/csp-report"`
 	}
 
-	reverse_proxy /api/* idpn-api:3000
-	reverse_proxy /oauth2/* idpn-api:3000
-	reverse_proxy /.well-known/* idpn-api:3000
+	reverse_proxy /api/* idpn-api:6000
+	reverse_proxy /oauth2/* idpn-api:6000
+	reverse_proxy /.well-known/* idpn-api:6000
 	root * /srv/idpn/web
 	try_files {path} /index.html
 	file_server

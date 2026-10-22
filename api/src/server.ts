@@ -151,7 +151,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
     // ranges may set `X-Forwarded-For`.
     trustProxy: options.trustProxy ?? false,
   });
-  const issuer = options.issuer ?? 'http://127.0.0.1:3000';
+  const issuer = options.issuer ?? 'http://127.0.0.1:6000';
   const keys = options.keys ?? new SigningKeyManager(new MemorySigningKeyRepository());
 
   // RFC 6749/7009 clients post `application/x-www-form-urlencoded` to the token and
