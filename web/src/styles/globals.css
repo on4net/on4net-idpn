@@ -106,7 +106,8 @@
   --secondary: var(--idpn-secondary);
   --secondary-foreground: oklch(0.205 0 0);
   --muted: var(--idpn-muted);
-  --muted-foreground: oklch(0.556 0 0);
+  /* 0.52 keeps muted text at AA (4.34 → 5.05) on the muted surface (card #53 finding 1). */
+  --muted-foreground: oklch(0.52 0 0);
   --accent: var(--idpn-accent);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: var(--idpn-destructive);

@@ -1,7 +1,10 @@
+import { readFileSync } from 'node:fs';
+
 import { describe, expect, it } from 'vitest';
 
 import {
   IDPN_BASE_THEME,
+  IDPN_CONTRAST_PAIRS,
   IDPN_THEME_COLOR_KEYS,
   IDPN_THEME_FONT_KEYS,
   MIN_CONTRAST_RATIO,
@@ -249,14 +252,16 @@ describe('theme colour and font edge cases', () => {
   });
 
   it('falls back to the locale default when no font is configured', () => {
-    expect(idpnThemeToCssVariables({}, { locale: 'en-US' })['--idpn-font-sans']).toContain("'Inter'");
+    expect(idpnThemeToCssVariables({}, { locale: 'en-US' })['--idpn-font-sans']).toContain(
+      "'Inter'",
+    );
     expect(idpnThemeToCssVariables({}, { locale: 'fa-IR' })['--idpn-font-sans']).toContain(
       "'Vazirmatn'",
     );
     expect(idpnThemeToCssVariables({}, {})['--idpn-font-sans']).toContain("'Vazirmatn'");
-    expect(idpnThemeToCssVariables({ fontFamily: { ltr: 'system' } }, { dir: 'ltr' })).toMatchObject(
-      { '--idpn-font-ltr': 'system-ui, -apple-system, sans-serif' },
-    );
+    expect(
+      idpnThemeToCssVariables({ fontFamily: { ltr: 'system' } }, { dir: 'ltr' }),
+    ).toMatchObject({ '--idpn-font-ltr': 'system-ui, -apple-system, sans-serif' });
   });
 });
 describe('theme contrast guard', () => {
@@ -283,7 +288,8 @@ describe('theme contrast guard', () => {
     expect(sanitizeIdpnTheme({ primary: '#ffffff', primaryForeground: '#ffffff' })).toEqual({});
   });
 
-  it('resolves every supported colour syntax and rejects the rest', () => {    // rgb with percentage channels and an alpha channel.
+  it('resolves every supported colour syntax and rejects the rest', () => {
+    // rgb with percentage channels and an alpha channel.
     expect(resolveThemeColor('rgb(100% 0% 0% / 50%)')).toMatchObject({ r: 1, g: 0, b: 0 });
     // hsl with zero saturation is grey; a hue in turns is accepted.
     expect(resolveThemeColor('hsl(0 0% 50%)')).toMatchObject({ r: 0.5, g: 0.5, b: 0.5 });
@@ -309,22 +315,60 @@ describe('theme contrast guard', () => {
   });
 
   it('applies the guard to dark-mode overrides against the dark palette', () => {
-    expect(
-      sanitizeIdpnTheme({ dark: { background: '#111111', foreground: '#0d0d0d' } }),
-    ).toEqual({});
+    expect(sanitizeIdpnTheme({ dark: { background: '#111111', foreground: '#0d0d0d' } })).toEqual(
+      {},
+    );
     const accessible = { dark: { background: '#111111', foreground: '#f5f5f5' } };
     expect(sanitizeIdpnTheme(accessible)).toEqual(accessible);
   });
 
-  it('keeps the built-in palette above AA in both modes', () => {
+  it('keeps every built-in pair above AA in both modes', () => {
     for (const mode of ['light', 'dark'] as const) {
       const base = IDPN_BASE_THEME[mode];
-      expect(contrastRatio(base.foreground, base.background)).toBeGreaterThanOrEqual(
-        MIN_CONTRAST_RATIO,
-      );
-      expect(contrastRatio(base.primaryForeground, base.primary)).toBeGreaterThanOrEqual(
-        MIN_CONTRAST_RATIO,
-      );
+      for (const [foregroundKey, backgroundKey] of IDPN_CONTRAST_PAIRS) {
+        const ratio = contrastRatio(base[foregroundKey], base[backgroundKey]);
+        expect(ratio, `${mode} ${foregroundKey}/${backgroundKey}`).not.toBeNull();
+        expect(ratio ?? 0, `${mode} ${foregroundKey}/${backgroundKey}`).toBeGreaterThanOrEqual(
+          MIN_CONTRAST_RATIO,
+        );
+      }
     }
+  });
+
+  it('mirrors the rendered palette in globals.css', () => {
+    // The constant is what the guard measures; the stylesheet is what users see.
+    const css = readFileSync(
+      new URL('../../../web/src/styles/globals.css', import.meta.url),
+      'utf8',
+    );
+    const value = (name: string): string => {
+      const match = new RegExp(`--${name}:\\s*([^;]+);`).exec(css);
+      if (match?.[1] === undefined) {
+        throw new Error(`missing --${name}`);
+      }
+      return match[1].trim();
+    };
+    for (const mode of ['light', 'dark'] as const) {
+      const prefix = mode === 'dark' ? 'idpn-dark-' : 'idpn-';
+      const base = IDPN_BASE_THEME[mode];
+      for (const [key, expected] of Object.entries(base)) {
+        if (key.endsWith('Foreground') && !(key === 'foreground' || key === 'primaryForeground')) {
+          continue;
+        }
+        const cssName =
+          key === 'primaryForeground' ? `${prefix}primary-foreground` : `${prefix}${key}`;
+        expect(value(cssName), cssName).toBe(expected);
+      }
+    }
+  });
+
+  it('measures a translucent foreground against its background', () => {
+    // 5 % white on white is invisible; ignoring alpha reported 18.88.
+    expect(contrastRatio('rgba(255, 255, 255, 0.05)', '#ffffff') ?? 0).toBeLessThan(1.2);
+    expect(
+      sanitizeIdpnTheme({ primary: '#111111', primaryForeground: 'rgba(255,255,255,0.05)' }),
+    ).toEqual({});
+    // An opaque pair is unaffected.
+    expect(contrastRatio('#000000', '#ffffff')).toBeCloseTo(21, 5);
   });
 });

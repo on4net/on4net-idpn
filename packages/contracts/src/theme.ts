@@ -134,6 +134,8 @@ interface Rgb {
   r: number;
   g: number;
   b: number;
+  /** Opacity in 0..1; absent means fully opaque. */
+  a?: number;
 }
 
 const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
@@ -171,6 +173,20 @@ function rgbChannel(raw: string | undefined): number | null {
   return clamp01(raw.endsWith('%') ? value / 100 : value / 255);
 }
 
+/** `rgb(? / 50%)` and `rgba(?, 0.5)` both carry alpha; `#rgba`/`#rrggbbaa` are handled above. */
+function alphaChannel(candidate: string): number | undefined {
+  const match =
+    /\/\s*([0-9.]+)(%?)\s*\)$/.exec(candidate) ?? /,\s*([0-9.]+)(%?)\s*\)$/.exec(candidate);
+  if (match === null) {
+    return undefined;
+  }
+  const value = Number.parseFloat(match[1] ?? '');
+  if (!Number.isFinite(value)) {
+    return undefined;
+  }
+  return clamp01(match[2] === '%' ? value / 100 : value);
+}
+
 /**
  * Resolves a theme colour to sRGB so the contrast guard can measure it.
  * Returns `null` for values whose rendered colour is unknown (`transparent`,
@@ -191,6 +207,9 @@ export function resolveThemeColor(value: string): Rgb | null {
         r: expand(digits[0] ?? ''),
         g: expand(digits[1] ?? ''),
         b: expand(digits[2] ?? ''),
+        ...(digits.length === 4
+          ? { a: Number.parseInt(`${digits[3] ?? 'f'}${digits[3] ?? 'f'}`, 16) / 255 }
+          : {}),
       };
     }
     if (digits.length === 6 || digits.length === 8) {
@@ -198,6 +217,7 @@ export function resolveThemeColor(value: string): Rgb | null {
         r: Number.parseInt(digits.slice(0, 2), 16) / 255,
         g: Number.parseInt(digits.slice(2, 4), 16) / 255,
         b: Number.parseInt(digits.slice(4, 6), 16) / 255,
+        ...(digits.length === 8 ? { a: Number.parseInt(digits.slice(6, 8), 16) / 255 } : {}),
       };
     }
     return null;
@@ -209,7 +229,8 @@ export function resolveThemeColor(value: string): Rgb | null {
     const green = rgbChannel(rgb[2]);
     const blue = rgbChannel(rgb[3]);
     if (red === null || green === null || blue === null) return null;
-    return { r: red, g: green, b: blue };
+    const alpha = alphaChannel(candidate);
+    return { r: red, g: green, b: blue, ...(alpha === undefined ? {} : { a: alpha }) };
   }
 
   const hsl = HSL_COLOR.exec(candidate);
@@ -282,7 +303,20 @@ export function contrastRatio(foreground: string, background: string): number | 
   if (front === null || back === null) {
     return null;
   }
-  const a = relativeLuminance(front);
+  // A translucent background has no measurable colour of its own; treating it as opaque was
+  // how an almost invisible label could still report a passing ratio (card #53 finding 2).
+  if (back.a !== undefined && back.a < 1) {
+    return null;
+  }
+  const painted =
+    front.a === undefined || front.a >= 1
+      ? front
+      : {
+          r: front.r * front.a + back.r * (1 - front.a),
+          g: front.g * front.a + back.g * (1 - front.a),
+          b: front.b * front.a + back.b * (1 - front.a),
+        };
+  const a = relativeLuminance(painted);
   const b = relativeLuminance(back);
   const lighter = Math.max(a, b);
   const darker = Math.min(a, b);
@@ -293,57 +327,86 @@ export function contrastRatio(foreground: string, background: string): number | 
 export const MIN_CONTRAST_RATIO = 4.5;
 
 /**
- * Built-in palette (`web/src/styles/globals.css`). Only the pairs the contrast guard has to
- * evaluate are mirrored here; `globals.css` remains the source of truth for rendering.
+ * Built-in palette (`web/src/styles/globals.css`). Every pair the contrast guard evaluates is
+ * mirrored here; `globals.css` remains the source of truth for rendering and a unit test binds
+ * the two together so they cannot drift.
  */
 export const IDPN_BASE_THEME = {
   light: {
     background: 'oklch(1 0 0)',
     foreground: 'oklch(0.145 0 0)',
+    card: 'oklch(1 0 0)',
+    cardForeground: 'oklch(0.145 0 0)',
     primary: 'oklch(0.48 0.11 190)',
     primaryForeground: 'oklch(0.99 0 0)',
+    secondary: 'oklch(0.97 0 0)',
+    secondaryForeground: 'oklch(0.205 0 0)',
+    muted: 'oklch(0.97 0 0)',
+    mutedForeground: 'oklch(0.52 0 0)',
+    accent: 'oklch(0.97 0 0)',
+    accentForeground: 'oklch(0.205 0 0)',
   },
   dark: {
     background: 'oklch(0.145 0 0)',
     foreground: 'oklch(0.985 0 0)',
+    card: 'oklch(0.205 0 0)',
+    cardForeground: 'oklch(0.985 0 0)',
     primary: 'oklch(0.72 0.12 190)',
     primaryForeground: 'oklch(0.205 0 0)',
+    secondary: 'oklch(0.269 0 0)',
+    secondaryForeground: 'oklch(0.985 0 0)',
+    muted: 'oklch(0.269 0 0)',
+    mutedForeground: 'oklch(0.708 0 0)',
+    accent: 'oklch(0.371 0 0)',
+    accentForeground: 'oklch(0.985 0 0)',
   },
 } as const;
 
-type ContrastBase = {
-  readonly foreground: string;
-  readonly background: string;
-  readonly primary: string;
-  readonly primaryForeground: string;
-};
-
-const CONTRAST_PAIRS = [
-  ['foreground', 'background'],
-  ['primaryForeground', 'primary'],
-] as const;
+type ContrastBase = Readonly<Record<keyof (typeof IDPN_BASE_THEME)['light'], string>>;
 
 /**
- * Drops a client colour pair that cannot reach WCAG AA so the built-in palette applies
- * instead of rendering unreadable text (`docs/design-system.md` 4, card #53). A pair fails
- * when either member is client-supplied and the effective ratio is below
- * {@link MIN_CONTRAST_RATIO}; both members are removed so the fallback pair stays coherent.
+ * Every text/surface pair the contract exposes. Four of the twelve client keys are surfaces
+ * (`card`, `secondary`, `muted`, `accent`) whose foreground is a fixed literal; checking only
+ * the two original pairs let a client paint unreadable text on them (card #53 finding 1).
+ */
+export const IDPN_CONTRAST_PAIRS = [
+  ['foreground', 'background'],
+  ['primaryForeground', 'primary'],
+  ['cardForeground', 'card'],
+  ['secondaryForeground', 'secondary'],
+  ['mutedForeground', 'muted'],
+  ['accentForeground', 'accent'],
+] as const;
+
+const CLIENT_COLOR_KEYS = new Set<string>(IDPN_THEME_COLOR_KEYS);
+
+const clientColor = (colors: IdpnThemeColors, key: string): string | undefined =>
+  CLIENT_COLOR_KEYS.has(key) ? colors[key as IdpnThemeColorKey] : undefined;
+
+/**
+ * Drops a failing colour so the built-in palette applies instead of rendering unreadable
+ * text (`docs/design-system.md` 4, card #53). A pair fails when the effective ratio is below
+ * {@link MIN_CONTRAST_RATIO}, is unmeasurable (e.g. a translucent background) or unknown;
+ * every client-settable member of the pair is removed so the fallback stays coherent.
  */
 function enforceContrast(colors: IdpnThemeColors, base: ContrastBase): IdpnThemeColors {
   const result: IdpnThemeColors = { ...colors };
-  for (const [foregroundKey, backgroundKey] of CONTRAST_PAIRS) {
-    const foreground = result[foregroundKey] ?? base[foregroundKey];
-    const background = result[backgroundKey] ?? base[backgroundKey];
+  for (const [foregroundKey, backgroundKey] of IDPN_CONTRAST_PAIRS) {
+    const foreground = clientColor(result, foregroundKey) ?? base[foregroundKey];
+    const background = clientColor(result, backgroundKey) ?? base[backgroundKey];
     const ratio = contrastRatio(foreground, background);
-    if (ratio === null || ratio >= MIN_CONTRAST_RATIO) {
+    if (ratio !== null && ratio >= MIN_CONTRAST_RATIO) {
       continue;
     }
-    delete result[foregroundKey];
-    delete result[backgroundKey];
+    if (CLIENT_COLOR_KEYS.has(foregroundKey)) {
+      delete result[foregroundKey as IdpnThemeColorKey];
+    }
+    if (CLIENT_COLOR_KEYS.has(backgroundKey)) {
+      delete result[backgroundKey as IdpnThemeColorKey];
+    }
   }
   return result;
 }
-
 
 const parseChannel = (raw: string, max: number): boolean => {
   const value = numeric(raw);
