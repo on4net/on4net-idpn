@@ -431,6 +431,8 @@ POST /api/v1/users
 | PATCH  | `/api/v1/clients/{clientId}`                    | `idp:client:write` | ویرایش                       |
 | POST   | `/api/v1/clients/{clientId}/secrets`            | `idp:client:write` | ساخت Secret جدید             |
 | DELETE | `/api/v1/clients/{clientId}/secrets/{secretId}` | `idp:client:write` | ابطال Secret                 |
+
+چرخش Secret: Secret قبلی تا ۲۴ ساعت پس از صدور Secret جدید معتبر می‌ماند و سپس منقضی می‌شود. هر Client حداکثر ۲ Secret فعال دارد؛ صدور سومی `409` می‌دهد تا یکی ابطال شود.
 | POST   | `/api/v1/clients/{clientId}/disable`            | `idp:client:write` | غیرفعال‌سازی + ابطال توکن‌ها |
 
 **ایجاد کلاینت:**

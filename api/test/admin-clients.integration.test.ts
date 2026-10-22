@@ -338,25 +338,32 @@ describe('client secrets', () => {
     expect(typeof first.body.clientSecret).toBe('string');
     expect(first.body.secret.id).toBeTruthy();
 
-    const second = await request(app.server)
+    // The seeded secret and `first` are both usable, so a third is refused (cap of two).
+    const capped = await request(app.server)
       .post('/api/v1/clients/app-a/secrets')
       .set('Authorization', await token(adminUserId))
       .send({})
-      .expect(201);
-    expect(second.body.clientSecret).not.toBe(first.body.clientSecret);
+      .expect(409);
+    expect(capped.body.detail).toContain('at most 2 active secrets');
 
+    // Rotation bounded the predecessor: it now expires inside the grace window.
     const detail = await request(app.server)
       .get('/api/v1/clients/app-a')
       .set('Authorization', await token(adminUserId))
       .expect(200);
-    expect(detail.body.secrets.length).toBeGreaterThanOrEqual(3);
+    expect(detail.body.secrets).toHaveLength(2);
+    const bounded = detail.body.secrets.filter(
+      (entry: { expiresAt: string | null }) => entry.expiresAt !== null,
+    );
+    expect(bounded).toHaveLength(1);
+    expect(new Date(bounded[0].expiresAt).toISOString()).toBe('2026-10-20T09:00:00.000Z');
 
     // Both rotated secrets authenticate until one is revoked.
     const authRepository = createPrismaClientRepository(prisma);
     await expect(
       authenticateClient(authRepository, {
         clientId: 'app-a',
-        clientSecret: second.body.clientSecret,
+        clientSecret: first.body.clientSecret,
         method: 'client_secret_basic',
       }),
     ).resolves.toMatchObject({ ok: true });
@@ -383,7 +390,7 @@ describe('client secrets', () => {
       where: { action: 'client.secret.create' },
     });
     expect(JSON.stringify(audit?.metadata)).toContain('prefix');
-    expect(JSON.stringify(audit?.metadata)).not.toContain(second.body.clientSecret);
+    expect(JSON.stringify(audit?.metadata)).not.toContain(first.body.clientSecret);
   });
 
   it('refuses to issue a secret for a public client', async () => {

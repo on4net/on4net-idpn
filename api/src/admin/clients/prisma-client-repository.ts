@@ -1,11 +1,12 @@
 import type { PrismaClient } from '../../generated/prisma/client.js';
-import type {
-  AdminClientDetail,
-  AdminClientRepository,
-  AdminClientSummary,
-  ClientSecretSummary,
-  CreateClientInput,
-  UpdateClientInput,
+import {
+  ClientSecretLimitError,
+  type AdminClientDetail,
+  type AdminClientRepository,
+  type AdminClientSummary,
+  type ClientSecretSummary,
+  type CreateClientInput,
+  type UpdateClientInput,
 } from './client-types.js';
 
 interface ClientRow {
@@ -251,19 +252,49 @@ export function createPrismaAdminClientRepository(
       return findDetail(clientId);
     },
 
-    async addSecret(clientId: string, secret) {
+    async addSecret(clientId: string, secret, rotation) {
       const client = await prisma.client.findUnique({ where: { clientId }, select: { id: true } });
       if (client === null) {
         return null;
       }
-      const row = await prisma.clientSecret.create({
-        data: {
-          clientId: client.id,
-          secretHash: secret.secretHash,
-          prefix: secret.prefix,
-          expiresAt: secret.expiresAt,
-        },
-        select: SECRET_SELECT,
+      const create = (tx: Pick<PrismaClient, 'clientSecret'>) =>
+        tx.clientSecret.create({
+          data: {
+            clientId: client.id,
+            secretHash: secret.secretHash,
+            prefix: secret.prefix,
+            expiresAt: secret.expiresAt,
+          },
+          select: SECRET_SELECT,
+        });
+      if (rotation === undefined) {
+        return toSecret(await create(prisma));
+      }
+      const row = await prisma.$transaction(async (tx) => {
+        // Serialise concurrent rotations of one client so the cap cannot be raced past.
+        await tx.$queryRaw`SELECT id FROM clients WHERE id = ${client.id}::uuid FOR UPDATE`;
+        const active = await tx.clientSecret.findMany({
+          where: {
+            clientId: client.id,
+            revokedAt: null,
+            OR: [{ expiresAt: null }, { expiresAt: { gt: rotation.at } }],
+          },
+          select: { id: true, expiresAt: true },
+        });
+        if (active.length + 1 > rotation.maxActive) {
+          throw new ClientSecretLimitError(rotation.maxActive);
+        }
+        const cutoff = new Date(rotation.at.getTime() + rotation.graceMs);
+        const unbounded = active
+          .filter((entry) => entry.expiresAt === null || entry.expiresAt > cutoff)
+          .map((entry) => entry.id);
+        if (unbounded.length > 0) {
+          await tx.clientSecret.updateMany({
+            where: { id: { in: unbounded } },
+            data: { expiresAt: cutoff },
+          });
+        }
+        return create(tx);
       });
       return toSecret(row);
     },

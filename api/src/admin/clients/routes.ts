@@ -22,11 +22,12 @@ import {
   type ClientInput,
   type ClientType,
 } from './client-validation.js';
-import type {
-  AdminClientDetail,
-  AdminClientRepository,
-  ClientSecretSummary,
-  CreateClientInput,
+import {
+  ClientSecretLimitError,
+  type AdminClientDetail,
+  type AdminClientRepository,
+  type ClientSecretSummary,
+  type CreateClientInput,
 } from './client-types.js';
 
 export interface ClientRoutesOptions {
@@ -100,6 +101,11 @@ const listSchema = z.object({
   q: z.string().trim().min(1).max(120).optional(),
   status: z.enum(['active', 'disabled']).optional(),
 });
+
+/** Rotation keeps the previous secret usable for this long, then it expires on its own. */
+const SECRET_GRACE_MS = 24 * 60 * 60 * 1000;
+/** Current secret plus one predecessor still inside its grace window. */
+const MAX_ACTIVE_SECRETS = 2;
 
 const issueSecretSchema = z.object({
   expiresAt: z.string().datetime().optional(),
@@ -399,11 +405,30 @@ export function registerClientAdminRoutes(
       const secret = generateSecret();
       const expiresAt =
         parsed.data.expiresAt === undefined ? null : new Date(parsed.data.expiresAt);
-      const created = await options.clients.addSecret(existing.clientId, {
-        secretHash: clientSecrets.hash(secret),
-        prefix: secret.slice(0, 12),
-        expiresAt,
-      });
+      const issuedAt = now();
+      let created: ClientSecretSummary | null;
+      try {
+        created = await options.clients.addSecret(
+          existing.clientId,
+          {
+            secretHash: clientSecrets.hash(secret),
+            prefix: secret.slice(0, 12),
+            expiresAt,
+          },
+          { at: issuedAt, graceMs: SECRET_GRACE_MS, maxActive: MAX_ACTIVE_SECRETS },
+        );
+      } catch (error) {
+        if (error instanceof ClientSecretLimitError) {
+          return sendProblem(
+            reply,
+            409,
+            'conflict',
+            'Conflict',
+            `a client holds at most ${String(MAX_ACTIVE_SECRETS)} active secrets; revoke one first`,
+          );
+        }
+        throw error;
+      }
       if (created === null) {
         return sendProblem(reply, 404, 'not-found', 'Not found', 'client does not exist');
       }

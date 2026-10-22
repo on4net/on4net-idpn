@@ -73,6 +73,22 @@ export interface ClientRevocation {
   revokedSessions: number;
 }
 
+export interface ClientSecretRotationPolicy {
+  at: Date;
+  /** Predecessors keep working this long after the new secret is issued. */
+  graceMs: number;
+  /** Maximum number of non-revoked, non-expired secrets, the new one included. */
+  maxActive: number;
+}
+
+/** Raised when issuing another secret would exceed the active-secret cap. */
+export class ClientSecretLimitError extends Error {
+  constructor(readonly maxActive: number) {
+    super(`a client holds at most ${String(maxActive)} active secrets`);
+    this.name = 'ClientSecretLimitError';
+  }
+}
+
 export interface AdminClientRepository {
   list(input: {
     page: number;
@@ -83,9 +99,14 @@ export interface AdminClientRepository {
   findByClientId(clientId: string): Promise<AdminClientDetail | null>;
   create(input: CreateClientInput): Promise<AdminClientDetail>;
   update(clientId: string, input: UpdateClientInput): Promise<AdminClientDetail | null>;
+  /**
+   * Stores a secret. With `rotation`, the predecessors are given a bounded grace window and the
+   * call throws {@link ClientSecretLimitError} when too many secrets are still usable.
+   */
   addSecret(
     clientId: string,
     secret: { secretHash: string; prefix: string; expiresAt: Date | null },
+    rotation?: ClientSecretRotationPolicy,
   ): Promise<ClientSecretSummary | null>;
   revokeSecret(clientId: string, secretId: string, at: Date): Promise<boolean>;
   disable(clientId: string, at: Date): Promise<ClientRevocation | null>;
