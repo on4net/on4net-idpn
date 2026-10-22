@@ -364,16 +364,18 @@ describe('denied context calls are audited', () => {
     expect(metadata['key']).toBe('customer-team');
   });
 
-  it('records an anonymous denial when no token was presented', async () => {
-    await api().get(`${contextPath('app-a')}`).expect(401);
-
-    const event = await prisma.auditEvent.findFirstOrThrow({
-      where: { action: 'client.context.denied', result: 'failure', clientId: state.appAId },
-      orderBy: { occurredAt: 'desc' },
+  it('rejects an anonymous call without writing an audit row', async () => {
+    const before = await prisma.auditEvent.count({
+      where: { action: 'client.context.denied' },
     });
-    expect(event.actorType).toBe('anonymous');
-    expect(event.actorId).toBeNull();
-    expect((event.metadata as Record<string, unknown>)['attempted']).toBe('list');
+
+    const response = await api().get(`${contextPath('app-a')}`).expect(401);
+    expect(response.headers['www-authenticate']).toContain('invalid_token');
+
+    // A caller with no verified token has no actor to attribute; writing a row per request
+    // was an amplification path, so the denial is logged instead (card #72 finding 1).
+    const after = await prisma.auditEvent.count({ where: { action: 'client.context.denied' } });
+    expect(after).toBe(before);
   });
 });
 
