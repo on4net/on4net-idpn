@@ -1,3 +1,5 @@
+import { createServer } from 'node:http';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import {
@@ -158,6 +160,40 @@ describe('FetchBackchannelLogoutSender', () => {
     expect(transport.calls[0]?.options).toMatchObject({ address: '127.0.0.1', family: 4 });
   });
 
+  it('connects over the pinned address with the real transport', async () => {
+    // Regression: Node passes `{ all: true }` to `lookup` when `autoSelectFamily` is on and
+    // expects an array; the single-address callback threw ERR_INVALID_IP_ADDRESS, so no real
+    // back-channel logout could ever connect (card #73 finding 1).
+    const received: string[] = [];
+    const server = createServer((request, response) => {
+      let payload = '';
+      request.setEncoding('utf8');
+      request.on('data', (chunk: string) => {
+        payload += chunk;
+      });
+      request.on('end', () => {
+        received.push(payload);
+        response.writeHead(204).end();
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const bound = server.address();
+    const port = typeof bound === 'object' && bound !== null ? bound.port : 0;
+    try {
+      const sender = new FetchBackchannelLogoutSender({
+        resolveHost: async () => ['127.0.0.1'],
+        timeoutMs: 2_000,
+      });
+
+      await sender.send(`http://localhost:${port}/backchannel`, 'logout-token-value');
+
+      expect(received).toHaveLength(1);
+      expect(received[0]).toBe('logout_token=logout-token-value');
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  }, 10_000);
+
   it('fails when the host does not resolve', async () => {
     const sender = new FetchBackchannelLogoutSender({
       transport: recordingTransport(),
@@ -187,6 +223,28 @@ describe('assertBackchannelLogoutUri / isPrivateAddress', () => {
     }
     expect(isPrivateAddress('203.0.113.10')).toBe(false);
     expect(isPrivateAddress('2001:db8::1')).toBe(false);
+  });
+
+  it('rejects IPv4-mapped IPv6 literals that point at private space', () => {
+    for (const uri of [
+      'https://[::ffff:10.0.0.1]/bc',
+      'https://[::ffff:a00:1]/bc',
+      'https://[::ffff:127.0.0.1]/bc',
+      'https://[::ffff:7f00:1]/bc',
+    ]) {
+      expect(() => assertBackchannelLogoutUri(uri)).toThrow(/private address/);
+    }
+    // A mapped public address is still a valid destination.
+    expect(() => assertBackchannelLogoutUri('https://[::ffff:cb00:7101]/bc')).not.toThrow();
+  });
+
+  it('unwraps IPv4-mapped addresses in both notations', () => {
+    // Dotted form: `net.isIP` keeps it, but the hex form has to be parsed explicitly.
+    expect(isPrivateAddress('::ffff:127.0.0.1')).toBe(true);
+    expect(isPrivateAddress('::ffff:7f00:1')).toBe(true);
+    expect(isPrivateAddress('::ffff:0a00:1')).toBe(true);
+    expect(isPrivateAddress('::ffff:a9fe:101')).toBe(true);
+    expect(isPrivateAddress('::ffff:cb00:7101')).toBe(false);
   });
 });
 
@@ -350,6 +408,7 @@ describe('BackchannelLogoutDispatcher', () => {
 /** Minimal Redis list double with BLMOVE/LREM semantics for the drain worker. */
 function fakeQueueRedis(): RedisQueueDrainClient & {
   lists: Map<string, string[]>;
+  calls: { blmove: number };
   entries(key: string): string[];
 } {
   const lists = new Map<string, string[]>();
@@ -362,8 +421,10 @@ function fakeQueueRedis(): RedisQueueDrainClient & {
     lists.set(key, created);
     return created;
   };
+  const calls = { blmove: 0 };
   return {
     lists,
+    calls,
     entries: (key) => [...list(key)],
     async lpush(key, value) {
       list(key).unshift(value);
@@ -374,7 +435,11 @@ function fakeQueueRedis(): RedisQueueDrainClient & {
       lists.set(key, values.slice(start, stop === -1 ? undefined : stop + 1));
       return 'OK';
     },
+    async lrange(key, start, stop) {
+      return list(key).slice(start, stop === -1 ? undefined : stop + 1);
+    },
     async blmove(source, destination, from, to) {
+      calls.blmove += 1;
       const values = list(source);
       if (values.length === 0) {
         return null;
@@ -491,6 +556,50 @@ describe('BackchannelLogoutQueueDrainer', () => {
       attempts: 5,
     });
     expect(deliveries).toEqual(['failed']);
+  });
+
+  it('reclaims an entry stranded in flight by a crashed worker', async () => {
+    const redis = fakeQueueRedis();
+    // A worker claimed this entry at 09:00 and died before `lrem`.
+    await redis.lpush(
+      BACKCHANNEL_LOGOUT_INFLIGHT_KEY,
+      JSON.stringify(queued({ queuedAt: '2026-10-18T09:00:00.000Z' })),
+    );
+    const delivered: string[] = [];
+    const drainer = new BackchannelLogoutQueueDrainer({
+      redis,
+      tokens: { async issue() { return 'token'; } },
+      sender: {
+        async send(uri) {
+          delivered.push(uri);
+        },
+      },
+      now: () => new Date('2026-10-18T12:00:00.000Z'),
+    });
+
+    await drainer.drainOnce();
+
+    expect(delivered).toEqual(['https://app-a.example.com/bc']);
+    expect(redis.entries(BACKCHANNEL_LOGOUT_INFLIGHT_KEY)).toEqual([]);
+  });
+
+  it('stops a pass where every entry is waiting for its retry time', async () => {
+    const redis = fakeQueueRedis();
+    const dueLater = { nextAttemptAt: '2026-10-18T13:00:00.000Z' };
+    await redis.lpush(BACKCHANNEL_LOGOUT_QUEUE_KEY, JSON.stringify(queued({ clientId: 'a', ...dueLater })));
+    await redis.lpush(BACKCHANNEL_LOGOUT_QUEUE_KEY, JSON.stringify(queued({ clientId: 'b', ...dueLater })));
+    const drainer = new BackchannelLogoutQueueDrainer({
+      redis,
+      tokens: { async issue() { return 'token'; } },
+      sender: { async send() {} },
+      now: () => new Date('2026-10-18T12:00:00.000Z'),
+    });
+
+    await drainer.drainOnce();
+
+    // Two BLMOVEs plus the one that detects the repeat, not `batchSize` (10) attempts.
+    expect(redis.calls.blmove).toBeLessThanOrEqual(3);
+    expect(redis.entries(BACKCHANNEL_LOGOUT_QUEUE_KEY)).toHaveLength(2);
   });
 
   it('does not retry an entry before its next attempt time', async () => {

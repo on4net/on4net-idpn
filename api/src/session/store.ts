@@ -104,7 +104,11 @@ export class RedisSessionStore implements ClientSessionRevoker {
       idleExpiresAt: (idleExpiresAt < absolute ? idleExpiresAt : absolute).toISOString(),
     };
     await this.persist(next);
-    await this.mirrorSlide(next);
+    // Fire-and-forget: the PostgreSQL mirror is derived state, so it must not add a database
+    // round-trip to the session read path of every authenticated request (card #73 finding 4).
+    void this.mirrorSlide(next).catch(() => {
+      // `mirrorSlide` already swallows its own failures; this is defence in depth.
+    });
     return next;
   }
 
@@ -353,6 +357,9 @@ export class RedisSessionStore implements ClientSessionRevoker {
     };
     await this.cache.set(sessionKey(session.sid), JSON.stringify(revoked), REVOKE_GRACE_SECONDS);
     await this.cache.setRemove(userKey(session.userId), session.sid);
+    // The throttle entry is only meaningful for a live session; keeping it would grow one
+    // entry per sid for the process lifetime (card #73 finding 4).
+    this.lastSlideMirrorAt.delete(session.sid);
     if (this.onRevoked !== undefined) {
       try {
         await this.onRevoked(revoked, reason);
@@ -388,6 +395,7 @@ export class RedisSessionStore implements ClientSessionRevoker {
   private async delete(session: IdpSession): Promise<void> {
     await this.cache.delete(sessionKey(session.sid));
     await this.cache.setRemove(userKey(session.userId), session.sid);
+    this.lastSlideMirrorAt.delete(session.sid);
   }
 }
 

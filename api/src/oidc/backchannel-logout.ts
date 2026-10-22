@@ -228,7 +228,17 @@ export function isPrivateAddress(address: string): boolean {
       return true;
     }
     if (value.startsWith('::ffff:')) {
-      return isPrivateAddress(value.slice('::ffff:'.length));
+      const mapped = value.slice('::ffff:'.length);
+      // `net.isIP` prints IPv4-mapped addresses in dotted form, but a client may send the
+      // compressed hex form (`::ffff:7f00:1`) which `isIP` treats as opaque IPv6. Left as-is,
+      // that was a direct bypass of every IPv4 rule.
+      const hex = /^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(mapped);
+      if (hex !== null) {
+        const high = Number.parseInt(hex[1] ?? '0', 16);
+        const low = Number.parseInt(hex[2] ?? '0', 16);
+        return isPrivateAddress(`${high >> 8}.${high & 0xff}.${low >> 8}.${low & 0xff}`);
+      }
+      return isPrivateAddress(mapped);
     }
     return false;
   }
@@ -300,7 +310,21 @@ const defaultTransport: BackchannelHttpTransport = (url, body, options) =>
         timeout: options.timeoutMs,
         // The only resolution the request performs: the address that was validated a moment
         // ago. A DNS answer that changes in between cannot steer the token anywhere else.
-        lookup: (_host, _options, callback) => {
+        // Node calls this with `{ all: true }` when `autoSelectFamily` is on and then expects
+        // an *array*; returning the single-address shape throws ERR_INVALID_IP_ADDRESS and
+        // every real delivery failed before connecting (card #73 finding 1).
+        lookup: (_host, lookupOptions, callback) => {
+          const wantsAll =
+            typeof lookupOptions === 'object' &&
+            lookupOptions !== null &&
+            (lookupOptions as { all?: boolean }).all === true;
+          if (wantsAll) {
+            (callback as unknown as (error: null, addresses: { address: string; family: number }[]) => void)(
+              null,
+              [{ address: options.address, family: options.family }],
+            );
+            return;
+          }
           callback(null, options.address, options.family);
         },
         ...(url.protocol === 'https:' ? { servername: hostname } : {}),
@@ -391,6 +415,8 @@ export interface RedisQueueDrainClient extends RedisListClient {
     timeoutSeconds: number,
   ): Promise<string | null>;
   lrem(key: string, count: number, value: string): Promise<number>;
+  /** Optional: lets the drainer reclaim entries stranded by a crashed worker. */
+  lrange?(key: string, start: number, stop: number): Promise<string[]>;
 }
 
 export interface BackchannelLogoutQueueDrainerOptions {
@@ -403,6 +429,11 @@ export interface BackchannelLogoutQueueDrainerOptions {
   batchSize?: number;
   /** Seconds BLMOVE waits for an entry; 1 by default. */
   blockSeconds?: number;
+  /**
+   * In-flight entries older than this are assumed to belong to a crashed worker and are put
+   * back on the queue. Work on one entry takes seconds, so the default is generous.
+   */
+  staleAfterMs?: number;
   /** Backoff for the next worker attempt. */
   retryDelayMs?: readonly number[];
   now?: () => Date;
@@ -439,7 +470,9 @@ export class BackchannelLogoutQueueDrainer {
 
   /** Moves up to `batchSize` entries; returns how many were attempted. */
   async drainOnce(): Promise<number> {
+    await this.reclaimStranded();
     let processed = 0;
+    const deferred = new Set<string>();
     for (let index = 0; index < this.batchSize; index += 1) {
       const raw = await this.options.redis.blmove(
         BACKCHANNEL_LOGOUT_QUEUE_KEY,
@@ -451,13 +484,61 @@ export class BackchannelLogoutQueueDrainer {
       if (raw === null) {
         break;
       }
+      if (deferred.has(raw)) {
+        // Every entry in the queue is waiting for its retry time; stop instead of moving the
+        // same entries back and forth for the rest of the batch (card #73 finding 5).
+        await this.requeue(raw);
+        break;
+      }
       processed += 1;
-      await this.attempt(raw);
+      if (await this.attempt(raw)) {
+        deferred.add(raw);
+      }
     }
     return processed;
   }
 
-  private async attempt(raw: string): Promise<void> {
+  /**
+   * Puts entries left in the in-flight list by a crashed worker back on the queue. Without
+   * this nothing ever reads `BACKCHANNEL_LOGOUT_INFLIGHT_KEY`, so an entry stranded between
+   * `BLMOVE` and `lrem` was never retried (card #73 finding 5).
+   */
+  private async reclaimStranded(): Promise<void> {
+    const lrange = this.options.redis.lrange;
+    if (lrange === undefined) {
+      return;
+    }
+    const staleBefore = this.now().getTime() - (this.options.staleAfterMs ?? 5 * 60 * 1000);
+    let entries: string[];
+    try {
+      entries = await lrange.call(this.options.redis, BACKCHANNEL_LOGOUT_INFLIGHT_KEY, 0, -1);
+    } catch {
+      return;
+    }
+    for (const raw of entries) {
+      let queuedAt: number;
+      try {
+        queuedAt = Date.parse(parseQueuedEntry(raw).queuedAt);
+      } catch {
+        queuedAt = Number.NaN;
+      }
+      // Unparseable entries are parked by `attempt`; only reclaim the ones we can date.
+      if (!Number.isFinite(queuedAt) || queuedAt > staleBefore) {
+        continue;
+      }
+      await this.requeue(raw);
+    }
+  }
+
+  private async requeue(raw: string): Promise<void> {
+    await this.options.redis.lrem(BACKCHANNEL_LOGOUT_INFLIGHT_KEY, 1, raw);
+    // Producers `lpush`, the drainer consumes from the right, so this puts the entry at the
+    // back of the queue — exactly where a retry belongs.
+    await this.options.redis.lpush(BACKCHANNEL_LOGOUT_QUEUE_KEY, raw);
+  }
+
+  /** Returns `true` when the entry was deferred (not due), so the caller can stop the pass. */
+  private async attempt(raw: string): Promise<boolean> {
     let entry: QueuedBackchannelLogout;
     try {
       entry = parseQueuedEntry(raw);
@@ -469,15 +550,14 @@ export class BackchannelLogoutQueueDrainer {
         JSON.stringify({ raw, reason: 'malformed', deadAt: this.now().toISOString() }),
       );
       this.options.onError?.(error, { clientId: '', phase: 'queue' });
-      return;
+      return false;
     }
 
     const dueAt = entry.nextAttemptAt === undefined ? 0 : Date.parse(entry.nextAttemptAt);
     if (Number.isFinite(dueAt) && dueAt > this.now().getTime()) {
       // Not due yet: take it off the in-flight list without spending an attempt.
-      await this.options.redis.lrem(BACKCHANNEL_LOGOUT_INFLIGHT_KEY, 1, raw);
-      await this.options.redis.lpush(BACKCHANNEL_LOGOUT_QUEUE_KEY, raw);
-      return;
+      await this.requeue(raw);
+      return true;
     }
 
     const attempts = entry.attempts + 1;
@@ -500,7 +580,7 @@ export class BackchannelLogoutQueueDrainer {
     await this.options.redis.lrem(BACKCHANNEL_LOGOUT_INFLIGHT_KEY, 1, raw);
     if (outcome === 'delivered') {
       this.options.onDelivery?.({ clientId: entry.clientId, status: 'delivered', attempts });
-      return;
+      return false;
     }
 
     if (attempts >= this.maxAttempts) {
@@ -509,7 +589,7 @@ export class BackchannelLogoutQueueDrainer {
         JSON.stringify({ ...entry, attempts, deadAt: this.now().toISOString() }),
       );
       this.options.onDelivery?.({ clientId: entry.clientId, status: 'failed', attempts });
-      return;
+      return false;
     }
 
     const delay = this.retryDelayMs[attempts - 1] ?? this.retryDelayMs.at(-1) ?? 60;
@@ -522,6 +602,7 @@ export class BackchannelLogoutQueueDrainer {
       }),
     );
     this.options.onDelivery?.({ clientId: entry.clientId, status: 'queued', attempts });
+    return false;
   }
 }
 

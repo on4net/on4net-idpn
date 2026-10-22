@@ -634,8 +634,18 @@ keyRotationScheduler.start();
  * fresh Logout Token per attempt, keeps in-flight entries in a separate list so a crash does
  * not lose them, and dead-letters an entry after `maxAttempts`.
  */
+/**
+ * The drainer blocks on `BLMOVE` for up to a second. ioredis multiplexes one socket, so
+ * sharing the main connection would stall every session, rate-limit and MFA command while
+ * the queue is empty (card #73 finding 3). The duplicate is dedicated to the queue.
+ */
+const backchannelQueueRedis = redis.duplicate();
+backchannelQueueRedis.on('error', (error: unknown) => {
+  logError({ component: 'backchannel-queue' }, `redis error: ${sanitizeLogMessage(error)}`);
+});
+
 const backchannelQueueDrainer = new BackchannelLogoutQueueDrainer({
-  redis,
+  redis: backchannelQueueRedis,
   tokens: new LogoutTokenSigner({
     issuer: env.APP_URL,
     keys,
@@ -701,6 +711,7 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     void app
       .close()
       .then(() => prisma.$disconnect())
+      .then(() => backchannelQueueRedis.quit())
       .then(() => redis.quit())
       .then(() => process.exit(0));
   });
