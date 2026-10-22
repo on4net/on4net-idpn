@@ -351,9 +351,14 @@ describe('max_age and auth_time semantics', () => {
     expect(silent.location.pathname).not.toBe('/login');
 
     const interactive = await authorize('app-b', { maxAge: 0, sid: 'sid-shared' });
-    expect(interactive.location.searchParams.get('error')).toBe('interaction_required');
+    // Interactive clients are sent through authentication again instead of receiving
+    // `interaction_required`, which is reserved for `prompt=none` (card #70 finding 8).
+    expect(interactive.location.searchParams.get('error')).toBeNull();
     expect(interactive.location.searchParams.get('code')).toBeNull();
-    expect(interactive.location.pathname).not.toBe('/login');
+    expect(interactive.location.pathname).toBe('/login');
+    const returnTo = new URL(interactive.location.searchParams.get('return_to') ?? '', issuer);
+    expect(returnTo.pathname).toBe('/oauth2/authorize');
+    expect(returnTo.searchParams.get('max_age')).toBe('0');
 
     expect(codes.records.size).toBe(0);
   });
