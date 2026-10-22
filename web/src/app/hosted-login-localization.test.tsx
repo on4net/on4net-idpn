@@ -228,11 +228,14 @@ describe('Hosted login language switch', () => {
       '/?client_id=app-a&ui_locales=fa-IR&login_request=request-123&return_to=%2Foauth2%2Fauthorize%3Fclient_id%3Dapp-a',
     );
 
+    const submit = vi.fn().mockResolvedValue({ ok: true });
     render(
       <HostedLoginPage
         search={window.location.search}
         fetchConfig={vi.fn().mockResolvedValue(CONFIG)}
         fetchBundle={fetchBundle}
+        submit={submit}
+        navigate={vi.fn()}
       />,
     );
     await waitForForm();
@@ -265,6 +268,17 @@ describe('Hosted login language switch', () => {
     expect(window.location.pathname).toBe('/');
     // The document title follows the language (tab + screen reader).
     expect(document.title).toBe('Customer portal sign-in');
+
+    // The submitted login must carry the language the user picked, otherwise the IdP issues
+    // the token for the mount-time language (card #60 finding 1).
+    await user.type(screen.getByLabelText('Password'), 'a-very-long-password');
+    await user.click(screen.getByRole('button', { name: 'Sign in' }));
+    await waitFor(() => {
+      expect(submit).toHaveBeenCalled();
+    });
+    expect(submit.mock.calls[0]?.[0]).toMatchObject({
+      returnTo: '/oauth2/authorize?client_id=app-a&ui_locales=en-US',
+    });
 
     expect(events).toContainEqual({ type: 'locale:changed', locale: 'en-US', dir: 'ltr' });
     expect(localStorage.length).toBe(0);

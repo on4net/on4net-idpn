@@ -811,12 +811,24 @@ export function HostedLoginPage({
        * context MFA policy from it, and the authorize URL is bound to the same context so
        * the issued token carries `login_context` (docs/login-contexts.md 4.1, 6).
        */
+      // Bind the *current* language as well: `changeLocale` rewrites the address bar, but the
+      // submitted `return_to` used to come from the mount-time query, so the choice was
+      // dropped at login (card #60 finding 1). Only requests that carried `ui_locales` — or
+      // where the user just picked one — are rewritten, so a client that never asked for a
+      // locale keeps its authorize request untouched.
+      const localeWasChosen =
+        uiLocales !== undefined ||
+        (typeof window !== 'undefined' &&
+          new URLSearchParams(window.location.search).has('ui_locales'));
       const boundReturnTo = withLoginContext(returnTo, activeContextKey);
+      const withLocale = localeWasChosen
+        ? withUiLocales(boundReturnTo, locale)
+        : boundReturnTo;
       const result = await submit({
         ...values,
         ...(clientId === undefined ? {} : { clientId }),
         ...(activeContextKey === undefined ? {} : { loginContext: activeContextKey }),
-        ...(boundReturnTo === undefined ? {} : { returnTo: boundReturnTo }),
+        ...(withLocale === undefined ? {} : { returnTo: withLocale }),
       });
       if (!result.ok) {
         if (result.reason === 'mfa_required') {
