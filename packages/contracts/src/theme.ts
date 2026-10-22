@@ -238,8 +238,14 @@ export function resolveThemeColor(value: string): Rgb | null {
     const hue = greyHue(hsl[1]);
     const saturation = Math.min(1, Math.max(0, numeric(hsl[2] ?? '0') / 100));
     const lightness = Math.min(1, Math.max(0, numeric(hsl[3] ?? '0') / 100));
+    const alpha = alphaChannel(candidate);
     if (hue === null || saturation === 0) {
-      return { r: lightness, g: lightness, b: lightness };
+      return {
+        r: lightness,
+        g: lightness,
+        b: lightness,
+        ...(alpha === undefined ? {} : { a: alpha }),
+      };
     }
     const q =
       lightness < 0.5
@@ -251,6 +257,7 @@ export function resolveThemeColor(value: string): Rgb | null {
       r: hueToRgb(p, q, hueTurn + 1 / 3),
       g: hueToRgb(p, q, hueTurn),
       b: hueToRgb(p, q, hueTurn - 1 / 3),
+      ...(alpha === undefined ? {} : { a: alpha }),
     };
   }
 
@@ -272,10 +279,12 @@ export function resolveThemeColor(value: string): Rgb | null {
     const l = lPrime ** 3;
     const m = mPrime ** 3;
     const s = sPrime ** 3;
+    const alpha = alphaChannel(candidate);
     return {
       r: clamp01(fromLinear(4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s)),
       g: clamp01(fromLinear(-1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s)),
       b: clamp01(fromLinear(-0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s)),
+      ...(alpha === undefined ? {} : { a: alpha }),
     };
   }
 

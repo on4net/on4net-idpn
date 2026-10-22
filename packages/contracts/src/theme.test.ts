@@ -302,6 +302,15 @@ describe('theme contrast guard', () => {
     // Shorthand hex and 8-digit hex.
     expect(resolveThemeColor('#fff')).toMatchObject({ r: 1, g: 1, b: 1 });
     expect(resolveThemeColor('#000000ff')).toMatchObject({ r: 0, g: 0, b: 0 });
+    // Alpha in every supported notation, and the no-alpha path.
+    expect(resolveThemeColor('rgb(255 255 255)')).not.toHaveProperty('a');
+    expect(resolveThemeColor('rgba(255, 0, 0, 0.5)')).toMatchObject({ r: 1, g: 0, b: 0, a: 0.5 });
+    expect(resolveThemeColor('hsl(0 100% 50% / 25%)')).toMatchObject({ r: 1, g: 0, b: 0, a: 0.25 });
+    expect(resolveThemeColor('#ff000080')?.a).toBeCloseTo(0.502, 3);
+    expect(resolveThemeColor('#f008')?.a).toBeCloseTo(0.533, 3);
+    // A translucent background has no measurable colour of its own.
+    expect(contrastRatio('#000000', 'rgba(255, 255, 255, 0.5)')).toBeNull();
+
     // Values whose colour cannot be measured.
     expect(resolveThemeColor('transparent')).toBeNull();
     expect(resolveThemeColor('currentcolor')).toBeNull();
