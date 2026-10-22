@@ -62,6 +62,7 @@ import { SimpleWebauthnLibrary } from './mfa/webauthn-library.js';
 import { resolveWebauthnConfig } from './mfa/webauthn.js';
 import { hashPassword, verifyPassword } from './auth/password.js';
 import { argon2ParamsFromEnv } from './auth/password-config.js';
+import { createSecurityAlertSink } from './security/alerts.js';
 import { buildServer } from './server.js';
 import { readBackupStatus } from './observability/backup-status.js';
 import { DependencyMonitor } from './observability/health.js';
@@ -295,6 +296,29 @@ const authorizeMembershipStatus = createAuthorizeMembershipStatus(prisma);
 const loginContextAccess = createPrismaLoginContextAccessSource(prisma);
 const authorizationCodes = createPrismaCodeRepository(prisma);
 /**
+ * Security alerts (`docs/security.md` 9.2): a structured warning line plus the
+ * `idpn_security_alerts_total` counter, so the Prometheus rule and the runbook can act on it
+ * without the audit table becoming an alerting bus.
+ */
+const securityAlerts = createSecurityAlertSink({
+  log: (alert) =>
+    logWarning(
+      {
+        component: 'security-alert',
+        type: alert.type,
+        severity: alert.severity,
+        ...(alert.userId === undefined || alert.userId === null ? {} : { userId: alert.userId }),
+        ...(alert.clientId === undefined || alert.clientId === null
+          ? {}
+          : { clientId: alert.clientId }),
+        ...(alert.ip === undefined || alert.ip === null ? {} : { ip: alert.ip }),
+        ...(alert.detail === undefined ? {} : { detail: alert.detail }),
+      },
+      `security alert: ${alert.type}`,
+    ),
+  metric: (alert) => metrics.recordSecurityAlert(alert.type, alert.severity),
+});
+/**
  * One hashing policy for every credential: login, password change/reset, admin-created
  * passwords and MFA recovery codes. `PASSWORD_PEPPER` is applied as the Argon2 secret and is
  * never stored (card #70 finding 4).
@@ -368,6 +392,7 @@ const app = buildServer({
     sessions,
     rateLimiter: accountRateLimiter,
     passwordParams,
+    alerts: securityAlerts,
     persistSession: (input) => loginRepository.persistSession(input),
     audit: { record: (event) => loginRepository.record(event) },
     mfa: mfaDependencies,
@@ -470,6 +495,7 @@ const app = buildServer({
     passwords: passwordStore,
     audit: createPrismaAdminAudit(prisma),
     passwordParams,
+    rateLimit: accountRateLimiter,
     mfa: {
       repository: mfaRepository,
       secretBox: mfaSecretBox,

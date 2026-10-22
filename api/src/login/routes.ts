@@ -15,6 +15,7 @@ import type { WebauthnServiceDependencies } from '../mfa/webauthn.js';
 import { serializeSessionCookie } from '../session/cookie.js';
 import type { RedisSessionStore } from '../session/store.js';
 import type { RateLimiter, RateLimitPolicy } from '../http/rate-limit.js';
+import type { SecurityAlertSink } from '../security/alerts.js';
 import {
   LOGIN_FAILED_CODE,
   LOGIN_FAILED_MESSAGE,
@@ -43,6 +44,8 @@ export interface LoginRouteOptions {
   rateLimiter?: RateLimiter;
   /** Hashing policy from the validated environment; defaults to the library defaults. */
   passwordParams?: Argon2Params;
+  /** Security-alert channel for the MFA routes registered alongside this one. */
+  alerts?: SecurityAlertSink;
   /** Mirrors the session into PostgreSQL so tokens can reference it (FK). */
   persistSession(input: {
     sid: string;
@@ -174,6 +177,15 @@ export function registerLoginRoute(app: FastifyInstance, options: LoginRouteOpti
     // Raising the cost or adding a pepper must reach existing accounts, so a valid login
     // upgrades the stored hash while the plaintext is available exactly once.
     await upgradePasswordHash(user, password, options);
+
+    // Fail closed: without the MFA repository the policy cannot be evaluated, so an account
+    // that already has a confirmed factor must never receive a password-only session.
+    if (options.mfa === undefined && user.hasConfirmedFactor) {
+      return reply
+        .code(503)
+        .header('Cache-Control', 'no-store')
+        .send({ error: 'mfa_unavailable', message: 'multi-factor authentication is unavailable' });
+    }
 
     const requirement = await resolveMfaRequirement(options, user, {
       ...(body.clientId === undefined ? {} : { clientId: body.clientId }),

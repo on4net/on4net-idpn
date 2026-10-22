@@ -34,6 +34,7 @@ import {
   renameCredential,
   type WebauthnServiceDependencies,
 } from '../mfa/webauthn.js';
+import type { RateLimiter, RateLimitPolicy } from '../http/rate-limit.js';
 import { readSessionId, serializeSessionCookie } from '../session/cookie.js';
 import type { IdpSession, RevokeReason } from '../session/types.js';
 import { changePassword, type PasswordStore } from '../users/change-password.js';
@@ -95,10 +96,15 @@ export interface AccountRoutesOptions {
   hash?: (password: string, params: Argon2Params) => Promise<string>;
   /** Hashing policy from the validated environment; used for every password change. */
   passwordParams?: Argon2Params;
+  /** Shared limiter for endpoints that verify the account password (`docs/security.md` 3.2). */
+  rateLimit?: RateLimiter;
   now?: () => Date;
 }
 
 const PROBLEM_BASE = 'https://on4net.dev/problems';
+
+/** Sensitive account mutations per address (password proof). */
+const ACCOUNT_SENSITIVE_LIMIT: RateLimitPolicy = { windowSeconds: 60, max: 10 };
 
 export type ProblemSlug =
   | 'unauthorized'
@@ -257,6 +263,9 @@ export function registerAccountRoutes(app: FastifyInstance, options: AccountRout
     }
     const auth = await authenticate(request, reply);
     if (auth === null) {
+      return reply;
+    }
+    if (!(await enforceSensitiveLimit(reply, 'password', auth.profile.id))) {
       return reply;
     }
     const parsed = changePasswordSchema.safeParse(request.body);
@@ -578,6 +587,49 @@ export function registerAccountRoutes(app: FastifyInstance, options: AccountRout
   const invalidBody = (reply: FastifyReply, instance: string, detail: string): FastifyReply =>
     sendProblem(reply, 422, 'validation-error', 'Validation failed', detail, { instance });
 
+  const lockedProblem = (reply: FastifyReply): FastifyReply =>
+    sendProblem(
+      reply,
+      429,
+      'rate-limited',
+      'Too many attempts',
+      'the account is temporarily locked after repeated failures',
+      { code: 'account_locked' },
+    );
+
+  /**
+   * Every account endpoint that verifies the password is a password oracle: without a limit
+   * an authenticated session can be used to brute-force the current password
+   * (`docs/security.md` 3.2). The bucket is per address and per scope.
+   */
+  const enforceSensitiveLimit = async (
+    reply: FastifyReply,
+    scope: string,
+    subject: string,
+  ): Promise<boolean> => {
+    if (options.rateLimit === undefined) {
+      return true;
+    }
+    // Keyed per account, not per address: several users behind one NAT must not exhaust each
+    // other's budget, while an attacker holding a session is still throttled.
+    const allowed = await options.rateLimit.consume(
+      `account:${scope}:${subject}`,
+      ACCOUNT_SENSITIVE_LIMIT,
+    );
+    if (!allowed) {
+      sendProblem(
+        reply,
+        429,
+        'rate-limited',
+        'Too many requests',
+        'too many attempts from this address; try again later',
+        { code: 'too_many_requests' },
+      );
+      return false;
+    }
+    return true;
+  };
+
   app.get('/api/v1/account/mfa', async (request, reply) => {
     const auth = await authenticate(request, reply);
     if (auth === null) {
@@ -599,6 +651,9 @@ export function registerAccountRoutes(app: FastifyInstance, options: AccountRout
     }
     const auth = await authenticate(request, reply);
     if (auth === null) {
+      return reply;
+    }
+    if (!(await enforceSensitiveLimit(reply, 'mfa-enroll', auth.profile.id))) {
       return reply;
     }
     if (options.mfa === undefined) {
@@ -628,6 +683,9 @@ export function registerAccountRoutes(app: FastifyInstance, options: AccountRout
           'the current password is incorrect',
           { code: 'invalid_current_password' },
         );
+      }
+      if (result.reason === 'locked') {
+        return lockedProblem(reply);
       }
       if (result.reason === 'denied') {
         return sendProblem(
@@ -719,6 +777,9 @@ export function registerAccountRoutes(app: FastifyInstance, options: AccountRout
     if (auth === null) {
       return reply;
     }
+    if (!(await enforceSensitiveLimit(reply, 'mfa-disable', auth.profile.id))) {
+      return reply;
+    }
     if (options.mfa === undefined) {
       return mfaUnavailable(reply);
     }
@@ -732,6 +793,10 @@ export function registerAccountRoutes(app: FastifyInstance, options: AccountRout
       ...(parsed.data.factorId === undefined ? {} : { factorId: parsed.data.factorId }),
       ...(parsed.data.password === undefined ? {} : { password: parsed.data.password }),
       ...(parsed.data.code === undefined ? {} : { code: parsed.data.code }),
+      ...(auth.session.clientId === undefined ? {} : { clientId: auth.session.clientId }),
+      ...(auth.session.loginContext === undefined
+        ? {}
+        : { loginContext: auth.session.loginContext }),
       actorIp: request.ip ?? null,
       userAgent: request.headers['user-agent'] ?? null,
     });
@@ -742,6 +807,19 @@ export function registerAccountRoutes(app: FastifyInstance, options: AccountRout
       return sendProblem(reply, 404, 'not-found', 'Not found', 'factor does not exist', {
         code: 'mfa_factor_not_found',
       });
+    }
+    if (result.reason === 'locked') {
+      return lockedProblem(reply);
+    }
+    if (result.reason === 'last_method') {
+      return sendProblem(
+        reply,
+        409,
+        'conflict',
+        'MFA method required',
+        'the policy of this app requires a second factor and this is the last one',
+        { code: 'mfa_required_method' },
+      );
     }
     if (result.reason === 'invalid_password') {
       return sendProblem(
@@ -781,6 +859,9 @@ export function registerAccountRoutes(app: FastifyInstance, options: AccountRout
     if (auth === null) {
       return reply;
     }
+    if (!(await enforceSensitiveLimit(reply, 'mfa-recovery', auth.profile.id))) {
+      return reply;
+    }
     if (options.mfa === undefined) {
       return mfaUnavailable(reply);
     }
@@ -800,6 +881,9 @@ export function registerAccountRoutes(app: FastifyInstance, options: AccountRout
       return sendProblem(reply, 404, 'not-found', 'Not found', 'no confirmed factor exists', {
         code: 'mfa_factor_not_found',
       });
+    }
+    if (result.reason === 'locked') {
+      return lockedProblem(reply);
     }
     return sendProblem(
       reply,

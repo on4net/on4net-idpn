@@ -408,8 +408,10 @@ export function registerRbacAdminRoutes(app: FastifyInstance, options: RbacRoute
       permission: WRITE_PERMISSION,
       delegatedPermission: DELEGATED_WRITE,
       // Replacing the permission set changes what every holder of the role can do, exactly
-      // like deleting the role, so it needs the same fresh authentication.
+      // like deleting the role, so it needs the same fresh authentication and a session that
+      // actually proved a second factor (docs/domain-model.md 2.11).
       stepUp: true,
+      requireMfa: true,
       allowDelegated: true,
     });
     if (principal === null) {
@@ -458,6 +460,7 @@ export function registerRbacAdminRoutes(app: FastifyInstance, options: RbacRoute
       delegatedPermission: DELEGATED_WRITE,
       allowDelegated: true,
       stepUp: true,
+      requireMfa: true,
     });
     if (principal === null) {
       return reply;

@@ -279,6 +279,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
         ...(options.login.rateLimiter === undefined
           ? {}
           : { rateLimiter: options.login.rateLimiter }),
+        ...(options.login.alerts === undefined ? {} : { alerts: options.login.alerts }),
         ...(options.login.now === undefined ? {} : { now: options.login.now }),
       });
       if (options.login.webauthn !== undefined) {
@@ -293,6 +294,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
           ...(options.login.rateLimiter === undefined
             ? {}
             : { rateLimiter: options.login.rateLimiter }),
+          ...(options.login.alerts === undefined ? {} : { alerts: options.login.alerts }),
           ...(options.login.now === undefined ? {} : { now: options.login.now }),
         });
       }

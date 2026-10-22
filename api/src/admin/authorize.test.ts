@@ -302,6 +302,39 @@ describe('delegated admin mode', () => {
     expect(result.ok).toBe(true);
   });
 
+  it('enforces requireMfa on its own, without a step-up window', async () => {
+    const options = guard({
+      verifier: verifier(delegatedToken),
+      permissions: permissions([], ['idp:client-role:write']),
+      now: () => new Date(1_760_000_100 * 1000),
+    });
+
+    // A password-only token must be rejected even when the route forgot `stepUp`; the old
+    // nesting made `requireMfa: true` silently enforce nothing.
+    const passwordOnly = await authorizeAdminRequest(
+      request(tokenWith({ ...delegatedToken, acr: 'urn:on4net:acr:pwd', amr: ['pwd'] })),
+      options,
+      { ...requirement, delegatedPermission: 'idp:client-role:write', requireMfa: true },
+    );
+    expect(passwordOnly).toMatchObject({
+      ok: false,
+      status: 403,
+      error: 'insufficient_user_authentication',
+    });
+
+    const mfaToken = { ...delegatedToken, acr: 'urn:on4net:acr:mfa', amr: ['pwd', 'totp'] };
+    const mfa = await authorizeAdminRequest(
+      request(tokenWith(mfaToken)),
+      guard({
+        verifier: verifier(mfaToken),
+        permissions: permissions([], ['idp:client-role:write']),
+        now: () => new Date(1_760_000_100 * 1000),
+      }),
+      { ...requirement, delegatedPermission: 'idp:client-role:write', requireMfa: true },
+    );
+    expect(mfa.ok).toBe(true);
+  });
+
   it('rejects a fresh password-only token when MFA is required for step-up', async () => {
     const options = guard({
       verifier: verifier(delegatedToken),

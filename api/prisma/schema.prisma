@@ -263,6 +263,8 @@ model MfaFactor {
   @@index([userId, type])
   // A user has at most one TOTP factor; the partial unique index lives in the migration because
   // Prisma cannot express `WHERE type = 'totp'`.
+  // The method/material invariants (`totp` ⇒ secret, `webauthn` ⇒ credential + key) are CHECK
+  // constraints in `0015_mfa_factor_method_invariants`, which Prisma cannot express either.
   @@map("mfa_factors")
 }
 

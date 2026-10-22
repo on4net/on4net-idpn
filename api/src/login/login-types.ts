@@ -16,6 +16,12 @@ export interface LoginUserRecord {
   lockedUntil: Date | null;
   failedLoginCount: number;
   deletedAt: Date | null;
+  /**
+   * Whether a confirmed second factor exists. The route needs it to fail closed when the
+   * deployment has no MFA repository wired instead of silently issuing a password-only
+   * session (card #38 review, finding 6).
+   */
+  hasConfirmedFactor: boolean;
 }
 
 export interface LoginUserRepository {

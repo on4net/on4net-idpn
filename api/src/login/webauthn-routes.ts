@@ -5,6 +5,7 @@ import { MFA_ACR, type MfaLoginDependencies } from '../mfa/mfa-types.js';
 import { MFA_CHALLENGE_MAX_ATTEMPTS, isChallengeToken } from '../mfa/challenge-store.js';
 import { beginAuthentication, finishAuthentication } from '../mfa/webauthn.js';
 import type { RateLimiter } from '../http/rate-limit.js';
+import type { SecurityAlertSink } from '../security/alerts.js';
 import { serializeSessionCookie } from '../session/cookie.js';
 import type { RedisSessionStore } from '../session/store.js';
 import { isAccountLocked, nextFailureState } from './lockout.js';
@@ -23,6 +24,8 @@ export interface LoginWebauthnRouteOptions {
   cookie: LoginRouteOptions['cookie'];
   /** Shared limiter; the per-challenge budget alone is bypassed by opening new challenges. */
   rateLimiter?: RateLimiter;
+  /** Security-alert channel (`docs/security.md` 9.2); omitted only in tests. */
+  alerts?: SecurityAlertSink;
   now?: () => Date;
 }
 
@@ -159,6 +162,16 @@ export function registerLoginWebauthnRoutes(
             challengeAttempt: reservation.attempt,
           }),
         });
+        if (failureState.locked) {
+          options.alerts?.raise({
+            type: 'mfa.lockout',
+            severity: 'high',
+            userId: user.id,
+            clientId: challenge.clientId ?? null,
+            ip: request.ip,
+            detail: { attempts: failureState.attempts, method: 'webauthn' },
+          });
+        }
         if (failureState.locked || reservation.attempt >= MFA_CHALLENGE_MAX_ATTEMPTS) {
           // Destroy the challenge and its counter, matching the TOTP route.
           await options.mfa.challenges.consume(token);

@@ -128,6 +128,13 @@ export interface MfaFactorRepository {
   countUnusedRecoveryCodes(factorId: string): Promise<number>;
   findUserSecurity(userId: string): Promise<MfaUserSecurity | null>;
   recordAudit(event: AuditEventInput): Promise<void>;
+  /** Effective MFA policy of the session's client/context; `optional` when unbound. */
+  resolveMfaPolicy?(input: {
+    clientId?: string | undefined;
+    loginContext?: string | undefined;
+  }): Promise<MfaPolicy>;
+  /** Counts an account-level credential failure so the shared lockout also covers MFA. */
+  registerFailedAttempt?(userId: string, attempts: number, lockedUntil: Date | null): Promise<void>;
 }
 
 /** The subset the login flow needs (policy, challenge verification, auditing). */

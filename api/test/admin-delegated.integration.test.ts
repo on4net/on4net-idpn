@@ -51,7 +51,7 @@ async function tokenFor(
   scope = 'openid idp.client-admin',
 ): Promise<string> {
   const accessToken = await keys.signAccessToken(
-    { scope, client_id: clientId, auth_time: nowSeconds() },
+    { scope, client_id: clientId, auth_time: nowSeconds(), acr: 'urn:on4net:acr:mfa', amr: ['pwd', 'totp'] },
     { issuer, audience: clientId, subject: userId, expiresInSeconds: 300 },
   );
   return 'Bearer ' + accessToken;
@@ -59,7 +59,7 @@ async function tokenFor(
 
 const globalAuthorization = async (): Promise<{ Authorization: string }> => {
   const accessToken = await keys.signAccessToken(
-    { scope: 'openid idp.admin', client_id: adminClientId, auth_time: nowSeconds() },
+    { scope: 'openid idp.admin', client_id: adminClientId, auth_time: nowSeconds(), acr: 'urn:on4net:acr:mfa', amr: ['pwd', 'totp'] },
     { issuer, audience: adminClientId, subject: adminUserId, expiresInSeconds: 300 },
   );
   return { Authorization: 'Bearer ' + accessToken };

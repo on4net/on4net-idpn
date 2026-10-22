@@ -330,6 +330,16 @@ export function createPrismaMfaRepository(
       await recordAuditEvent(prisma, event);
     },
 
+    async registerFailedAttempt(userId, attempts, lockedUntil) {
+      await prisma.user.update({
+        where: { id: userId },
+        data: {
+          failedLoginCount: attempts,
+          ...(lockedUntil === null ? {} : { lockedUntil }),
+        },
+      });
+    },
+
     async resolveMfaPolicy({ clientId, loginContext }): Promise<MfaPolicy> {
       if (clientId === undefined || clientId === '') {
         return 'optional';

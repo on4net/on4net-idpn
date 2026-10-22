@@ -43,13 +43,26 @@ async function migrateDeploy(): Promise<void> {
 
 const token = async (userId: string, scope = 'openid idp.admin'): Promise<string> => {
   const accessToken = await keys.signAccessToken(
-    { scope, client_id: adminClientId, auth_time: Math.floor(Date.now() / 1000) },
+    { scope, client_id: adminClientId, auth_time: Math.floor(Date.now() / 1000), acr: 'urn:on4net:acr:mfa', amr: ['pwd', 'totp'] },
     { issuer, audience: adminClientId, subject: userId, expiresInSeconds: 300 },
   );
   return 'Bearer ' + accessToken;
 };
 
 const authorization = async (userId: string) => ({ Authorization: await token(userId) });
+
+/** A fresh token without MFA claims: the password-only step-up case. */
+const passwordOnlyAuthorization = async (userId: string) => {
+  const accessToken = await keys.signAccessToken(
+    {
+      scope: 'openid idp.admin',
+      client_id: adminClientId,
+      auth_time: Math.floor(Date.now() / 1000),
+    },
+    { issuer, audience: adminClientId, subject: userId, expiresInSeconds: 300 },
+  );
+  return { Authorization: 'Bearer ' + accessToken };
+};
 
 beforeAll(async () => {
   const external = process.env.TEST_DATABASE_URL;
@@ -404,6 +417,19 @@ describe('roles and cross-client protection', () => {
 
     const unchanged = await prisma.rolePermission.count({ where: { roleId: role.id } });
     expect(unchanged).toBe(2);
+  });
+
+  it('rejects a password-only token when replacing role permissions', async () => {
+    const role = await prisma.role.findUniqueOrThrow({ where: { key: 'app-a:member' } });
+
+    const denied = await request(app.server)
+      .put(`/api/v1/roles/${role.id}/permissions`)
+      .set(await passwordOnlyAuthorization(adminUserId))
+      .send({ permissions: ['app-a:contact:read'] })
+      .expect(403);
+
+    // The route asks for MFA independently of the step-up window (card #38 review, finding 1).
+    expect(String(denied.body.detail)).toContain('multi-factor authentication is required');
   });
 
   it('rejects deleting a role or permission that is still in use', async () => {

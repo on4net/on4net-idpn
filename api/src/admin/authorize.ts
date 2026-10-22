@@ -259,16 +259,19 @@ export async function authorizeAdminRequest(
         subject,
       );
     }
-    // A fresh password entry is not proof of MFA: the token must carry the MFA ACR and an
-    // AMR entry for the second factor that was actually used.
-    if (requirement.requireMfa === true && !tokenProvesMfa(payload)) {
-      return denied(
-        403,
-        'insufficient_user_authentication',
-        'multi-factor authentication is required for this operation',
-        subject,
-      );
-    }
+  }
+
+  // `requireMfa` is independent of `stepUp`: a route that asks for MFA without a freshness
+  // window must still reject a password-only token instead of silently enforcing nothing.
+  // A fresh password entry is not proof of MFA: the token must carry the MFA ACR and an AMR
+  // entry for the second factor that was actually used.
+  if (requirement.requireMfa === true && !tokenProvesMfa(payload)) {
+    return denied(
+      403,
+      'insufficient_user_authentication',
+      'multi-factor authentication is required for this operation',
+      subject,
+    );
   }
 
   if (requirement.authenticatedOnly === true) {

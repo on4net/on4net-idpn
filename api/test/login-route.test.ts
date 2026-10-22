@@ -29,6 +29,7 @@ const user = async (overrides: Partial<LoginUserRecord> = {}): Promise<LoginUser
   lockedUntil: null,
   failedLoginCount: 0,
   deletedAt: null,
+  hasConfirmedFactor: false,
   ...overrides,
 });
 
@@ -144,6 +145,19 @@ describe('POST /api/v1/login', () => {
       redirectTo: '/oauth2/authorize?client_id=app-a',
     });
 
+    await app.close();
+  });
+
+  it('refuses a password-only session when a factor exists but MFA is not wired', async () => {
+    const { app } = await harness(await user({ hasConfirmedFactor: true }));
+
+    const response = await request(app.server)
+      .post('/api/v1/login')
+      .send({ identifier: 'sara@example.com', password })
+      .expect(503);
+
+    expect(response.body.error).toBe('mfa_unavailable');
+    expect(response.headers['set-cookie']).toBeUndefined();
     await app.close();
   });
 

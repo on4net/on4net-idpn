@@ -375,6 +375,11 @@ export class ApiMetrics {
     'Gauge collectors that failed during a scrape, by collector.',
   );
 
+  readonly securityAlerts = this.registry.counter(
+    'idpn_security_alerts_total',
+    'Security alerts raised for operator attention, by type and severity.',
+  );
+
   readonly activeSessions = this.registry.gauge(
     'idpn_active_sessions',
     'Non-revoked, non-expired IdP sessions recorded in PostgreSQL.',
@@ -449,6 +454,11 @@ export class ApiMetrics {
 
   recordBackchannelDelivery(status: BackchannelDeliveryStatus): void {
     this.backchannel.inc({ status });
+  }
+
+  /** Records a security alert so dashboards and the `IdpnSecurityAlert` rule can fire. */
+  recordSecurityAlert(type: string, severity: string): void {
+    this.securityAlerts.inc({ type, severity });
   }
 
   recordCollectorError(collector: string): void {

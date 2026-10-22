@@ -43,18 +43,6 @@ describe('MFA challenge store', () => {
     await expect(store.consume(token)).resolves.toBeNull();
   });
 
-  it('destroys the challenge after the attempt budget', async () => {
-    const store = new MemoryMfaChallengeStore();
-    const { token } = await store.create(input);
-
-    for (let attempt = 1; attempt < MFA_CHALLENGE_MAX_ATTEMPTS; attempt += 1) {
-      expect(await store.fail(token)).toBe(attempt);
-      await expect(store.read(token)).resolves.not.toBeNull();
-    }
-    expect(await store.fail(token)).toBe(MFA_CHALLENGE_MAX_ATTEMPTS);
-    await expect(store.read(token)).resolves.toBeNull();
-  });
-
   it('ignores malformed tokens', async () => {
     const store = new MemoryMfaChallengeStore();
     await expect(store.read('short')).resolves.toBeNull();

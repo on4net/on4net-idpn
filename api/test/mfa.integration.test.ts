@@ -17,6 +17,7 @@ import { createPrismaPermissionReader } from '../src/admin/prisma-permission-rea
 import { createPrismaPasswordStore } from '../src/audit/prisma-audit.js';
 import { hashPassword, verifyPassword, type Argon2Params } from '../src/auth/password.js';
 import { createSecretBox } from '../src/crypto/secret-box.js';
+import { createMemoryRateLimiter } from '../src/http/rate-limit.js';
 import { PrismaClient } from '../src/generated/prisma/client.js';
 import { createPrismaLoginRepository } from '../src/login/prisma-repository.js';
 import {
@@ -51,6 +52,7 @@ let prisma: PrismaClient;
 let store: RedisSessionStore;
 let app: ReturnType<typeof buildServer>;
 let tenantId: string;
+const alerts: { type: string; severity: string; userId?: string | null }[] = [];
 
 const connectionString = (): string => connectionStringValue;
 
@@ -236,8 +238,10 @@ beforeAll(async () => {
         recoveryParams: FAST_ARGON2,
       },
       cookie: { secure: true, idleTtlSeconds: 600, absoluteTtlSeconds: 3600 },
+      alerts: { raise: (alert) => alerts.push(alert) },
     },
     account: {
+      rateLimit: createMemoryRateLimiter(),
       sessions: store,
       repository: sessionRepository,
       profiles: createPrismaAccountProfileRepository(prisma),
@@ -426,6 +430,59 @@ describe('account MFA enrollment', () => {
     expect(accepted.status).toBe(200);
   });
 
+  it('refuses to remove the last factor when the app policy requires MFA', async () => {
+    const userId = await createUser('last-method');
+    await enrollTotp(userId);
+    const session = await createSession(userId, 'app-required');
+
+    const refused = await request(app.server)
+      .post('/api/v1/account/mfa/totp/disable')
+      .set('Cookie', cookie(session))
+      .set(sameOrigin)
+      .send({ password: userPassword });
+    expect(refused.status).toBe(409);
+    expect(refused.body.code).toBe('mfa_required_method');
+    expect(await prisma.mfaFactor.count({ where: { userId } })).toBe(1);
+  });
+
+  it('locks the account after five wrong passwords on the enrolment proof', async () => {
+    const userId = await createUser('locked-enrol');
+    const session = await createSession(userId);
+
+    const statuses: number[] = [];
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const response = await request(app.server)
+        .post('/api/v1/account/mfa/totp/enroll')
+        .set('Cookie', cookie(session))
+        .set(sameOrigin)
+        .send({ password: 'wrong-password-1' });
+      statuses.push(response.status);
+    }
+
+    expect(statuses.slice(0, 5).every((status) => status === 400)).toBe(true);
+    // The sixth attempt is refused before hashing: the shared lockout now covers this surface.
+    expect(statuses[5]).toBe(429);
+    expect(await prisma.mfaFactor.count({ where: { userId } })).toBe(0);
+  });
+
+  it('throttles repeated password proofs per address', async () => {
+    const userId = await createUser('throttled-password');
+    const session = await createSession(userId);
+
+    const statuses: number[] = [];
+    for (let attempt = 0; attempt < 11; attempt += 1) {
+      const response = await request(app.server)
+        .put('/api/v1/account/password')
+        .set('Cookie', cookie(session))
+        .set(sameOrigin)
+        .send({ currentPassword: 'wrong-password-1', newPassword: 'another-long-password-123' });
+      statuses.push(response.status);
+    }
+
+    expect(statuses.slice(0, 10).every((status) => status === 400)).toBe(true);
+    expect(statuses[10]).toBe(429);
+  });
+
   it('disables TOTP with the current password and audits the removal', async () => {
     const userId = await createUser('disable-user');
     const session = await createSession(userId);
@@ -556,6 +613,11 @@ describe('login with TOTP', () => {
     // The password branch honours the same lock, so the account is not left half-protected.
     const fresh = await login('login-lockout', 'app-a');
     expect(fresh.status).toBe(401);
+
+    // The lockout is also raised on the security-alert channel, not only in the audit log.
+    expect(alerts).toContainEqual(
+      expect.objectContaining({ type: 'mfa.lockout', severity: 'high', userId }),
+    );
   });
 
   it('rejects a replayed TOTP step even with a fresh challenge', async () => {

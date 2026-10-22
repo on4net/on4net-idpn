@@ -8,6 +8,7 @@ import { DEFAULT_ARGON2_PARAMS } from '../auth/password.js';
 import type { RateLimiter, RateLimitPolicy } from '../http/rate-limit.js';
 import { serializeSessionCookie } from '../session/cookie.js';
 import type { RedisSessionStore } from '../session/store.js';
+import type { SecurityAlertSink } from '../security/alerts.js';
 import { isAccountLocked, nextFailureState } from './lockout.js';
 import type { LoginRouteOptions } from './routes.js';
 
@@ -23,6 +24,8 @@ export interface MfaVerifyRouteOptions {
   cookie: LoginRouteOptions['cookie'];
   /** Shared limiter; the per-challenge budget alone is bypassed by opening new challenges. */
   rateLimiter?: RateLimiter;
+  /** Security-alert channel (`docs/security.md` 9.2); omitted only in tests. */
+  alerts?: SecurityAlertSink;
   now?: () => Date;
 }
 
@@ -77,6 +80,12 @@ export function registerMfaVerifyRoute(app: FastifyInstance, options: MfaVerifyR
       return failure(reply, 401, 'mfa_challenge_invalid', CHALLENGE_INVALID_MESSAGE);
     }
     if (!reservation.allowed) {
+      options.alerts?.raise({
+        type: 'mfa.challenge_exhausted',
+        severity: 'medium',
+        ip: request.ip,
+        detail: { attempt: reservation.attempt },
+      });
       return failure(reply, 429, 'mfa_rate_limited', RATE_LIMITED_MESSAGE);
     }
     const challenge = reservation.record;
@@ -145,9 +154,21 @@ export function registerMfaVerifyRoute(app: FastifyInstance, options: MfaVerifyR
           challengeAttempt: reservation.attempt,
         }),
       });
+      if (failureState.locked) {
+        // An account locked by second-factor failures is exactly what an operator must see:
+        // the password is already known to the attacker at this point.
+        options.alerts?.raise({
+          type: 'mfa.lockout',
+          severity: 'high',
+          userId: user.id,
+          clientId: challenge.clientId ?? null,
+          ip: request.ip,
+          detail: { attempts: failureState.attempts, method },
+        });
+      }
       if (failureState.locked || reservation.attempt >= MFA_CHALLENGE_MAX_ATTEMPTS) {
-        // Destroy the challenge (and its counter) as the old `fail()` did, so a later request
-        // sees an invalid challenge instead of a lingering exhausted one.
+        // Destroy the challenge (and its counter), so a later request sees an invalid
+        // challenge instead of a lingering exhausted one.
         await options.mfa.challenges.consume(token);
         return failure(reply, 429, 'mfa_rate_limited', RATE_LIMITED_MESSAGE);
       }

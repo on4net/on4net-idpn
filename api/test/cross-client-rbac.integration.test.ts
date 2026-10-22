@@ -141,6 +141,8 @@ async function signDelegatedToken(
       scope: options.scope ?? 'openid idp.client-admin',
       client_id: clientId,
       auth_time: options.authTime ?? nowSeconds(),
+      acr: 'urn:on4net:acr:mfa',
+      amr: ['pwd', 'totp'],
     },
     {
       issuer,
@@ -154,7 +156,7 @@ async function signDelegatedToken(
 
 async function signGlobalAdminToken(): Promise<string> {
   const token = await keys.signAccessToken(
-    { scope: 'openid idp.admin', client_id: adminClientId, auth_time: nowSeconds() },
+    { scope: 'openid idp.admin', client_id: adminClientId, auth_time: nowSeconds(), acr: 'urn:on4net:acr:mfa', amr: ['pwd', 'totp'] },
     {
       issuer,
       audience: adminClientId,

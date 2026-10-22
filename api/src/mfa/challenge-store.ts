@@ -61,8 +61,6 @@ export interface MfaChallengeStore {
    * challenge has been destroyed.
    */
   reserve(token: string): Promise<MfaAttemptReservation>;
-  /** Records a failure; returns the attempt count and drops the challenge after the limit. */
-  fail(token: string): Promise<number>;
   /** Atomic read-and-delete. Returns `null` for an unknown, expired or already used token. */
   consume(token: string): Promise<MfaChallengeRecord | null>;
 }
@@ -165,21 +163,6 @@ export class RedisMfaChallengeStore implements MfaChallengeStore {
     return { attempt, record, allowed };
   }
 
-  async fail(token: string): Promise<number> {
-    if (!isChallengeToken(token)) {
-      return MFA_CHALLENGE_MAX_ATTEMPTS;
-    }
-    const key = `${ATTEMPTS_KEY}${token}`;
-    const attempts = await this.redis.incr(key);
-    if (attempts === 1) {
-      await this.redis.expire(key, MFA_CHALLENGE_TTL_SECONDS);
-    }
-    if (attempts >= MFA_CHALLENGE_MAX_ATTEMPTS) {
-      await this.redis.del(`${CHALLENGE_KEY}${token}`);
-    }
-    return attempts;
-  }
-
   async consume(token: string): Promise<MfaChallengeRecord | null> {
     if (!isChallengeToken(token)) {
       return null;
@@ -234,15 +217,6 @@ export class MemoryMfaChallengeStore implements MfaChallengeStore {
       this.challenges.delete(token);
     }
     return { attempt, record, allowed };
-  }
-
-  async fail(token: string): Promise<number> {
-    const attempts = (this.attempts.get(token) ?? 0) + 1;
-    this.attempts.set(token, attempts);
-    if (attempts >= MFA_CHALLENGE_MAX_ATTEMPTS) {
-      this.challenges.delete(token);
-    }
-    return attempts;
   }
 
   async consume(token: string): Promise<MfaChallengeRecord | null> {

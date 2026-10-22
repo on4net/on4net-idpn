@@ -8,7 +8,8 @@ import {
 import { generateRecoveryCodes, RECOVERY_CODE_COUNT } from '../mfa/recovery-codes.js';
 import { buildOtpauthUri, generateTotpSecret } from '../mfa/totp.js';
 import { verifyTotpFactor } from '../mfa/verify.js';
-import type { MfaFactorRecord, MfaFactorRepository } from '../mfa/mfa-types.js';
+import type { MfaFactorRecord, MfaFactorRepository, MfaUserSecurity } from '../mfa/mfa-types.js';
+import { isAccountLocked, nextFailureState } from '../login/lockout.js';
 
 /**
  * Account-level MFA workflow (docs/auth-flows.md 7.2, docs/account-api.md).
@@ -88,7 +89,10 @@ export async function getMfaStatus(
 
 export type EnrollTotpResult =
   | { ok: true; factorId: string; secret: string; otpauthUri: string }
-  | { ok: false; reason: 'already_enrolled' | 'unavailable' | 'invalid_password' | 'denied' };
+  | {
+      ok: false;
+      reason: 'already_enrolled' | 'unavailable' | 'invalid_password' | 'denied' | 'locked';
+    };
 
 /**
  * Starts TOTP enrolment after re-proving the password. A session alone is not enough: a
@@ -102,15 +106,20 @@ export async function enrollTotp(
   if (deps.secretBox === null) {
     return { ok: false, reason: 'unavailable' };
   }
+  const at = (deps.now ?? (() => new Date()))();
   const user = await deps.repository.findUserSecurity(input.userId);
   if (user === null || user.deletedAt !== null || user.status === 'disabled') {
     return { ok: false, reason: 'denied' };
+  }
+  if (isLockedAccount(user, at)) {
+    return { ok: false, reason: 'locked' };
   }
   const params = deps.recoveryParams ?? DEFAULT_ARGON2_PARAMS;
   const proven =
     user.passwordHash !== null &&
     (await (deps.verify ?? verifyPassword)(user.passwordHash, input.password, params));
   if (!proven) {
+    await recordCredentialFailure(deps, user, at);
     await deps.repository.recordAudit({
       actorType: 'user',
       actorId: input.userId,
@@ -201,7 +210,31 @@ export async function verifyTotpEnrollment(
 
 export type DisableResult =
   | { ok: true }
-  | { ok: false; reason: 'not_found' | 'invalid_password' | 'invalid_code' | 'denied' };
+  | {
+      ok: false;
+      reason: 'not_found' | 'invalid_password' | 'invalid_code' | 'denied' | 'last_method' | 'locked';
+    };
+
+/**
+ * Counts a wrong password/code against the account. The same 5-strike/15-minute policy as the
+ * login branch applies, so the account surface cannot be used as an unthrottled oracle.
+ */
+async function recordCredentialFailure(
+  deps: AccountMfaDependencies,
+  user: MfaUserSecurity,
+  at: Date,
+): Promise<void> {
+  const register = deps.repository.registerFailedAttempt;
+  if (register === undefined) {
+    return;
+  }
+  const failure = nextFailureState(user, at);
+  await register(user.id, failure.attempts, failure.lockedUntil);
+}
+
+function isLockedAccount(user: MfaUserSecurity, at: Date): boolean {
+  return isAccountLocked(user.lockedUntil, at);
+}
 
 /**
  * Removes the TOTP factor after proving ownership with the current password or a valid
@@ -214,6 +247,9 @@ export async function disableTotp(
     factorId?: string;
     password?: string;
     code?: string;
+    /** Session client/context, so the effective MFA policy can be resolved. */
+    clientId?: string | undefined;
+    loginContext?: string | undefined;
     actorIp?: string | null;
     userAgent?: string | null;
   },
@@ -230,6 +266,9 @@ export async function disableTotp(
   const user = await deps.repository.findUserSecurity(input.userId);
   if (user === null || user.deletedAt !== null || user.status === 'disabled') {
     return { ok: false, reason: 'denied' };
+  }
+  if (isLockedAccount(user, at)) {
+    return { ok: false, reason: 'locked' };
   }
 
   let proven = false;
@@ -249,6 +288,7 @@ export async function disableTotp(
     proven = proof.ok;
   }
   if (!proven) {
+    await recordCredentialFailure(deps, user, at);
     await deps.repository.recordAudit({
       actorType: 'user',
       actorId: input.userId,
@@ -264,6 +304,23 @@ export async function disableTotp(
       ok: false,
       reason: input.password !== undefined ? 'invalid_password' : 'invalid_code',
     };
+  }
+
+  // Removing the last factor of an account whose policy requires MFA would lock it out:
+  // login then answers `mfa_enrollment_required` with no in-login enrolment path
+  // (docs/auth-flows.md 7.5).
+  const policy =
+    deps.repository.resolveMfaPolicy === undefined
+      ? 'optional'
+      : await deps.repository.resolveMfaPolicy({
+          clientId: input.clientId,
+          loginContext: input.loginContext,
+        });
+  if (policy !== 'optional') {
+    const others = await deps.repository.listFactors(input.userId);
+    if (!others.some((candidate) => candidate.id !== factor.id && candidate.confirmedAt !== null)) {
+      return { ok: false, reason: 'last_method' };
+    }
   }
 
   await deps.repository.deleteFactor(factor.id, input.userId);
@@ -283,7 +340,7 @@ export async function disableTotp(
 
 export type RegenerateResult =
   | { ok: true; recoveryCodes: string[] }
-  | { ok: false; reason: 'not_found' | 'invalid_password' | 'unavailable' };
+  | { ok: false; reason: 'not_found' | 'invalid_password' | 'unavailable' | 'locked' };
 
 /** Rotates the recovery codes after a password check; the previous set stops working. */
 export async function regenerateRecoveryCodes(
@@ -299,9 +356,13 @@ export async function regenerateRecoveryCodes(
   if (user === null || user.passwordHash === null) {
     return { ok: false, reason: 'not_found' };
   }
+  if (isLockedAccount(user, at)) {
+    return { ok: false, reason: 'locked' };
+  }
   const params = deps.recoveryParams ?? DEFAULT_ARGON2_PARAMS;
   const valid = await (deps.verify ?? verifyPassword)(user.passwordHash, input.password, params);
   if (!valid) {
+    await recordCredentialFailure(deps, user, at);
     await deps.repository.recordAudit({
       actorType: 'user',
       actorId: input.userId,

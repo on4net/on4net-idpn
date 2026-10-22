@@ -71,9 +71,15 @@ export function createPrismaLoginRepository(prisma: PrismaClient): LoginUserRepo
           lockedUntil: true,
           failedLoginCount: true,
           deletedAt: true,
+          mfaFactors: { where: { confirmedAt: { not: null } }, select: { id: true }, take: 1 },
         },
       });
-      return users.length === 1 ? (users[0] ?? null) : null;
+      const found = users.length === 1 ? users[0] : undefined;
+      if (found === undefined) {
+        return null;
+      }
+      const { mfaFactors, ...record } = found;
+      return { ...record, hasConfirmedFactor: mfaFactors.length > 0 };
     },
 
     async registerFailedAttempt(userId, attempts, lockedUntil) {
