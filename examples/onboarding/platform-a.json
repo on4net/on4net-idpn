@@ -1,0 +1,58 @@
+{
+  "clientId": "platform-a",
+  "name": "Platform A (example)",
+  "socialProviders": {
+    "google": {
+      "enabled": true,
+      "scopes": ["openid", "email", "profile"],
+      "allowedEmailDomains": ["platform-a.example.com"],
+      "clientKeyRef": "IDPN_SOCIAL_PLATFORM_A_GOOGLE_CLIENT_KEY",
+      "clientSecretRef": "IDPN_SOCIAL_PLATFORM_A_GOOGLE_CLIENT_SECRET"
+    },
+    "facebook": {
+      "enabled": false,
+      "scopes": ["openid", "email"],
+      "allowedEmailDomains": ["platform-a.example.com"]
+    }
+  },
+  "permissions": [
+    { "key": "platform-a:contact:read", "description": "Read contacts of the app" },
+    { "key": "platform-a:contact:write", "description": "Create and update contacts of the app" },
+    { "key": "platform-a:report:read", "description": "Read reports of the app" }
+  ],
+  "roles": [
+    {
+      "key": "platform-a:member",
+      "name": "Member",
+      "description": "Default role assigned to every new member of the app",
+      "permissions": ["platform-a:contact:read"]
+    },
+    {
+      "key": "platform-a:editor",
+      "name": "Editor",
+      "description": "Can create and update contacts and read reports",
+      "permissions": [
+        "platform-a:contact:read",
+        "platform-a:contact:write",
+        "platform-a:report:read"
+      ]
+    },
+    {
+      "key": "platform-a:user-admin",
+      "name": "User administrator",
+      "description": "Delegated user administration scoped to this app",
+      "permissions": [
+        "idp:client-member:read",
+        "idp:client-member:invite",
+        "idp:client-member:write",
+        "idp:client-role:read",
+        "idp:client-role:assign",
+        "idp:client-session:read",
+        "idp:client-session:write",
+        "idp:social-provider:read"
+      ]
+    }
+  ],
+  "defaultRole": "platform-a:member",
+  "userAdminRole": "platform-a:user-admin"
+}

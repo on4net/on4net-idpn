@@ -61,59 +61,118 @@ packages/ui/                  # یا web/src/components/ui
 سه لایه:
 
 1. **Primitive:** پالت OKLCH در `globals.css` (shadcn).
-2. **Semantic:** متغیرهای shadcn (`--background`, `--foreground`, `--primary`, ...) و لایه `--idpn-*` برای برند.
-3. **Component:** متغیرهای محلی کامپوننت در صورت نیاز.
+2. **Semantic:** متغیرهای shadcn (`--background`, `--foreground`, `--primary`, ...) که در
+   `globals.css` از لایه برند مقدار می‌گیرند: `--background: var(--idpn-background)`.
+3. **Brand:** لایه `--idpn-*` که تنها لایه‌ای است که از Public Config نوشته می‌شود. مقدار
+   پیش‌فرض هر توکن روی `.idpn-root` اعلام می‌شود، پس تم کلاینت همیشه بر آن اولویت دارد و
+   `.idpn-root` هرگز `:root` میزبان را تغییر نمی‌دهد.
 
 ```css
-:root {
-  --idpn-bg: var(--background);
-  --idpn-fg: var(--foreground);
-  --idpn-primary: var(--primary);
-  --idpn-primary-fg: var(--primary-foreground);
-  --idpn-border: var(--border);
-  --idpn-radius: var(--radius);
-  --idpn-font-sans: "Vazirmatn", system-ui, sans-serif;
+/* globals.css — جهت نگاشت؛ در کد واقعی هر پالت روی .idpn-root اعلام می‌شود */
+.idpn-root {
+  --idpn-background: oklch(1 0 0);
+  --idpn-foreground: oklch(0.145 0 0);
+  --idpn-primary: oklch(0.48 0.11 190);
+  --idpn-primary-foreground: oklch(0.99 0 0);
+  --idpn-radius: 0.625rem;
+
+  --background: var(--idpn-background);
+  --foreground: var(--idpn-foreground);
+  --primary: var(--idpn-primary);
+  --primary-foreground: var(--idpn-primary-foreground);
+  --radius: var(--idpn-radius);
 }
 ```
+
+`IdpnRoot` فقط توکن‌های `--idpn-*` را می‌نویسد (`idpnThemeToCssVariables` در
+`@idpn/contracts`)، هرگز `--primary` یا سایر متغیرهای Semantic را مستقیماً.
+
+### کلیدهای مجاز تم
+
+| گروه | کلیدها |
+| --- | --- |
+| رنگ (۱۲ کلید) | `background`، `foreground`، `card`، `primary`، `primaryForeground`، `secondary`، `muted`، `accent`، `destructive`، `border`، `input`، `ring` |
+| شکل | `radius` (یک طول غیرمنفی: `0`، `8px`، `0.625rem`، `50%`) |
+| فونت | `fontFamily.rtl` / `fontFamily.ltr` از فهرست مجاز `vazirmatn`، `inter`، `system` |
+| حالت تاریک | `dark` با همان ۱۲ کلید رنگ (`--idpn-dark-*`) |
+
+هر کلید رنگ به `--idpn-<kebab-case>` نگاشت می‌شود (`primaryForeground` →
+`--idpn-primary-foreground`) و بازنویسی تاریک به `--idpn-dark-<kebab-case>`.
 
 ### قواعد رنگ
 
 - استفاده از رنگ‌های پیش‌فرض Tailwind (`bg-red-500`, `text-slate-500`) ممنوع است.
 - فقط توکن‌های shadcn یا `--idpn-*` استفاده شود.
-- کنتراست حداقل WCAG AA رعایت شود.
-- Dark Mode از طریق کلاس `.dark` و توکن‌های Semantic.
+- **کنتراست WCAG AA (۴٫۵:۱) اجباری است.** `sanitizeIdpnTheme` جفت‌های
+  `foreground`/`background` و `primaryForeground`/`primary` (و معادل‌های `dark`) را با
+  `contrastRatio` می‌سنجد؛ جفتی که به ۴٫۵:۱ نرسد کنار گذاشته می‌شود و پالت داخلی
+  (`IDPN_BASE_THEME`) اعمال می‌شود. پالت داخلی در هر دو حالت روشن و تاریک با تست واحد
+  تأیید می‌شود.
+- Dark Mode از طریق کلاس `.dark` و توکن‌های Semantic؛ بازنویسی هر کلاینت زیر `dark` می‌آید.
 
 ## 5. تم هر اپلیکیشن
 
-- `Client.branding` در IdP شامل `logoUrl`، `primaryColor`، `radius` و در صورت نیاز فونت است.
-- Public Config این مقادیر را به MFE می‌دهد.
-- MFE آن‌ها را به CSS Variables روی ریشه خودش Map می‌کند:
+- `Client.branding` در IdP شامل `logoUrl`، `title` و `theme` (ساختار ۱۲ کلید رنگ + `radius` +
+  `fontFamily` + `dark`، بخش ۴) است.
+- Public Config همان شیء را به MFE و Hosted UI می‌دهد؛ قرارداد آن `idpnThemeSchema` در
+  `@idpn/contracts` است.
+- اپ آن را با `idpnThemeToCssVariables` به CSS Variables روی ریشه خودش Map می‌کند (فقط
+  `--idpn-*`)؛ هیچ کلیدی از تم به `:root` میزبان نمی‌رسد.
 
 ```ts
-root.style.setProperty("--primary", config.theme.primary);
-root.style.setProperty("--idpn-primary", config.theme.primary);
-root.style.setProperty("--radius", config.theme.radius);
+// همان کاری که IdpnRoot انجام می‌دهد
+for (const [name, value] of Object.entries(idpnThemeToCssVariables(config.theme, { locale }))) {
+  root.style.setProperty(name, value);
+}
 ```
 
-- Fallback امن برای همه مقادیر.
+- Fallback امن برای همه مقادیر: مقدار نامعتبر، کلید ناشناخته یا جفت کم‌کنتراست کنار گذاشته
+  می‌شود و پالت داخلی می‌ماند.
 - هیچ اپی کامپوننت‌ها را Fork نمی‌کند؛ فقط Theme می‌دهد.
-- تست کنتراست برای هر Theme الزامی است.
+- تست کنتراست برای هر Theme الزامی است (تست واحد `contrastRatio` + تست axe روی تم کلاینت و
+  تست Visual برای دو تم متفاوت).
+
+### 5.1 Theme به‌ازای Login Context
+
+- هر Context می‌تواند `branding` خودش (لوگو، عنوان، رنگ اصلی) را داشته باشد.
+- ترتیب اعمال: Theme پایه اپ ← Theme همان Context.
+- تغییر Context در صفحه ورود، Theme را بدون Reload عوض می‌کند.
+- کنتراست برای ترکیب هر Context با هر Theme تست می‌شود (همان `sanitizeIdpnTheme` روی
+  ترکیب نهایی اجرا می‌شود).
 
 ## 6. RTL و i18n
+
+> مرجع کامل رفتار چندزبانه: [localization.md](./localization.md).
 
 ### الزامات
 
 - `DirectionProvider` از Radix در ریشه MFE و Hosted UI.
-- `dir="rtl"` برای فارسی و `dir="ltr"` برای انگلیسی.
+- `dir` بر اساس Locale فعال تنظیم می‌شود (`fa-IR`/`ar-SA` → rtl، `en-US` → ltr).
 - استفاده از Utilityهای Logical:
   - `ps-*` / `pe-*` به‌جای `pl-*` / `pr-*`
   - `ms-*` / `me-*` به‌جای `ml-*` / `mr-*`
   - `start-*` / `end-*` به‌جای `left-*` / `right-*`
   - `text-start` / `text-end` به‌جای `text-left` / `text-right`
 - آیکون‌های جهت‌دار (Chevron، Arrow) در RTL چرخانده شوند (`rtl:rotate-180`).
-- فونت فارسی: `Vazirmatn` یا فونت برند؛ با `font-display: swap`.
-- اعداد، تاریخ و واحد پول با Locale فارسی؛ تست ترکیب فارسی/انگلیسی.
+- فونت به‌ازای Locale: `Vazirmatn` برای `fa-IR`، `Inter` برای `en-US`؛ با `font-display: swap`.
+  - فایل‌های woff2 زیرمجموعه‌شده (OFL 1.1) در `web/public/fonts/` منتشر می‌شوند و اعلان
+    `@font-face` با `unicode-range` در `web/src/styles/fonts.css` است. این فایل فقط از ورودی
+    Hosted UI (`web/src/main.tsx`) بارگذاری می‌شود؛ MFE و Web Component همچنان تنها
+    `globals.css` را بسته‌بندی می‌کنند تا صفحه میزبان هیچ درخواست فونتی به IdP نفرستد.
+  - میزبان‌هایی که همان تایپوگرافی را در MFE می‌خواهند، همان فایل‌ها را در دامنه خود سرو
+    می‌کنند (`docs/integration-guide.md`). CSP هاست‌شده `font-src 'self' data:` است.
+  - تست a11y علاوه بر پشته و توکن `--idpn-font-sans`، بارگذاری واقعی فونت را با
+    `document.fonts.check` و وضعیت هر Face بررسی می‌کند.
+- اعداد، تاریخ و واحد پول با `Intl` و Locale فعال؛ تست ترکیب فارسی/انگلیسی.
 - فرم‌ها، پیام‌های خطا و Placeholderها در RTL تست شوند.
+
+### متن‌ها
+
+- هیچ متن ثابتی در کامپوننت نوشته نمی‌شود؛ همه از کلیدهای بسته پایه می‌آید.
+- کلیدهای پایه در `packages/i18n/messages/{locale}.json` نگهداری می‌شوند.
+- Override هر اپ و هر Context فقط از API می‌آید و در زمان رندر خوانده می‌شود.
+- Placeholder مجاز: `{name}`, `{appName}`, `{supportEmail}`؛ HTML مجاز نیست.
+- تغییر Locale بدون Reload صفحه و بدون از دست رفتن State.
 
 ### Audit الزامی
 
@@ -126,6 +185,7 @@ root.style.setProperty("--radius", config.theme.radius);
 - Animationهای `slide-in-from-left/right`
 - Iconهای جهت‌دار
 - Portal و Dialog در RTL
+- متن Hardcoded به‌جای کلید ترجمه
 
 هر Patch در `UPSTREAM.md` ثبت شود. مرجع: `https://ui.shadcn.com/docs/rtl`
 
@@ -211,14 +271,15 @@ Tailwind v4 و CSS گلوبال shadcn می‌توانند با Host تداخل 
 
 ## 12. Skills و دستورالعمل Agent
 
-- Skillهای موجود در Workspace اسکیل‌ها (`openon4net/.github/skills`):
-  - `ui-styling` برای shadcn/ui
-  - `design-system` برای Token Architecture
-  - `accessibility-review` برای A11y
-  - `i18n-rtl-review` برای RTL
-  - `playwright-skill` برای E2E/Visual
-  - `dependency-review` برای Supply Chain
+- Skillهای موجود در [`.github/skills`](../.github/skills/README.md):
+  - [accessibility-review](../.github/skills/accessibility-review/SKILL.md) برای A11y
+  - [i18n-rtl-review](../.github/skills/i18n-rtl-review/SKILL.md) برای RTL و i18n
+  - [playwright-skill](../.github/skills/playwright-skill/SKILL.md) برای E2E و Visual Regression
+  - [dependency-review](../.github/skills/dependency-review/SKILL.md) برای Supply Chain
+  - [review-gate](../.github/skills/review-gate/SKILL.md) برای پذیرش نهایی تسک
+  - [code-review](../.github/skills/code-review/SKILL.md) برای بازبینی مبتنی بر شواهد
 - دستورالعمل پروژه: **منبع کامپوننت shadcn/ui است؛ از کپی‌های دستی یا Registryهای تأییدنشده استفاده نشود.**
+- توکن‌ها، تم و RTL مطابق همین سند پیاده‌سازی می‌شوند؛ هیچ سند دیگری مرجع جایگزین نیست.
 
 ## 13. چک‌لیست پذیرش
 
@@ -227,9 +288,54 @@ Tailwind v4 و CSS گلوبال shadcn می‌توانند با Host تداخل 
 - [ ] توکن‌های `--idpn-*` تعریف و مستند شده‌اند.
 - [ ] Theme هر اپ از Public Config اعمال می‌شود.
 - [ ] RTL همه کامپوننت‌های مصرفی Audit و Patch شده است.
+- [ ] هیچ متن Hardcoded در کامپوننت‌ها نیست؛ همه از کلید ترجمه می‌آید.
+- [ ] Locale و فونت هر اپ از Public Config اعمال می‌شود.
+- [ ] Theme هر Login Context درست روی Theme اپ اعمال می‌شود.
 - [ ] ایزولاسیون MFE در Host با Tailwind مستقل تست شده است.
 - [ ] Radix Portalها داخل ریشه MFE رندر می‌شوند.
 - [ ] axe بدون خطای Critical/Serious است.
 - [ ] تست Visual برای Light/Dark و RTL/LTR وجود دارد.
 - [ ] Supply Chain و لایسنس بررسی شده است.
 - [ ] دستورالعمل پروژه بر shadcn/ui تأکید دارد.
+
+## 14. تصمیم Go/No-Go: shadcn/ui در MFE (اسپایک #50)
+
+**نتیجه: Go** برای shadcn/ui + Tailwind v4 در Hosted Auth UI، Module Federation و Web Component.
+جزئیات و اندازه‌گیری‌ها: [spikes/shadcn-mfe-spike.md](./spikes/shadcn-mfe-spike.md).
+
+| معیار | نتیجه | شاهد |
+|---|---|---|
+| نشت CSS/Preflight به Host | ندارد | تست Playwright با Host دارای Preflight و Utilityهای مهاجم |
+| Portalهای Dialog/Select | داخل `.idpn-root` | تست E2E در Hosted، Shadow DOM و Host فدریشن |
+| RTL فارسی | درست | `DirectionProvider` + Utilityهای Logical + تست axe/keyboard |
+| axe | بدون Critical/Serious | سه صفحه (ورود، Host ساده، Host فدریشن) |
+| React 19 Singleton | تایید شد | Mount واقعی Remote با `shared.singleton` و رندر Hook/Context |
+
+**تصمیم‌های الزام‌آور حاصل از اسپایک:**
+
+1. Preflight تیلویند در MFE وارد نمی‌شود؛ فقط `tailwindcss/utilities.css` ایمپورت می‌شود (`tailwindcss/theme.css` هم وارد نمی‌شود، چون `:root, :host` را به سند میزبان تزریق می‌کند).
+2. توکن‌ها روی `.idpn-root` تعریف می‌شوند، نه `:root`.
+3. `Dialog`/`Select` (و هر Portal آینده) مقصد Portal را خودشان از `usePortalScope()` حل می‌کنند؛
+   `container` فقط برای Override صریح داده می‌شود و هرگز `null` پاس نمی‌شود
+   (`resolvePortalTarget` روی `null` عمداً خطا می‌دهد — برای «هنوز آماده نیست» مقدار را حذف کنید
+   تا از scope استفاده شود).
+4. ماژول MFE خودکفاست (`UserManagementRoot`): ریشه، جهت و Portal Container را خودش می‌سازد،
+   زیرا Context بین Bundleهای فدریشن مشترک نیست.
+5. Remote روی Origin خودش سرو می‌شود یا هدر CORS دارد؛ `remoteEntry.js` بدون CORS لود نمی‌شود.
+6. رنگ Primary باید کنتراست AA با متن سفید داشته باشد (`oklch(0.48 …)` یا تیره‌تر).
+
+## 15. Governance اجرایی و زنجیره تأمین
+
+- **منبع کامپوننت:** فقط CLI پین‌شده `pnpm dlx shadcn@4.22.0` (اسکریپت `ui:add`).
+  کپی دستی یا Registry تأییدنشده ممنوع است.
+- **دستورالعمل پروژه:** [`.github/instructions/ui-components.instructions.md`](../.github/instructions/ui-components.instructions.md)
+  روی `web/src/components/ui/**`، `web/src/app/**` و `web/src/mfe/**` اعمال می‌شود.
+- **Skill:** [`.github/skills/ui-styling/SKILL.md`](../.github/skills/ui-styling/SKILL.md) —
+  روند افزودن کامپوننت، مالکیت حوزه‌ها و چک‌لیست بازبینی.
+- **Inventory و Patchها:** [`web/UPSTREAM.md`](../web/UPSTREAM.md).
+- **نسخه‌ها:** همه وابستگی‌های Design System دقیقاً Pin هستند (بدون `^`/`~`)؛ بررسی با `pnpm supply-chain`.
+- **آسیب‌پذیری:** `pnpm audit:ci` روی High/Critical شکست می‌خورد؛ SBOM با `pnpm sbom` (CycloneDX 1.5)
+  تولید می‌شود. جزئیات: [supply-chain.md](./supply-chain.md).
+- **Upgrade:** فقط دستی و در PR مستقل، همراه با اعمال دوباره Patchها و اجرای
+  `typecheck`، `test:coverage`، `test:e2e` و بازبینی RTL/axe.
+- **لایسنس:** MIT برای shadcn/ui، Radix UI و Tailwind CSS در [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md).

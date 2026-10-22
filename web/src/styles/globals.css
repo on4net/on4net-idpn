@@ -1,0 +1,215 @@
+/*
+ * shadcn/ui tokens for the MFE and Hosted UI. Preflight is intentionally NOT imported: the
+ * MFE must not reset host styles (docs/design-system.md 7.1). All tokens live on
+ * `.idpn-root` so a host keeps its own palette, radius and dark mode, and several clients
+ * can render side by side with different themes.
+ *
+ * Only `utilities.css` is imported. `tailwindcss/theme.css` is deliberately absent because
+ * it emits `:root, :host { … }` defaults, which would make the MFE write into the host's
+ * document. The small default scale used by the shared components is declared with
+ * `@theme inline`, so Tailwind inlines the values into utilities instead of emitting global
+ * custom properties.
+ *
+ * Per-client values arrive as `--idpn-*` custom properties written by `IdpnRoot` from the
+ * sanitized public-config theme; the semantic shadcn variables below consume them. The
+ * defaults are declared on `.idpn-root` itself (not merely as `var()` fallbacks) so a host
+ * that defines `--idpn-*` globally cannot restyle the module.
+ */
+@layer theme, base, components, utilities;
+@import 'tailwindcss/utilities.css' layer(utilities);
+
+/* Scan the shared components when this stylesheet is built by a host app. */
+@source '../';
+
+@layer base {
+  /*
+   * Module Federation hosts commonly ship Tailwind Preflight globally. Those author rules
+   * also match nodes inside `.idpn-root`. Revert every element to the user-agent origin so
+   * host reset/layout rules cannot reach module content. This lives in `base`, before
+   * `components`/`utilities`, so component classes and MFE utilities still win.
+   */
+  .idpn-root *,
+  .idpn-root *::before,
+  .idpn-root *::after {
+    all: revert;
+  }
+
+  /* Re-apply the inherited defaults the module relies on after the revert. */
+  .idpn-root,
+  .idpn-root *,
+  .idpn-root *::before,
+  .idpn-root *::after {
+    box-sizing: border-box;
+  }
+
+  /*
+   * Replicate the form-control part of Tailwind Preflight inside the module. These
+   * selectors must outrank `.idpn-root *` (0,1,0): `all: revert` restored the UA button
+   * styles (buttonface background, buttontext colour), and a zero-specificity `:where()`
+   * rule cannot override that declaration.
+   */
+  .idpn-root button,
+  .idpn-root input,
+  .idpn-root select,
+  .idpn-root textarea {
+    font: inherit;
+    font-feature-settings: inherit;
+    font-variation-settings: inherit;
+    letter-spacing: inherit;
+    color: inherit;
+    border-radius: 0;
+    background-color: transparent;
+    opacity: 1;
+  }
+
+  .idpn-root button,
+  .idpn-root input:where([type='button'], [type='reset'], [type='submit']) {
+    appearance: button;
+  }
+}
+
+.idpn-root {
+  /* Local defaults; inline `--idpn-*` values from the client theme win over these. */
+  --idpn-background: oklch(1 0 0);
+  --idpn-foreground: oklch(0.145 0 0);
+  --idpn-card: oklch(1 0 0);
+  --idpn-primary: oklch(0.48 0.11 190);
+  --idpn-primary-foreground: oklch(0.99 0 0);
+  --idpn-secondary: oklch(0.97 0 0);
+  --idpn-muted: oklch(0.97 0 0);
+  --idpn-accent: oklch(0.97 0 0);
+  --idpn-destructive: oklch(0.577 0.245 27.325);
+  --idpn-border: oklch(0.922 0 0);
+  --idpn-input: oklch(0.922 0 0);
+  --idpn-ring: oklch(0.708 0 0);
+  --idpn-radius: 0.625rem;
+
+  --idpn-dark-background: oklch(0.145 0 0);
+  --idpn-dark-foreground: oklch(0.985 0 0);
+  --idpn-dark-card: oklch(0.205 0 0);
+  --idpn-dark-primary: oklch(0.72 0.12 190);
+  --idpn-dark-primary-foreground: oklch(0.205 0 0);
+  --idpn-dark-secondary: oklch(0.269 0 0);
+  --idpn-dark-muted: oklch(0.269 0 0);
+  --idpn-dark-accent: oklch(0.371 0 0);
+  --idpn-dark-destructive: oklch(0.704 0.191 22.216);
+  --idpn-dark-border: oklch(1 0 0 / 12%);
+  --idpn-dark-input: oklch(1 0 0 / 18%);
+  --idpn-dark-ring: oklch(0.556 0 0);
+
+  --background: var(--idpn-background);
+  --foreground: var(--idpn-foreground);
+  --card: var(--idpn-card);
+  --card-foreground: oklch(0.145 0 0);
+  --primary: var(--idpn-primary);
+  --primary-foreground: var(--idpn-primary-foreground);
+  --secondary: var(--idpn-secondary);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: var(--idpn-muted);
+  /* 0.52 keeps muted text at AA (4.34 → 5.05) on the muted surface (card #53 finding 1). */
+  --muted-foreground: oklch(0.52 0 0);
+  --accent: var(--idpn-accent);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: var(--idpn-destructive);
+  --border: var(--idpn-border);
+  --input: var(--idpn-input);
+  --ring: var(--idpn-ring);
+  --radius: var(--idpn-radius);
+
+  /* Mode-aware aliases for app CSS; the configured brand values stay on `--idpn-*`. */
+  --idpn-bg: var(--background);
+  --idpn-fg: var(--foreground);
+  --idpn-primary-fg: var(--primary-foreground);
+
+  font-family: var(--idpn-font-sans, 'Vazirmatn', 'Inter', system-ui, sans-serif);
+  color: var(--idpn-fg);
+  background-color: var(--idpn-bg);
+}
+
+.idpn-root.dark {
+  --background: var(--idpn-dark-background);
+  --foreground: var(--idpn-dark-foreground);
+  --card: var(--idpn-dark-card);
+  --card-foreground: oklch(0.985 0 0);
+  --primary: var(--idpn-dark-primary);
+  --primary-foreground: var(--idpn-dark-primary-foreground);
+  --secondary: var(--idpn-dark-secondary);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: var(--idpn-dark-muted);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: var(--idpn-dark-accent);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: var(--idpn-dark-destructive);
+  --border: var(--idpn-dark-border);
+  --input: var(--idpn-dark-input);
+  --ring: var(--idpn-dark-ring);
+}
+
+@theme inline {
+  /*
+   * Minimal default scale inherited from Tailwind's theme, declared `inline` so the values
+   * are baked into utilities and nothing is emitted on `:root`. Extend this list when a
+   * component starts using another default-theme utility.
+   */
+  --color-black: #000;
+  --spacing: 0.25rem;
+  --breakpoint-sm: 40rem;
+  --font-mono:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
+    monospace;
+  --container-sm: 24rem;
+  --container-md: 28rem;
+  --container-3xl: 48rem;
+  --container-4xl: 56rem;
+  --text-xs: 0.75rem;
+  --text-xs--line-height: calc(1 / 0.75);
+  --text-sm: 0.875rem;
+  --text-sm--line-height: calc(1.25 / 0.875);
+  --text-base: 1rem;
+  --text-base--line-height: calc(1.5 / 1);
+  --text-lg: 1.125rem;
+  --text-lg--line-height: calc(1.75 / 1.125);
+  --text-xl: 1.25rem;
+  --text-xl--line-height: calc(1.75 / 1.25);
+  --text-2xl: 1.5rem;
+  --text-2xl--line-height: calc(2 / 1.5);
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --leading-none: 1;
+  --leading-relaxed: 1.625;
+  /* Unique animation name: a generic `spin` keyframe would collide with the host's. */
+  --animate-spin: idpn-spin 1s linear infinite;
+  --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+  --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+  --default-transition-duration: 0.15s;
+  --default-transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@keyframes idpn-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

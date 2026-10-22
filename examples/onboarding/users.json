@@ -1,0 +1,21 @@
+{
+  "users": [
+    {
+      "email": "ali.rezaei@example.com",
+      "displayName": "Ali Rezaei",
+      "externalId": "legacy-1001",
+      "locale": "fa-IR",
+      "roleKeys": ["platform-a:member"]
+    },
+    {
+      "email": "sara.ahmadi@example.com",
+      "displayName": "Sara Ahmadi",
+      "external_id": "legacy-1002",
+      "locale": "fa-IR",
+      "memberships": {
+        "platform-a": ["platform-a:editor"],
+        "platform-b": ["platform-b:member"]
+      }
+    }
+  ]
+}

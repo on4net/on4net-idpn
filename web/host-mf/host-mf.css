@@ -1,0 +1,122 @@
+/*
+ * Independent host stylesheet: it includes its own Tailwind build (with preflight) plus
+ * host-specific element styles. The MFE must neither reset the host nor restyle these
+ * elements (docs/design-system.md 7).
+ */
+@import 'tailwindcss';
+
+.host-body {
+  margin: 0;
+  padding: 1rem;
+  /* MFE modules must not change the host typography; `.idpn-root` sets its own. */
+  font-family: Georgia, 'Times New Roman', serif;
+}
+
+#host-title {
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 40px;
+  margin: 0;
+}
+
+#host-button {
+  background-color: rgb(200, 0, 0);
+  color: rgb(255, 255, 255);
+  font-size: 24px;
+  padding: 2px;
+  border: 0;
+}
+
+#host-paragraph {
+  display: block;
+  margin: 0;
+}
+
+/* Host shell around the federated modules. Deliberately plain CSS: the host has its own
+ * design system and does not import shadcn/ui (docs/design-system.md 3). */
+.idpn-host-app {
+  display: grid;
+  gap: 1.5rem;
+  margin-top: 1.5rem;
+}
+
+.idpn-host-config {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 1rem;
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 14px;
+}
+
+.idpn-host-config dt {
+  font-weight: 700;
+}
+
+.idpn-host-config dd {
+  margin: 0;
+}
+
+.idpn-host-section {
+  border: 1px solid #d4d4d4;
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.idpn-host-section__title {
+  margin: 0 0 0.75rem;
+  font-size: 18px;
+}
+
+.idpn-host-fallback {
+  display: grid;
+  gap: 0.5rem;
+  padding: 1rem;
+  border: 1px dashed #9ca3af;
+  border-radius: 8px;
+}
+
+.idpn-host-fallback--error {
+  border-color: #b91c1c;
+  background-color: #fef2f2;
+}
+
+.idpn-host-fallback__title {
+  margin: 0;
+  font-weight: 700;
+}
+
+.idpn-host-fallback__text {
+  margin: 0;
+}
+
+.idpn-host-fallback__link {
+  color: #1d4ed8;
+  text-decoration: underline;
+}
+
+.idpn-host-alert {
+  display: grid;
+  gap: 0.5rem;
+  padding: 1rem;
+  border: 1px solid #b91c1c;
+  border-radius: 8px;
+  background-color: #fef2f2;
+}
+
+.idpn-host-alert__title {
+  margin: 0;
+  font-weight: 700;
+}
+
+.idpn-host-alert__code,
+.idpn-host-alert__dismiss {
+  width: fit-content;
+}
+
+.idpn-host-alert__dismiss {
+  padding: 0.25rem 0.75rem;
+  border: 1px solid #7f1d1d;
+  border-radius: 6px;
+  background-color: #ffffff;
+  font-family: inherit;
+}

@@ -1,0 +1,497 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - a-main
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    name: Lint, typecheck, contracts, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Contract check (OpenAPI and MFE schemas)
+        run: pnpm contract:check
+
+      - name: Build
+        run: pnpm build
+
+  unit:
+    name: Unit tests (coverage)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Unit tests
+        run: pnpm test:unit
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-unit
+          path: |
+            packages/*/coverage/lcov.info
+            examples/*/coverage/lcov.info
+            web/coverage/lcov.info
+          if-no-files-found: ignore
+
+  integration:
+    name: Integration tests (Testcontainers)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Integration tests (PostgreSQL and Redis containers)
+        run: pnpm test:integration
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-integration
+          path: api/coverage/lcov.info
+          if-no-files-found: ignore
+
+  observability:
+    # Metrics/readiness contract, Prometheus rule unit tests and a real backup/restore drill.
+    # The drill creates and drops a scratch database on the service PostgreSQL.
+    name: Observability (metrics, readiness, alerts, backup drill)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: idpn
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d idpn"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/idpn
+      TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/idpn
+      REDIS_URL: redis://127.0.0.1:6379
+      TEST_REDIS_URL: redis://127.0.0.1:6379
+      SESSION_SECRET: ci-observability-session-secret-at-least-32
+      APP_URL: http://127.0.0.1:3100
+      HOSTED_UI_URL: http://127.0.0.1:3100
+      HOST: 127.0.0.1
+      PORT: '3100'
+      ADMIN_CLIENT_ID: admin-panel
+      SESSION_MAX_CONCURRENT: '0'
+      KEY_ROTATION_INTERVAL_DAYS: '0'
+      METRICS_ENABLED: 'true'
+      BACKUP_STATUS_FILE: ${{ github.workspace }}/artifacts/backup-ci/status.json
+      OPS_PG_MODE: docker
+      GRAFANA_ADMIN_PASSWORD: ci-only-grafana-password
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate a per-run metrics token
+        run: echo "METRICS_TOKEN=ci-metrics-$(openssl rand -hex 16)" >> "$GITHUB_ENV"
+
+      - name: Validate Prometheus configuration and alert rules
+        run: |
+          docker run --rm -v "$PWD/deploy/observability/prometheus:/etc/prometheus:ro" \
+            --entrypoint promtool prom/prometheus:v3.1.0 check config /etc/prometheus/prometheus.yml
+          docker run --rm -v "$PWD/deploy/observability/prometheus:/rules:ro" \
+            --entrypoint promtool prom/prometheus:v3.1.0 check rules /rules/alerts.yml
+          docker run --rm -v "$PWD/deploy/observability/prometheus:/rules:ro" \
+            --entrypoint promtool prom/prometheus:v3.1.0 test rules /rules/alerts.test.yaml
+
+      - name: Validate dashboard JSON and compose file
+        run: |
+          node -e "JSON.parse(require('fs').readFileSync('deploy/observability/grafana/dashboards/idpn-overview.json','utf8'))"
+          docker compose --env-file deploy/observability/.env.example \
+            -f deploy/observability/compose.observability.yaml config --quiet
+
+      - name: Observability unit and route tests
+        run: |
+          pnpm --filter @idpn/api exec vitest run \
+            src/observability test/observability.test.ts test/ops-scripts.test.ts
+
+      - name: Migrate and seed the database
+        run: |
+          pnpm --filter @idpn/api run db:deploy
+          pnpm --filter @idpn/api run db:seed
+
+      - name: Start API
+        run: |
+          pnpm --filter @idpn/api start > api-observability.log 2>&1 &
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:3100/healthz > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "API did not become healthy"
+          cat api-observability.log
+          exit 1
+
+      - name: Metrics, readiness and redaction smoke
+        run: |
+          curl -fsS http://127.0.0.1:3100/readyz | tee readyz.json
+          grep -q '"status":"ok"' readyz.json
+          curl -fsS -H "Authorization: Bearer $METRICS_TOKEN" \
+            http://127.0.0.1:3100/metrics -o metrics.txt
+          grep -q 'idpn_http_requests_total' metrics.txt
+          grep -q 'idpn_dependency_up{service="postgres"} 1' metrics.txt
+          grep -q 'idpn_dependency_up{service="redis"} 1' metrics.txt
+          grep -q 'idpn_active_sessions' metrics.txt
+          grep -q 'idpn_signing_key_age_days' metrics.txt
+          if grep -q "$METRICS_TOKEN" metrics.txt; then
+            echo "metrics leaked the scrape token"
+            exit 1
+          fi
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3100/metrics)
+          test "$code" = "401"
+
+      - name: Backup and restore drill
+        run: |
+          BACKUP_DIR="$GITHUB_WORKSPACE/artifacts/backup-ci"
+          pnpm --filter @idpn/api run ops:backup -- \
+            --database-url "$DATABASE_URL" --output-dir "$BACKUP_DIR" --no-redis | tee backup.log
+          DUMP=$(ls "$BACKUP_DIR"/*.dump | head -n 1)
+          pnpm --filter @idpn/api run ops:restore -- \
+            --backup "$DUMP" --drill --source-url "$DATABASE_URL" --json | tee "$BACKUP_DIR/drill.json"
+          curl -fsS -H "Authorization: Bearer $METRICS_TOKEN" \
+            http://127.0.0.1:3100/metrics -o metrics-after-backup.txt
+          grep -q 'idpn_backup_last_success_timestamp_seconds' metrics-after-backup.txt
+
+      - name: Logs on failure
+        if: failure()
+        run: cat api-observability.log || true
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: observability-evidence
+          path: |
+            readyz.json
+            metrics.txt
+            metrics-after-backup.txt
+            artifacts/backup-ci/
+            api-observability.log
+          if-no-files-found: warn
+
+  supply-chain:
+    name: Supply chain (audit, SBOM, pins)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Audit (fail on high/critical)
+        run: pnpm audit:ci
+
+      - name: Pinned versions and licenses
+        run: pnpm supply-chain
+
+      - name: Generate SBOM
+        run: pnpm sbom
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx
+          path: artifacts/sbom.cdx.json
+          if-no-files-found: error
+
+  mfe-security:
+    name: MFE security (CSP, CORS allowlist, source scan)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Security tests (header policy, origin allowlist, forbidden patterns)
+        run: pnpm test:security
+
+  perf-smoke:
+    # Short k6 profile with the documented SLO thresholds (docs/performance-baseline.md).
+    # Not a soak: 15s of measured traffic per scenario plus 5s warmup.
+    name: Load smoke (k6 SLO thresholds)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: idpn
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d idpn"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/idpn
+      REDIS_URL: redis://127.0.0.1:6379
+      SESSION_SECRET: ci-perf-session-secret-at-least-32-characters
+      APP_URL: http://127.0.0.1:3100
+      HOSTED_UI_URL: http://127.0.0.1:3100
+      HOST: 127.0.0.1
+      PORT: '3100'
+      ADMIN_CLIENT_ID: perf-admin
+      SESSION_MAX_CONCURRENT: '0'
+      KEY_ROTATION_INTERVAL_DAYS: '0'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply database migrations
+        run: pnpm --filter @idpn/api run db:deploy
+
+      - name: Seed benchmark fixtures
+        run: pnpm perf:seed
+
+      - name: Start API
+        run: |
+          pnpm --filter @idpn/api start > api-perf.log 2>&1 &
+          echo $! > api-perf.pid
+
+      - name: k6 smoke with SLO thresholds
+        run: pnpm perf:load:smoke
+
+      - name: API log on failure
+        if: failure()
+        run: cat api-perf.log
+
+      - name: Upload performance summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-smoke-summary
+          path: artifacts/perf
+          if-no-files-found: warn
+
+  ui-a11y:
+    name: UI accessibility (axe Critical/Serious)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Accessibility gate
+        run: pnpm test:a11y
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-a11y-report
+          path: playwright-report
+          if-no-files-found: ignore
+
+  ui-visual:
+    # Screenshot baselines are committed per platform; this job uses the win32 set.
+    name: UI visual regression (win32 baselines)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm exec playwright install chromium
+
+      - name: Visual regression gate
+        run: pnpm test:visual
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-visual-report
+          path: playwright-report
+          if-no-files-found: ignore
+
+  e2e:
+    name: 'E2E (Chromium: API, Hosted UI, MFE, BFF)'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: idpn
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d idpn"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/idpn
+      REDIS_URL: redis://127.0.0.1:6379
+      SESSION_SECRET: ci-e2e-session-secret-at-least-32-characters
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Apply database migrations
+        run: pnpm --filter @idpn/api run db:deploy
+
+      - name: E2E
+        run: pnpm test:e2e
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report
+          if-no-files-found: ignore

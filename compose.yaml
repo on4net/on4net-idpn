@@ -1,0 +1,61 @@
+name: on4net-idpn
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: idpn-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-idpn}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-idpn}
+      POSTGRES_DB: ${POSTGRES_DB:-idpn}
+    ports:
+      - '127.0.0.1:${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - idpn
+
+  redis:
+    image: redis:7-alpine
+    container_name: idpn-redis
+    command: ['redis-server', '--appendonly', 'yes']
+    ports:
+      - '127.0.0.1:${REDIS_PORT:-6379}:6379'
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - idpn
+
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    container_name: idpn-mailhog
+    ports:
+      - '127.0.0.1:${MAILHOG_SMTP_PORT:-1025}:1025'
+      - '127.0.0.1:${MAILHOG_HTTP_PORT:-8025}:8025'
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -q -O /dev/null http://127.0.0.1:8025/api/v2/messages || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - idpn
+
+volumes:
+  postgres-data:
+  redis-data:
+
+networks:
+  idpn:
+    driver: bridge

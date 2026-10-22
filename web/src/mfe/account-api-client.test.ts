@@ -1,0 +1,306 @@
+import { describe, expect, it, vi } from 'vitest';
+
+import { AccountApiError, createAccountApiClient } from './account-api-client';
+
+const jsonResponse = (body: unknown, status = 200): Response =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+
+type FetchMock = typeof fetch & { mock: { calls: [string, RequestInit?][] } };
+
+const fetchMock = (response: Response | (() => Promise<Response>)): FetchMock =>
+  vi.fn(
+    typeof response === 'function' ? response : () => Promise.resolve(response),
+  ) as unknown as FetchMock;
+
+const profile = {
+  id: 'u1',
+  username: 'sara',
+  email: 'sara@example.com',
+  displayName: 'Sara',
+  phone: null,
+  avatarUrl: null,
+  locale: 'fa-IR',
+  status: 'active',
+  emailVerified: true,
+  mustChangePassword: false,
+  createdAt: '2026-10-19T09:00:00.000Z',
+  passwordChangedAt: null,
+};
+
+describe('createAccountApiClient', () => {
+  it('loads the profile with cookie credentials and no token header', async () => {
+    const fetchImpl = fetchMock(jsonResponse(profile));
+    const client = createAccountApiClient({
+      baseUrl: 'https://auth.example/',
+      fetchImpl,
+    });
+
+    await expect(client.getProfile()).resolves.toEqual(profile);
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://auth.example/api/v1/account/profile',
+      expect.objectContaining({ method: 'GET', credentials: 'include' }),
+    );
+    const init = fetchImpl.mock.calls[0]?.[1] as RequestInit;
+    expect((init.headers as Record<string, string>)['Authorization']).toBeUndefined();
+  });
+
+  it('sends the password change as a JSON PUT', async () => {
+    const fetchImpl = fetchMock(
+      jsonResponse({
+        ok: true,
+        revokedSessions: 1,
+        revokedRefreshTokens: 2,
+        keptCurrentSession: true,
+      }),
+    );
+    const client = createAccountApiClient({ fetchImpl });
+
+    await client.changePassword({
+      currentPassword: 'old-password-1',
+      newPassword: 'new-password-12',
+    });
+
+    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('/api/v1/account/password');
+    expect(init.method).toBe('PUT');
+    expect(JSON.parse(String(init.body))).toEqual({
+      currentPassword: 'old-password-1',
+      newPassword: 'new-password-12',
+    });
+    expect((init.headers as Record<string, string>)['Content-Type']).toBe('application/json');
+  });
+
+  it('lists only the requested page of sessions', async () => {
+    const fetchImpl = fetchMock(jsonResponse({ items: [], page: 2, limit: 10, total: 0 }));
+    const client = createAccountApiClient({ fetchImpl });
+
+    await client.listSessions({ page: 2, limit: 10 });
+
+    expect(fetchImpl.mock.calls[0]?.[0]).toBe('/api/v1/account/sessions?page=2&limit=10');
+  });
+
+  it('closes a session with an encoded id', async () => {
+    const fetchImpl = fetchMock(jsonResponse({ revoked: true, alreadyRevoked: false }));
+    const client = createAccountApiClient({ fetchImpl });
+
+    await expect(client.closeSession('a/b')).resolves.toEqual({
+      revoked: true,
+      alreadyRevoked: false,
+    });
+    expect(fetchImpl.mock.calls[0]?.[0]).toBe('/api/v1/account/sessions/a%2Fb');
+  });
+
+  it('drives the passkey ceremony endpoints without putting a token in the body', async () => {
+    const registration = {
+      id: 'credential-1',
+      rawId: 'credential-1',
+      type: 'public-key',
+      response: { clientDataJSON: 'client-data' },
+      clientExtensionResults: {},
+    };
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ challengeId: 'c1', options: { challenge: 'one' } }))
+      .mockResolvedValueOnce(
+        jsonResponse({ ok: true, factor: { id: 'p1', type: 'webauthn', name: 'Laptop' } }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ challengeId: 'c2', options: { challenge: 'two' } }))
+      .mockResolvedValueOnce(
+        jsonResponse({ ok: true, acr: 'urn:on4net:acr:mfa', amr: ['pwd', 'webauthn'] }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }));
+    const client = createAccountApiClient({ fetchImpl: fetchImpl as unknown as typeof fetch });
+
+    await expect(client.beginPasskeyRegistration()).resolves.toEqual({
+      challengeId: 'c1',
+      options: { challenge: 'one' },
+    });
+    await client.finishPasskeyRegistration({
+      challengeId: 'c1',
+      response: registration as never,
+      name: 'Laptop',
+    });
+    await client.beginPasskeyAuthentication();
+    await client.finishPasskeyAuthentication({
+      challengeId: 'c2',
+      response: registration as never,
+    });
+    await client.renamePasskey({ factorId: 'p/1', name: 'Office' });
+    await client.deletePasskey('p/1');
+
+    const calls = fetchImpl.mock.calls as [string, RequestInit][];
+    expect(calls[0]?.[0]).toBe('/api/v1/account/mfa/webauthn/options');
+    expect(calls[0]?.[1].method).toBe('POST');
+    expect(calls[0]?.[1].body).toBe('{}');
+    expect(calls[1]?.[0]).toBe('/api/v1/account/mfa/webauthn/verify');
+    expect(JSON.parse(String(calls[1]?.[1].body))).toMatchObject({
+      challengeId: 'c1',
+      name: 'Laptop',
+    });
+    expect(calls[2]?.[0]).toBe('/api/v1/account/mfa/webauthn/authenticate/options');
+    expect(calls[3]?.[0]).toBe('/api/v1/account/mfa/webauthn/authenticate/verify');
+    expect(calls[4]?.[0]).toBe('/api/v1/account/mfa/webauthn/p%2F1');
+    expect(calls[4]?.[1].method).toBe('PATCH');
+    expect(calls[5]?.[1].method).toBe('DELETE');
+    for (const [, init] of calls) {
+      expect(JSON.stringify(init.body ?? '')).not.toContain('token');
+    }
+  });
+
+  it('exposes the problem code and password policy violations', async () => {
+    const fetchImpl = fetchMock(
+      jsonResponse(
+        {
+          title: 'Password policy violated',
+          detail: 'the new password does not meet the password policy',
+          code: 'password_policy',
+          violations: ['too_short', 'common_password', 42],
+        },
+        422,
+      ),
+    );
+    const client = createAccountApiClient({ fetchImpl });
+
+    const error = await client
+      .changePassword({ currentPassword: 'a', newPassword: 'b' })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(AccountApiError);
+    const apiError = error as AccountApiError;
+    expect(apiError.kind).toBe('invalid');
+    expect(apiError.status).toBe(422);
+    expect(apiError.code).toBe('password_policy');
+    expect(apiError.violations).toEqual(['too_short', 'common_password']);
+    expect(apiError.detail).toContain('password policy');
+  });
+
+  it('maps statuses to error kinds and tolerates a non-JSON problem body', async () => {
+    const statuses: [number, string][] = [
+      [401, 'unauthorized'],
+      [403, 'forbidden'],
+      [404, 'not_found'],
+      [409, 'conflict'],
+      [500, 'server'],
+    ];
+    for (const [status, kind] of statuses) {
+      const fetchImpl = fetchMock(
+        new Response('nope', { status, headers: { 'Content-Type': 'text/plain' } }),
+      );
+      const client = createAccountApiClient({ fetchImpl });
+      const error = (await client
+        .getProfile()
+        .catch((caught: unknown) => caught)) as AccountApiError;
+      expect(error).toBeInstanceOf(AccountApiError);
+      expect(error.kind).toBe(kind);
+      expect(error.status).toBe(status);
+      expect(error.code).toBeUndefined();
+    }
+  });
+
+  it('never treats an HTML host fallback as a profile', async () => {
+    const fetchImpl = fetchMock(
+      new Response('<!doctype html><html></html>', {
+        status: 200,
+        headers: { 'Content-Type': 'text/html' },
+      }),
+    );
+    const client = createAccountApiClient({ fetchImpl });
+
+    await expect(client.getProfile()).rejects.toMatchObject({ kind: 'server', status: 200 });
+  });
+
+  it('reports network failures as a network error', async () => {
+    const fetchImpl = fetchMock(() => Promise.reject(new TypeError('offline')));
+    const client = createAccountApiClient({ fetchImpl });
+
+    await expect(client.getProfile()).rejects.toMatchObject({ kind: 'network', status: 0 });
+  });
+
+  it('re-throws an abort so unmounted components do not report an error', async () => {
+    const abort = new DOMException('aborted', 'AbortError');
+    const fetchImpl = fetchMock(() => Promise.reject(abort));
+    const client = createAccountApiClient({ fetchImpl });
+
+    await expect(client.getProfile()).rejects.toBe(abort);
+  });
+});
+
+describe('account MFA client', () => {
+  it('loads the MFA status without a token', async () => {
+    const status = { factors: [], totp: null, recoveryCodesRemaining: 0, available: true };
+    const fetchImpl = fetchMock(jsonResponse(status));
+    const client = createAccountApiClient({ baseUrl: 'https://auth.example/', fetchImpl });
+
+    await expect(client.getMfaStatus()).resolves.toEqual(status);
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://auth.example/api/v1/account/mfa',
+      expect.objectContaining({ method: 'GET', credentials: 'include' }),
+    );
+  });
+
+  it('posts enrollment, verification, disable and rotation as JSON', async () => {
+    const calls: RequestInit[] = [];
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push(init ?? {});
+      return jsonResponse({ ok: true, recoveryCodes: [], factorId: 'f1' });
+    }) as unknown as FetchMock;
+    const client = createAccountApiClient({ fetchImpl });
+
+    await client.enrollTotp({ password: 'secret-password' });
+    await client.verifyTotpEnrollment({ factorId: 'f1', code: '123456' });
+    await client.disableTotp({ password: 'secret-password' });
+    await client.regenerateRecoveryCodes({ password: 'secret-password' });
+
+    const paths = fetchImpl.mock.calls.map(([input]) => String(input));
+    expect(paths).toEqual([
+      '/api/v1/account/mfa/totp/enroll',
+      '/api/v1/account/mfa/totp/verify',
+      '/api/v1/account/mfa/totp/disable',
+      '/api/v1/account/mfa/recovery-codes',
+    ]);
+    for (const init of calls) {
+      expect(init.method).toBe('POST');
+      expect(init.credentials).toBe('include');
+      expect((init.headers as Record<string, string>)['Content-Type']).toBe('application/json');
+      expect((init.headers as Record<string, string>)['Authorization']).toBeUndefined();
+    }
+    expect(calls[1]?.body).toBe(JSON.stringify({ factorId: 'f1', code: '123456' }));
+    expect(calls[2]?.body).toBe(JSON.stringify({ password: 'secret-password' }));
+  });
+
+  it('maps MFA problem codes so the UI can translate them', async () => {
+    const fetchImpl = fetchMock(
+      jsonResponse(
+        {
+          type: 'https://on4net.dev/problems/invalid-mfa-code',
+          title: 'Invalid code',
+          status: 400,
+          code: 'invalid_mfa_code',
+        },
+        400,
+      ),
+    );
+    const client = createAccountApiClient({ fetchImpl });
+
+    await expect(
+      client.verifyTotpEnrollment({ factorId: 'f1', code: '000000' }),
+    ).rejects.toMatchObject({ kind: 'invalid', status: 400, code: 'invalid_mfa_code' });
+  });
+
+  it('reports an unavailable deployment as a server problem', async () => {
+    const fetchImpl = fetchMock(
+      jsonResponse({ title: 'MFA unavailable', status: 503, code: 'mfa_unavailable' }, 503),
+    );
+    const client = createAccountApiClient({ fetchImpl });
+
+    await expect(client.enrollTotp({ password: 'secret-password' })).rejects.toMatchObject({
+      status: 503,
+      code: 'mfa_unavailable',
+    });
+  });
+});

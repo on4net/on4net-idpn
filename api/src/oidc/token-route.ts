@@ -1,0 +1,554 @@
+import { randomUUID } from 'node:crypto';
+
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+
+import type { AuditEventInput } from '../audit/sanitize.js';
+import { registerFormBodyParser } from '../http/form-body.js';
+import type { IdpSession } from '../session/types.js';
+import type { ClientSecretService } from '../auth/client-secret.js';
+import {
+  exchangeAuthorizationCode,
+  type AuthorizationCodeRecord,
+  type AuthorizationCodeRepository,
+} from './authorization-code.js';
+import {
+  authenticateClient,
+  parseBasicAuthHeader,
+  type AuthenticatedClient,
+  type ClientAuthRepository,
+} from './client-auth.js';
+import type { SigningKeyManager } from './keys.js';
+import {
+  type LoginContextAccessDecision,
+  type LoginContextAccessSource,
+} from './login-context-access.js';
+import { oauthError, type OAuthError } from './oauth-error.js';
+import {
+  commitRefreshRotation,
+  issueRefreshToken,
+  validateRefreshToken,
+  type RefreshTokenRepository,
+} from './refresh-token.js';
+import {
+  accessClaimsFor,
+  buildAccessTokenClaims,
+  buildIdTokenClaims,
+  ID_TOKEN_TTL_SECONDS,
+  type TokenProfile,
+  type TokenResponse,
+  type UserProfileRepository,
+} from './token-claims.js';
+import type { EffectiveAccess, EffectiveAccessSource } from './effective-access.js';
+
+export interface TokenRouteOptions {
+  issuer: string;
+  clients: ClientAuthRepository;
+  /** Keyed client-secret verifier; defaults to the process environment configuration. */
+  clientSecrets?: ClientSecretService;
+  codes: AuthorizationCodeRepository;
+  refreshTokens: RefreshTokenRepository;
+  users: UserProfileRepository;
+  keys: SigningKeyManager;
+  /** Optional session lookup so revocation invalidates refresh grants immediately. */
+  sessions?: {
+    read(sid: string): Promise<IdpSession | null>;
+    /** Records the context a session now acts in after an audited context switch. */
+    rebindContext?(sid: string, loginContext: string): Promise<IdpSession | null>;
+  };
+  /**
+   * Eligibility for the `idp.client-admin` scope. The scope is never issued to a user who
+   * holds no `idp:client-*` permission for the app, even if an old code or refresh token
+   * still carries it.
+   */
+  isClientAdminEligible?: (userId: string, clientId: string) => Promise<boolean>;
+  /** Effective roles/permissions/membership claim source (docs/domain-model.md 3.2). */
+  access?: EffectiveAccessSource;
+  /**
+   * Login-context state check for context-bound codes and refresh tokens
+   * (docs/login-contexts.md 4.1, 6). When a code/token carries `login_context`, the token
+   * endpoint must verify that the context is still active and that the user's membership
+   * for it is still active; otherwise no token is issued. A missing source fails closed.
+   */
+  contextAccess?: LoginContextAccessSource;
+  /** Observability sink for outcomes that are not visible from the HTTP response. */
+  metrics?: TokenMetricsSink;
+  /** Audit sink; used for `token.refresh.reuse_detected` (docs/security.md 9.1). */
+  audit?: { record(event: AuditEventInput): Promise<void> };
+  now?: () => Date;
+}
+
+/** Minimal observability contract so this module does not depend on the metrics registry. */
+export interface TokenMetricsSink {
+  recordRefreshReuse(): void;
+}
+
+const CLIENT_ADMIN_SCOPE = 'idp.client-admin';
+
+interface TokenRequestBody {
+  grant_type?: string;
+  code?: string;
+  redirect_uri?: string;
+  code_verifier?: string;
+  client_id?: string;
+  client_secret?: string;
+  refresh_token?: string;
+  scope?: string;
+}
+
+const body = (request: FastifyRequest): TokenRequestBody =>
+  (request.body ?? {}) as TokenRequestBody;
+
+const noStore = (reply: FastifyReply): FastifyReply =>
+  reply.header('Cache-Control', 'no-store').header('Pragma', 'no-cache');
+
+const tokenError = (reply: FastifyReply, error: OAuthError, status = 400): FastifyReply =>
+  noStore(reply).code(status).send(error);
+
+const tokenSuccess = (reply: FastifyReply, payload: TokenResponse): FastifyReply =>
+  noStore(reply).send(payload);
+
+/**
+ * `POST /oauth2/token` — authorization_code, refresh_token and client_credentials grants
+ * (docs/api.md 2.2). Every failure is returned as a standard OAuth error body; internal
+ * reasons never reach the caller.
+ */
+export function registerTokenRoute(app: FastifyInstance, options: TokenRouteOptions): void {
+  const now = options.now ?? (() => new Date());
+  registerFormBodyParser(app);
+
+  app.post('/oauth2/token', async (request, reply) => {
+    const payload = body(request);
+    const basic = parseBasicAuthHeader(request.headers.authorization);
+    const clientId = basic?.clientId ?? payload.client_id;
+    const clientSecret = basic?.clientSecret ?? payload.client_secret;
+    const method =
+      basic !== null
+        ? 'client_secret_basic'
+        : payload.client_secret !== undefined
+          ? 'client_secret_post'
+          : 'none';
+
+    const auth = await authenticateClient(options.clients, {
+      ...(clientId === undefined ? {} : { clientId }),
+      ...(clientSecret === undefined ? {} : { clientSecret }),
+      method,
+      ...(options.clientSecrets === undefined ? {} : { clientSecrets: options.clientSecrets }),
+    });
+
+    if (!auth.ok) {
+      // RFC 6749 5.2: a failed client authentication is `invalid_client` with HTTP 401. The
+      // response is identical for unknown clients and wrong secrets (no enumeration).
+      if (basic !== null) {
+        reply.header('WWW-Authenticate', 'Basic realm="token"');
+      }
+      return tokenError(reply, oauthError('invalid_client', 'client authentication failed'), 401);
+    }
+
+    switch (payload.grant_type) {
+      case 'authorization_code':
+        return authorizationCodeGrant(reply, payload, auth.client, options, now());
+      case 'refresh_token':
+        return refreshTokenGrant(reply, payload, auth.client, options, now());
+      case 'client_credentials':
+        return clientCredentialsGrant(reply, payload, auth.client, options, now());
+      default:
+        return tokenError(reply, oauthError('unsupported_grant_type'));
+    }
+  });
+}
+
+async function authorizationCodeGrant(
+  reply: FastifyReply,
+  payload: TokenRequestBody,
+  client: AuthenticatedClient,
+  options: TokenRouteOptions,
+  at: Date,
+): Promise<FastifyReply> {
+  if (payload.code === undefined || payload.redirect_uri === undefined) {
+    return tokenError(reply, oauthError('invalid_request', 'code and redirect_uri are required'));
+  }
+
+  const exchange = await exchangeAuthorizationCode(options.codes, {
+    code: payload.code,
+    clientId: client.clientId,
+    redirectUri: payload.redirect_uri,
+    ...(payload.code_verifier === undefined ? {} : { codeVerifier: payload.code_verifier }),
+    now: at,
+  });
+
+  if (!exchange.ok) {
+    return tokenError(reply, oauthError('invalid_grant', 'authorization code is not valid'));
+  }
+
+  const profile = await options.users.findProfile(exchange.record.userId);
+  if (profile === null) {
+    return tokenError(reply, oauthError('invalid_grant', 'unknown subject'));
+  }
+
+  // The code is consumed above, so a context that was disabled or a membership that was
+  // suspended between `/authorize` and this call burns the code instead of yielding a token.
+  if (exchange.record.loginContext !== undefined) {
+    const decision = await resolveContextAccess(
+      options,
+      profile.id,
+      client.clientId,
+      exchange.record.loginContext,
+    );
+    if (!decision.ok) {
+      // RFC 6749 5.2 documents `invalid_grant` for a grant that is no longer usable; the
+      // refresh path already uses it for the same failure (card #62 finding 4).
+      return tokenError(reply, oauthError('invalid_grant', 'login context is not available'));
+    }
+  }
+
+  if (
+    exchange.record.scope.includes(CLIENT_ADMIN_SCOPE) &&
+    options.isClientAdminEligible !== undefined &&
+    !(await options.isClientAdminEligible(profile.id, client.clientId))
+  ) {
+    return tokenError(
+      reply,
+      oauthError('access_denied', 'client administration permission is required'),
+    );
+  }
+
+  const issuedAt = Math.floor(at.getTime() / 1000);
+  const access = await resolveAccess(
+    options,
+    profile.id,
+    client.clientId,
+    exchange.record.loginContext,
+  );
+  const accessToken = await signAccessToken(
+    options,
+    client,
+    profile,
+    exchange.record,
+    issuedAt,
+    at,
+    access,
+  );
+  const idToken = await signIdToken(options, client, profile, exchange.record, issuedAt);
+
+  const response: TokenResponse = {
+    access_token: accessToken,
+    token_type: 'Bearer',
+    expires_in: client.accessTokenTtl,
+    id_token: idToken,
+    scope: exchange.record.scope.join(' '),
+  };
+
+  if (exchange.record.scope.includes('offline_access')) {
+    const refresh = await issueRefreshToken(options.refreshTokens, {
+      clientId: client.clientId,
+      userId: profile.id,
+      sessionId: exchange.record.sessionId,
+      scope: exchange.record.scope,
+      ttlSeconds: client.refreshTokenTtl,
+      ...(exchange.record.loginContext === undefined
+        ? {}
+        : { loginContext: exchange.record.loginContext }),
+      now: at,
+    });
+    response.refresh_token = refresh.token;
+  }
+
+  return tokenSuccess(reply, response);
+}
+
+async function refreshTokenGrant(
+  reply: FastifyReply,
+  payload: TokenRequestBody,
+  client: AuthenticatedClient,
+  options: TokenRouteOptions,
+  at: Date,
+): Promise<FastifyReply> {
+  if (payload.refresh_token === undefined || payload.refresh_token === '') {
+    return tokenError(reply, oauthError('invalid_request', 'refresh_token is required'));
+  }
+
+  const validation = await validateRefreshToken(options.refreshTokens, {
+    token: payload.refresh_token,
+    clientId: client.clientId,
+    now: at,
+  });
+
+  if (!validation.ok) {
+    // Reuse revokes the whole family inside validateRefreshToken; the client only sees
+    // invalid_grant.
+    if (validation.reason === 'reuse_detected') {
+      await recordReuse(client, options, validation.revokedFamily);
+    }
+    return tokenError(reply, oauthError('invalid_grant', 'refresh token is not valid'));
+  }
+
+  const issued = validation.record;
+
+  const profile = await options.users.findProfile(issued.userId);
+  if (profile === null) {
+    return tokenError(reply, oauthError('invalid_grant', 'unknown subject'));
+  }
+
+  // A refresh token stays bound to the context it was issued for: the request cannot ask
+  // for another one, and the context/membership is re-evaluated on every rotation
+  // (docs/domain-model.md 2.6.2). A revoked context burns the family.
+  if (issued.loginContext !== undefined) {
+    const decision = await resolveContextAccess(
+      options,
+      profile.id,
+      client.clientId,
+      issued.loginContext,
+    );
+    if (!decision.ok) {
+      await options.refreshTokens.revokeFamily(issued.familyId, at);
+      return tokenError(reply, oauthError('invalid_grant', 'refresh token is not valid'));
+    }
+  }
+
+  if (
+    issued.scope.includes(CLIENT_ADMIN_SCOPE) &&
+    options.isClientAdminEligible !== undefined &&
+    !(await options.isClientAdminEligible(profile.id, client.clientId))
+  ) {
+    return tokenError(
+      reply,
+      oauthError('access_denied', 'client administration permission is required'),
+    );
+  }
+
+  const session =
+    options.sessions === undefined ? null : await options.sessions.read(issued.sessionId);
+  if (options.sessions !== undefined && session === null) {
+    return tokenError(reply, oauthError('invalid_grant', 'session is no longer valid'));
+  }
+
+  // Every check above passed, so only now is the token material built and the successor
+  // written (in that order): a rejected request writes nothing, and a signing failure cannot
+  // spend a refresh token the client never gets a successor for (card #70 finding 3).
+  const issuedAt = Math.floor(at.getTime() / 1000);
+  const access = await resolveAccess(
+    options,
+    profile.id,
+    client.clientId,
+    issued.loginContext,
+  );
+  const accessToken = await options.keys.signAccessToken(
+    {
+      iss: options.issuer,
+      sub: profile.id,
+      aud: client.clientId,
+      client_id: client.clientId,
+      // Same marker as `buildAccessTokenClaims`: `/oauth2/userinfo` rejects ID tokens.
+      token_use: 'access',
+      iat: issuedAt,
+      exp: issuedAt + client.accessTokenTtl,
+      auth_time: Math.floor(new Date(session?.authTime ?? at.toISOString()).getTime() / 1000),
+      acr: session?.acr ?? 'urn:on4net:acr:pwd',
+      amr: session?.amr ?? ['pwd'],
+      sid: issued.sessionId,
+      jti: randomUUID(),
+      scope: issued.scope.join(' '),
+      tenant_id: profile.tenantId,
+      ...(issued.loginContext === undefined
+        ? {}
+        : { login_context: issued.loginContext }),
+      ...accessClaimsFor(access),
+    },
+    {
+      issuer: options.issuer,
+      audience: client.clientId,
+      subject: profile.id,
+      expiresInSeconds: client.accessTokenTtl,
+    },
+  );
+
+  // Rotation writes the successor (same family, same context) and links it from the presented
+  // token; issuing another one here would orphan that row.
+  const rotation = await commitRefreshRotation(options.refreshTokens, {
+    record: issued,
+    ttlSeconds: client.refreshTokenTtl,
+    now: at,
+  });
+  if (!rotation.ok) {
+    await recordReuse(client, options, rotation.revokedFamily);
+    return tokenError(reply, oauthError('invalid_grant', 'refresh token is not valid'));
+  }
+
+  return tokenSuccess(reply, {
+    access_token: accessToken,
+    token_type: 'Bearer',
+    expires_in: client.accessTokenTtl,
+    refresh_token: rotation.successor.token,
+    scope: issued.scope.join(' '),
+  });
+}
+
+/**
+ * Records a refresh-token replay. The presenter is unauthenticated, so only the client and the
+ * fact are stored — never the token. Neither the metric nor the audit write may change the
+ * OAuth response.
+ */
+async function recordReuse(
+  client: AuthenticatedClient,
+  options: TokenRouteOptions,
+  revokedFamily: number | undefined,
+): Promise<void> {
+  options.metrics?.recordRefreshReuse();
+  if (options.audit === undefined) {
+    return;
+  }
+  try {
+    await options.audit.record({
+      actorType: 'anonymous',
+      action: 'token.refresh.reuse_detected',
+      targetType: 'refresh_token',
+      targetId: null,
+      clientId: client.clientId,
+      result: 'failure',
+      metadata: { reason: 'reuse_detected', revokedFamily },
+    });
+  } catch {
+    // Never turn an audit write failure into a different OAuth error.
+  }
+}
+
+async function clientCredentialsGrant(
+  reply: FastifyReply,
+  payload: TokenRequestBody,
+  client: AuthenticatedClient,
+  options: TokenRouteOptions,
+  at: Date,
+): Promise<FastifyReply> {
+  // A machine token must never be mintable with a published public `client_id`: only a
+  // confidential machine client (with a stored secret) may use this grant (card #70 finding 10).
+  if (client.type !== 'm2m') {
+    return tokenError(reply, oauthError('unauthorized_client', 'grant not allowed for this client'));
+  }
+
+  const requested = (payload.scope ?? '').split(/\s+/).filter((scope) => scope !== '');
+  if (requested.length === 0) {
+    return tokenError(reply, oauthError('invalid_scope'));
+  }
+  const invalid = requested.find(
+    (scope) => !client.scopes.includes(scope) || scope === 'openid' || scope === 'offline_access',
+  );
+  if (invalid !== undefined) {
+    return tokenError(reply, oauthError('invalid_scope', `scope "${invalid}" is not allowed`));
+  }
+
+  const issuedAt = Math.floor(at.getTime() / 1000);
+  const accessToken = await options.keys.signAccessToken(
+    {
+      iss: options.issuer,
+      sub: client.clientId,
+      aud: client.clientId,
+      client_id: client.clientId,
+      token_use: 'access',
+      iat: issuedAt,
+      exp: issuedAt + client.accessTokenTtl,
+      jti: randomUUID(),
+      scope: requested.join(' '),
+    },
+    {
+      issuer: options.issuer,
+      audience: client.clientId,
+      subject: client.clientId,
+      expiresInSeconds: client.accessTokenTtl,
+    },
+  );
+
+  return tokenSuccess(reply, {
+    access_token: accessToken,
+    token_type: 'Bearer',
+    expires_in: client.accessTokenTtl,
+    scope: requested.join(' '),
+  });
+}
+
+/**
+ * Fails closed when a context-bound token is presented but no context source is wired: an
+ * operator misconfiguration must never turn a narrowed grant into an unnarrowed one.
+ */
+async function resolveContextAccess(
+  options: TokenRouteOptions,
+  userId: string,
+  clientId: string,
+  loginContext: string,
+): Promise<LoginContextAccessDecision> {
+  if (options.contextAccess === undefined) {
+    return { ok: false, reason: 'context_not_found' };
+  }
+  return options.contextAccess.resolve({ userId, clientId, loginContext });
+}
+
+async function resolveAccess(
+  options: TokenRouteOptions,
+  userId: string,
+  clientId: string,
+  loginContext?: string,
+): Promise<EffectiveAccess | undefined> {
+  if (options.access === undefined) {
+    return undefined;
+  }
+  return options.access.resolve({
+    userId,
+    clientId,
+    ...(loginContext === undefined ? {} : { loginContext }),
+  });
+}
+
+function signAccessToken(
+  options: TokenRouteOptions,
+  client: AuthenticatedClient,
+  profile: TokenProfile,
+  code: AuthorizationCodeRecord,
+  issuedAt: number,
+  at: Date,
+  access?: EffectiveAccess,
+): Promise<string> {
+  void at;
+  return options.keys.signAccessToken(
+    buildAccessTokenClaims({
+      issuer: options.issuer,
+      clientId: client.clientId,
+      profile,
+      code,
+      expiresInSeconds: client.accessTokenTtl,
+      issuedAt,
+      jti: randomUUID(),
+      ...(access === undefined ? {} : { access }),
+    }),
+    {
+      issuer: options.issuer,
+      audience: client.clientId,
+      subject: profile.id,
+      expiresInSeconds: client.accessTokenTtl,
+    },
+  );
+}
+
+function signIdToken(
+  options: TokenRouteOptions,
+  client: AuthenticatedClient,
+  profile: TokenProfile,
+  code: AuthorizationCodeRecord,
+  issuedAt: number,
+): Promise<string> {
+  return options.keys.signAccessToken(
+    buildIdTokenClaims({
+      issuer: options.issuer,
+      clientId: client.clientId,
+      profile,
+      code,
+      expiresInSeconds: ID_TOKEN_TTL_SECONDS,
+      issuedAt,
+      jti: randomUUID(),
+    }),
+    {
+      issuer: options.issuer,
+      audience: client.clientId,
+      subject: profile.id,
+      expiresInSeconds: ID_TOKEN_TTL_SECONDS,
+    },
+  );
+}

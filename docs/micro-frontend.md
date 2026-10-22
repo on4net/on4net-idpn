@@ -115,8 +115,14 @@ export interface IdpnMfeConfig {
   mode: 'bff' | 'spa';
   apiBaseUrl: string;          // در BFF: مسیر /auth خود اپ
   loginUrl?: string;           // آدرس Hosted Auth برای Redirect
-  locale?: 'fa' | 'en';
-  theme?: IdpnThemeTokens;     // CSS Variables
+  locale?: 'fa-IR' | 'en-US' | string;
+  locales?: {
+    default: string;
+    supported: string[];
+    dir: Record<string, 'rtl' | 'ltr'>;
+  };
+  loginContext?: string;       // مدل ورود فعال همان اپ
+  theme?: IdpnThemeTokens;     // ۱۲ کلید رنگ + radius + fontFamily + dark (docs/design-system.md 4)
   module: 'account' | 'user-management';
   basename?: string;
   features?: {
@@ -132,6 +138,8 @@ export interface IdpnMfeConfig {
 
 - `clientId` فقط از تنظیمات میزبان می‌آید و قابل تغییر در Runtime توسط کاربر نیست.
 - ماژول `login` به‌صورت Embedded وجود ندارد؛ ورود همیشه با Redirect به `loginUrl` انجام می‌شود.
+- `loginContext` از مسیر اپ (مثلاً `/admin`) تعیین می‌شود، نه از ورودی خام کاربر.
+- `locale` و `locales` باید با Public Config همان کلاینت هم‌خوان باشند؛ مقدار نامعتبر به پیش‌فرض سقوط می‌کند.
 - `mode=spa` فقط برای اپ‌های کاملاً مورد اعتماد و ترجیحاً Monorepo.
 - MFE نباید Secret یا Client Secret دریافت کند.
 - تنظیمات عمومی از `GET /api/v1/clients/{clientId}/public-config` خوانده می‌شود.
@@ -140,10 +148,12 @@ export interface IdpnMfeConfig {
 
 ```ts
 export type IdpnEvent =
-  | { type: 'auth:login'; user: PublicUser }
+  | { type: 'auth:login'; user: PublicUser; loginContext: string }
   | { type: 'auth:logout'; reason: 'local' | 'global' | 'expired' }
   | { type: 'auth:error'; code: string }
   | { type: 'profile:updated'; user: PublicUser }
+  | { type: 'locale:changed'; locale: string; dir: 'rtl' | 'ltr' }
+  | { type: 'context:changed'; loginContext: string }
   | { type: 'navigation:request'; to: string };
 ```
 
@@ -162,13 +172,18 @@ export type IdpnEvent =
 | State | State داخلی MFE؛ هیچ Global Store میزبان خوانده/نوشته نمی‌شود |
 | React Version | Singleton در Module Federation؛ نسخه React 19 در Host و Remote یکسان |
 | Global Error | Error Boundary داخلی؛ خطا به رویداد `auth:error` تبدیل می‌شود |
-| Font/Icon | از Design Token و فونت خود MFE (Vazirmatn)؛ وابستگی به فونت میزبان ممنوع |
-| RTL/LTR | `DirectionProvider` رادیکس + `dir` داخل ریشه MFE؛ Audit کامل در [design-system.md](./design-system.md) |
+| Font/Icon | از Design Token و فونت خود MFE (Vazirmatn برای `fa-IR`)؛ وابستگی به فونت میزبان ممنوع |
+| RTL/LTR | `DirectionProvider` رادیکس + `dir` داخل ریشه MFE بر اساس Locale همان اپ؛ Audit کامل در [design-system.md](./design-system.md) |
+| Locale | Locale از Config میزبان/Public Config؛ MFE زبان Host را نمی‌خواند و تغییر نمی‌دهد |
+| Login Context | `loginContext` فقط برای نمایش و درخواست‌های مجاز؛ مرز دسترسی در سرور اعمال می‌شود |
 
 ## 8. مدیریت کاربری هر اپلیکیشن
 
 - `user-management` همیشه با `clientId` رندر می‌شود.
-- API مورد استفاده: `/api/v1/clients/{clientId}/members`.
+- اگر اپ چند Login Context دارد، ماژول با `loginContext` فعال رندر می‌شود و فقط اعضای همان Context را نشان می‌دهد.
+- API مورد استفاده: `/api/v1/clients/{clientId}/login-contexts/{key}/members`.
+  تا زمانی که Admin API مربوط به Context تکمیل نشده، پیاده‌سازی فعلی از
+  `/api/v1/clients/{clientId}/members` (عضویت پیش‌فرض همان اپ) استفاده می‌کند.
 - BFF اپ برای این مسیرها Scope `idp.client-admin` را در جریان OIDC درخواست می‌کند؛ این Scope فقط برای ادمین همان اپ صادر می‌شود.
 - ادمین اپ فقط اعضای همان اپ را می‌بیند و می‌تواند:
   - دعوت کاربر
@@ -176,8 +191,44 @@ export type IdpnEvent =
   - تخصیص نقش‌های همان اپ
   - مشاهده نشست‌های همان اپ (اختیاری)
 - ادمین اپ **نمی‌تواند** نقش سراسری، کلاینت دیگر، Secret یا کلید را تغییر دهد.
+- ادمین Context فقط اعضای همان Context را می‌بیند و `allowed_roles` را تغییر نمی‌دهد.
 - داده‌های اختصاصی اپ در `ClientMembership.attributes` نگهداری می‌شود و در توکن همان اپ قرار می‌گیرد.
 - کاربر می‌تواند در چند اپ عضو باشد؛ هویت و رمز عبور یکی است.
+
+**رابط ماژول (پیاده‌سازی فعلی):**
+
+```tsx
+<UserManagement
+  clientId="app-a"          // الزامی؛ از Config میزبان، هرگز ورودی کاربر
+  apiBaseUrl="/auth"        // BFF همان اپ؛ پیش‌فرض same-origin
+  getAccessToken={() => token} // فقط حالت SPA؛ توکن فقط در حافظه
+  locale="fa-IR"
+  dir="rtl"
+  pageSize={10}
+  onEvent={(event) => {}}   // فقط auth:error با code؛ بدون توکن
+/>
+```
+
+```html
+<on4net-idpn-user-management
+  client-id="app-a"
+  api-base="/auth"
+  locale="fa-IR"
+  dir="rtl"
+  page-size="10"
+></on4net-idpn-user-management>
+```
+
+- در حالت پیش‌فرض (BFF) هیچ توکنی در مرورگر نگه‌داری نمی‌شود؛ کوکی نشست BFF
+  درخواست‌های `/api/v1/clients/{clientId}/…` را احراز می‌کند.
+- در حالت SPA، توکن از طریق getter در حافظه خوانده می‌شود و در `Authorization` قرار می‌گیرد؛
+  هیچ‌جا persist نمی‌شود و در رویدادها نیز قرار نمی‌گیرد.
+- ماژول فقط `GET/POST/PATCH/PUT` روی مسیرهای همان `clientId` صدا می‌زند و
+  `clientId` مسیر از Config می‌آید، نه از State یا Query کاربر.
+- حالت‌های Loading/Error/Empty و صفحه‌بندی پیاده‌سازی شده‌اند؛ تغییر نقش نیازمند
+  Step-up سروری است و در صورت `403` پیام خطا در همان دیالوگ نمایش داده می‌شود.
+- `loginContext` پس از تکمیل Admin API آن (کارت #61) به همین رابط اضافه می‌شود؛
+  در نسخه فعلی، عضویت پیش‌فرض اپ نمایش داده می‌شود.
 
 ```mermaid
 flowchart TB
@@ -230,6 +281,9 @@ https://auth.example.com/oauth2/social/{clientId}/{provider}/callback
 ## 12. امنیت MFE
 
 - Remote فقط از Origin مورد اعتماد بارگذاری می‌شود (CSP `script-src` و `connect-src`).
+- `IDPN_REMOTE_ENTRY` قبل از ساخت Config اعتبارسنجی می‌شود: یا مسیر same-origin با یک `/` ابتدایی، یا URL با `https` که Origin آن در `IDPN_REMOTE_ORIGINS` Allowlist شده باشد؛ در غیر این صورت Build/Dev Server با خطای صریح متوقف می‌شود. فقط همان Origin در CSP مجاز می‌شود.
+- مسیرهای `/api` و `/auth` از میزبان پراکسی می‌شوند (`IDPN_IDP_ORIGIN`)، بنابراین کوکی BFF first-party می‌ماند و فراخوانی‌های `/auth/*` بومی ۴۰۴ نمی‌شوند.
+- مقادیر `api-base` و `loginUrl` با یک قاعده مشترک (`isSafeTarget`) بررسی می‌شوند: `//host`، `/\host` و `\\host` (که مرورگر مانند `//` تفسیر می‌کند) رد می‌شوند.
 - فرم رمز یا دکمه سوشال داخل دامنه اپ ساخته نمی‌شود؛ ورود فقط با Redirect سطح‌بالا به Hosted Auth UI انجام می‌شود.
 - هیچ توکنی در `localStorage` یا رویدادهای MFE قرار نمی‌گیرد.
 - در حالت BFF، MFE فقط با Cookie نشست اپ و Endpointهای `/auth/*` کار می‌کند.
@@ -274,5 +328,7 @@ https://auth.example.com/oauth2/social/{clientId}/{provider}/callback
 - [ ] CSS و Preflight به Host نشت نمی‌کند.
 - [ ] Radix Portalها داخل ریشه MFE رندر می‌شوند.
 - [ ] RTL فارسی با `DirectionProvider` تست شده است.
+- [ ] زبان و متن‌های اپ از Public Config/Override همان کلاینت خوانده می‌شود.
+- [ ] `loginContext` از مسیر اپ تعیین می‌شود و با توکن هم‌خوان است.
 - [ ] axe بدون خطای Critical/Serious است.
 - [ ] تست Visual برای Light/Dark و RTL/LTR وجود دارد.

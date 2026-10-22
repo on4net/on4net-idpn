@@ -1,0 +1,631 @@
+// on4net IDPN — initial data model (docs/domain-model.md).
+// Regenerate the client with `pnpm --filter @idpn/api db:generate`.
+// Create migrations with `pnpm --filter @idpn/api db:migrate -- --name <name>`.
+
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "esm"
+  importFileExtension = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum TenantStatus {
+  active
+  suspended
+}
+
+enum UserStatus {
+  active
+  locked
+  disabled
+  pending
+}
+
+enum IdentityProvider {
+  password
+  google
+  facebook
+  microsoft
+  github
+  otp
+}
+
+enum SocialProvider {
+  google
+  facebook
+}
+
+enum ClientType {
+  web
+  spa
+  mobile
+  m2m
+}
+
+enum ClientStatus {
+  active
+  disabled
+}
+
+enum RegistrationPolicy {
+  invite_only
+  self_service
+  disabled
+}
+
+enum MfaPolicy {
+  optional
+  required_admins
+  required_all
+}
+
+/// MFA methods (docs/domain-model.md 2.4). TOTP is implemented in phase 4; WebAuthn follows.
+enum MfaFactorType {
+  totp
+  webauthn
+}
+
+enum LoginContextStatus {
+  active
+  disabled
+}
+
+/// Single-use, hashed account lifecycle tokens (invite, email verification, reset).
+enum AccountTokenPurpose {
+  invite
+  email_verification
+  password_reset
+}
+
+enum MembershipStatus {
+  invited
+  active
+  suspended
+}
+
+enum AssignmentSubjectType {
+  user
+  group
+  service
+}
+
+enum AssignmentScopeType {
+  global
+  organization
+}
+
+enum AuditActorType {
+  user
+  admin
+  service
+  system
+  anonymous
+}
+
+enum AuditResult {
+  success
+  failure
+}
+
+enum SigningKeyAlg {
+  ES256
+}
+
+enum SigningKeyStatus {
+  active
+  retired
+  revoked
+}
+
+model Tenant {
+  id        String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  slug      String       @unique @db.VarChar(64)
+  name      String
+  status    TenantStatus @default(active)
+  createdAt DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  users   User[]
+  clients Client[]
+
+  @@map("tenants")
+}
+
+model User {
+  id                 String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId           String     @map("tenant_id") @db.Uuid
+  username           String     @db.VarChar(64)
+  email              String     @db.VarChar(320)
+  emailVerifiedAt    DateTime?  @map("email_verified_at") @db.Timestamptz(6)
+  phone              String?    @db.VarChar(32)
+  phoneVerifiedAt    DateTime?  @map("phone_verified_at") @db.Timestamptz(6)
+  displayName        String     @map("display_name")
+  avatarUrl          String?    @map("avatar_url")
+  locale             String     @default("fa-IR") @db.VarChar(16)
+  status             UserStatus @default(pending)
+  passwordHash       String?    @map("password_hash")
+  passwordChangedAt  DateTime?  @map("password_changed_at") @db.Timestamptz(6)
+  mustChangePassword Boolean    @default(false) @map("must_change_password")
+  failedLoginCount   Int        @default(0) @map("failed_login_count")
+  lockedUntil        DateTime?  @map("locked_until") @db.Timestamptz(6)
+  lastLoginAt        DateTime?  @map("last_login_at") @db.Timestamptz(6)
+  createdAt          DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt          DateTime?  @map("deleted_at") @db.Timestamptz(6)
+
+  tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  identities         Identity[]
+  sessions           Session[]
+  consents           Consent[]
+  refreshTokens      RefreshToken[]
+  authorizationCodes AuthorizationCode[]
+  memberships        ClientMembership[]  @relation("MembershipUser")
+  invitations        ClientMembership[]  @relation("MembershipInviter")
+  mfaFactors         MfaFactor[]
+  accountTokens      AccountToken[]
+
+  @@unique([tenantId, username])
+  @@unique([tenantId, email])
+  // The login lookup has no tenant filter, so these standalone indexes serve it
+  // (migration 0016); the tenant-prefixed uniques cannot.
+  @@index([email])
+  @@index([username])
+  @@unique([tenantId, phone])
+  @@index([tenantId, status])
+  @@map("users")
+}
+
+model Identity {
+  id             String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId         String           @map("user_id") @db.Uuid
+  provider       IdentityProvider
+  providerUserId String           @map("provider_user_id")
+  metadata       Json             @default("{}") @db.JsonB
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([provider, providerUserId])
+  @@unique([userId, provider])
+  @@map("identities")
+}
+
+model Client {
+  id                     String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  clientId               String             @unique @map("client_id") @db.VarChar(64)
+  name                   String
+  type                   ClientType
+  redirectUris           String[]           @map("redirect_uris")
+  postLogoutRedirectUris String[]           @map("post_logout_redirect_uris")
+  allowedOrigins         String[]           @map("allowed_origins")
+  scopes                 String[]
+  accessTokenTtl         Int                @default(600) @map("access_token_ttl")
+  refreshTokenTtl        Int                @default(2592000) @map("refresh_token_ttl")
+  requirePkce            Boolean            @default(true) @map("require_pkce")
+  backchannelLogoutUri   String?            @map("backchannel_logout_uri")
+  frontchannelLogoutUri  String?            @map("frontchannel_logout_uri")
+  registrationPolicy     RegistrationPolicy @default(invite_only) @map("registration_policy")
+  mfaPolicy              MfaPolicy          @default(optional) @map("mfa_policy")
+  allowedEmailDomains    String[]           @map("allowed_email_domains")
+  locales                Json               @default("{}") @db.JsonB
+  branding               Json               @default("{}") @db.JsonB
+  mfeFeatures            Json               @default("{}") @map("mfe_features") @db.JsonB
+  membershipSchema       Json?              @map("membership_schema") @db.JsonB
+  defaultLoginContextKey String?            @map("default_login_context_key") @db.VarChar(64)
+  status                 ClientStatus       @default(active)
+  tenantId               String             @map("tenant_id") @db.Uuid
+  createdAt              DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  tenant             Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  secrets            ClientSecret[]
+  socialProviders    ClientSocialProvider[]
+  loginContexts      ClientLoginContext[]
+  memberships        ClientMembership[]
+  permissions        Permission[]
+  roles              Role[]
+  sessions           Session[]
+  authorizationCodes AuthorizationCode[]
+  refreshTokens      RefreshToken[]
+  consents           Consent[]
+  auditEvents        AuditEvent[]
+  translations       ClientTranslation[]
+
+  @@index([tenantId, status])
+  @@map("clients")
+}
+
+model MfaFactor {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId          String        @map("user_id") @db.Uuid
+  type            MfaFactorType
+  name            String        @default("authenticator") @db.VarChar(64)
+  /// AES-256-GCM envelope (`crypto/secret-box.ts`); only set for TOTP and never returned.
+  secretEncrypted Bytes?        @map("secret_encrypted")
+  credentialId    Bytes?        @map("credential_id")
+  publicKey       Bytes?        @map("public_key")
+  signCount       BigInt        @default(0) @map("sign_count")
+  /// Authenticator transports reported at registration (`usb`, `nfc`, `ble`, `internal`, `hybrid`).
+  transports      String[]      @default([])
+  /// Authenticator attestation GUID; `null` for authenticators that report the zero AAGUID.
+  aaguid          String?       @db.Uuid
+  /// `singleDevice` or `multiDevice`; passkeys are multi-device and usually backed up.
+  deviceType      String?       @map("device_type") @db.VarChar(16)
+  backedUp        Boolean       @default(false) @map("backed_up")
+  confirmedAt     DateTime?     @map("confirmed_at") @db.Timestamptz(6)
+  lastUsedAt      DateTime?     @map("last_used_at") @db.Timestamptz(6)
+  /// Last accepted TOTP step; a code from this step or earlier is replayed and rejected.
+  lastUsedStep    BigInt?       @map("last_used_step")
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user          User              @relation(fields: [userId], references: [id], onDelete: Restrict)
+  recoveryCodes MfaRecoveryCode[]
+
+  @@index([userId, type])
+  // A user has at most one TOTP factor; the partial unique index lives in the migration because
+  // Prisma cannot express `WHERE type = 'totp'`.
+  // The method/material invariants (`totp` ⇒ secret, `webauthn` ⇒ credential + key) are CHECK
+  // constraints in `0015_mfa_factor_method_invariants`, which Prisma cannot express either.
+  @@map("mfa_factors")
+}
+
+/// One-time recovery codes: only the Argon2id hash is stored (docs/auth-flows.md 7.5).
+model MfaRecoveryCode {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  factorId  String    @map("factor_id") @db.Uuid
+  codeHash  String    @map("code_hash")
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  usedAt    DateTime? @map("used_at") @db.Timestamptz(6)
+
+  factor MfaFactor @relation(fields: [factorId], references: [id], onDelete: Cascade)
+
+  @@index([factorId, usedAt])
+  @@map("mfa_recovery_codes")
+}
+
+/// Only the SHA-256 hash of an account token is stored; the token itself is emailed once.
+model AccountToken {
+  id         String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String              @map("user_id") @db.Uuid
+  purpose    AccountTokenPurpose
+  tokenHash  String              @unique @map("token_hash") @db.VarChar(128)
+  expiresAt  DateTime            @map("expires_at") @db.Timestamptz(6)
+  consumedAt DateTime?           @map("consumed_at") @db.Timestamptz(6)
+  createdAt  DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  // Cascade: lifecycle tokens are derived from the user and must never block a hard delete
+  // (docs/domain-model.md 4). Retention is enforced by the scheduled purge.
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose, consumedAt])
+  @@index([expiresAt])
+  @@map("account_tokens")
+}
+
+model ClientSecret {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  clientId   String    @map("client_id") @db.Uuid
+  secretHash String    @map("secret_hash")
+  prefix     String    @db.VarChar(16)
+  expiresAt  DateTime? @map("expires_at") @db.Timestamptz(6)
+  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Restrict)
+
+  @@index([clientId, revokedAt])
+  @@map("client_secrets")
+}
+
+model ClientSocialProvider {
+  id                    String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  clientId              String         @map("client_id") @db.Uuid
+  provider              SocialProvider
+  clientKey             String         @map("client_key")
+  clientSecretEncrypted Bytes          @map("client_secret_encrypted") @db.ByteA
+  scopes                String[]
+  allowedEmailDomains   String[]       @map("allowed_email_domains")
+  enabled               Boolean        @default(true)
+  createdAt             DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Restrict)
+
+  @@unique([clientId, provider])
+  @@map("client_social_providers")
+}
+
+model ClientLoginContext {
+  id                  String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  clientId            String             @map("client_id") @db.Uuid
+  key                 String             @db.VarChar(64)
+  name                String
+  description         String?
+  status              LoginContextStatus @default(active)
+  isDefault           Boolean            @default(false) @map("is_default")
+  allowedRoles        String[]           @map("allowed_roles")
+  defaultRoles        String[]           @map("default_roles")
+  loginMethods        String[]           @map("login_methods")
+  mfaPolicy           MfaPolicy          @default(optional) @map("mfa_policy")
+  registrationPolicy  RegistrationPolicy @default(invite_only) @map("registration_policy")
+  allowedEmailDomains String[]           @map("allowed_email_domains")
+  sessionIdleTtl      Int                @map("session_idle_ttl")
+  sessionAbsoluteTtl  Int                @map("session_absolute_ttl")
+  stepUpRequired      Boolean            @default(false) @map("step_up_required")
+  branding            Json?              @db.JsonB
+  sortOrder           Int                @default(0) @map("sort_order")
+  createdAt           DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  client      Client             @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  memberships ClientMembership[]
+
+  @@unique([clientId, key])
+  @@index([clientId, status])
+  @@map("client_login_contexts")
+}
+
+/// Per-client, per-locale message override (docs/domain-model.md 2.6.4,
+/// docs/localization.md 4 and 7). Only keys that exist in the shared base bundle are
+/// accepted; an empty value deletes the row so the bundle falls back to the base text.
+model ClientTranslation {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  clientId  String   @map("client_id") @db.Uuid
+  locale    String   @db.VarChar(35)
+  key       String   @db.VarChar(160)
+  value     String   @db.VarChar(500)
+  updatedBy String?  @map("updated_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  client Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, locale, key])
+  @@index([clientId, locale])
+  @@map("client_translations")
+}
+
+model ClientMembership {
+  id             String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  clientId       String           @map("client_id") @db.Uuid
+  loginContextId String?          @map("login_context_id") @db.Uuid
+  userId         String           @map("user_id") @db.Uuid
+  status         MembershipStatus @default(invited)
+  attributes     Json             @default("{}") @db.JsonB
+  invitedBy      String?          @map("invited_by") @db.Uuid
+  invitedAt      DateTime?        @map("invited_at") @db.Timestamptz(6)
+  joinedAt       DateTime?        @map("joined_at") @db.Timestamptz(6)
+  lastAccessAt   DateTime?        @map("last_access_at") @db.Timestamptz(6)
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  client       Client              @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  loginContext ClientLoginContext? @relation(fields: [loginContextId], references: [id], onDelete: Restrict)
+  user         User                @relation("MembershipUser", fields: [userId], references: [id], onDelete: Restrict)
+  inviter      User?               @relation("MembershipInviter", fields: [invitedBy], references: [id], onDelete: SetNull)
+  /// Role grants this membership is the source of (docs/domain-model.md 2.11).
+  assignments  Assignment[]
+
+  // The migration creates this constraint with NULLS NOT DISTINCT so that a single
+  // default-context membership (login_context_id IS NULL) is enforced per client and user.
+  @@unique([clientId, loginContextId, userId])
+  @@index([userId, status])
+  @@index([clientId, status])
+  @@index([loginContextId])
+  @@index([invitedBy])
+  @@map("client_memberships")
+}
+
+model Permission {
+  id          String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  key         String  @unique
+  clientId    String? @map("client_id") @db.Uuid
+  description String
+
+  client          Client?          @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  rolePermissions RolePermission[]
+
+  @@index([clientId])
+  @@map("permissions")
+}
+
+model Role {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  key         String   @unique
+  name        String
+  clientId    String?  @map("client_id") @db.Uuid
+  isDefault   Boolean  @default(false) @map("is_default")
+  description String
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  client          Client?          @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  rolePermissions RolePermission[]
+  assignments     Assignment[]
+
+  @@index([clientId, isDefault])
+  @@map("roles")
+}
+
+model RolePermission {
+  roleId       String @map("role_id") @db.Uuid
+  permissionId String @map("permission_id") @db.Uuid
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Restrict)
+
+  @@id([roleId, permissionId])
+  @@index([permissionId])
+  @@map("role_permissions")
+}
+
+model Assignment {
+  id          String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  subjectType AssignmentSubjectType @map("subject_type")
+  subjectId   String                @map("subject_id") @db.Uuid
+  roleId      String                @map("role_id") @db.Uuid
+  scopeType   AssignmentScopeType   @default(global) @map("scope_type")
+  scopeId     String?               @map("scope_id") @db.Uuid
+  /// Membership that granted this assignment; removing the membership removes the grant
+  /// (docs/domain-model.md 2.11). Null for directly administered assignments.
+  sourceMembershipId String?        @map("source_membership_id") @db.Uuid
+  expiresAt   DateTime?             @map("expires_at") @db.Timestamptz(6)
+  assignedBy  String                @map("assigned_by") @db.Uuid
+  createdAt   DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  role Role @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  sourceMembership ClientMembership? @relation(fields: [sourceMembershipId], references: [id], onDelete: Cascade)
+
+  // subject_id / scope_id / assigned_by are polymorphic (user, group, service, organization)
+  // and therefore intentionally not foreign keys. The migration creates this unique key with
+  // NULLS NOT DISTINCT so an unattributed assignment stays unique while two memberships may
+  // hold the same role independently.
+  @@unique([subjectType, subjectId, roleId, scopeType, scopeId, sourceMembershipId])
+  @@index([roleId])
+  @@index([subjectType, subjectId])
+  @@index([sourceMembershipId])
+  @@map("assignments")
+}
+
+model Session {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId            String    @map("user_id") @db.Uuid
+  clientId          String?   @map("client_id") @db.Uuid
+  /// Login context the session was established for (null = client-wide session).
+  loginContext      String?   @map("login_context") @db.VarChar(64)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  lastSeenAt        DateTime  @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+  idleExpiresAt     DateTime  @map("idle_expires_at") @db.Timestamptz(6)
+  absoluteExpiresAt DateTime  @map("absolute_expires_at") @db.Timestamptz(6)
+  ip                String?   @db.Inet
+  userAgent         String?   @map("user_agent")
+  amr               String[]
+  acr               String    @db.VarChar(64)
+  revokedAt         DateTime? @map("revoked_at") @db.Timestamptz(6)
+  revokeReason      String?   @map("revoke_reason") @db.VarChar(32)
+
+  user               User                @relation(fields: [userId], references: [id], onDelete: Restrict)
+  client             Client?             @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  authorizationCodes AuthorizationCode[]
+  refreshTokens      RefreshToken[]
+
+  @@index([userId, revokedAt])
+  @@index([idleExpiresAt])
+  @@index([absoluteExpiresAt])
+  @@index([clientId, loginContext])
+  @@map("sessions")
+}
+
+model AuthorizationCode {
+  codeHash            String    @id @map("code_hash") @db.VarChar(128)
+  clientId            String    @map("client_id") @db.Uuid
+  userId              String    @map("user_id") @db.Uuid
+  sessionId           String    @map("session_id") @db.Uuid
+  redirectUri         String    @map("redirect_uri")
+  scope               String[]
+  nonce               String?
+  codeChallenge       String    @map("code_challenge") @db.VarChar(128)
+  codeChallengeMethod String    @default("S256") @map("code_challenge_method") @db.VarChar(8)
+  authTime            DateTime  @map("auth_time") @db.Timestamptz(6)
+  acr                 String    @db.VarChar(64)
+  amr                 String[]
+  expiresAt           DateTime  @map("expires_at") @db.Timestamptz(6)
+  consumedAt          DateTime? @map("consumed_at") @db.Timestamptz(6)
+  /** Login Context the code was issued for; narrows roles at token time (CTX/T31). */
+  loginContext        String?   @map("login_context") @db.VarChar(64)
+
+  client  Client  @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Restrict)
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+
+  @@index([userId])
+  @@index([sessionId])
+  @@index([expiresAt])
+  @@index([clientId])
+  @@map("authorization_codes")
+}
+
+model RefreshToken {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tokenHash  String    @unique @map("token_hash") @db.VarChar(128)
+  familyId   String    @map("family_id") @db.Uuid
+  clientId   String    @map("client_id") @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  sessionId  String    @map("session_id") @db.Uuid
+  scope      String[]
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(6)
+  rotatedAt  DateTime? @map("rotated_at") @db.Timestamptz(6)
+  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz(6)
+  replacedBy String?   @unique @map("replaced_by") @db.Uuid
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  /** Login Context the refresh token is bound to (docs/login-contexts.md 5). */
+  loginContext String? @map("login_context") @db.VarChar(64)
+
+  client      Client        @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  user        User          @relation(fields: [userId], references: [id], onDelete: Restrict)
+  session     Session       @relation(fields: [sessionId], references: [id], onDelete: Restrict)
+  replacement RefreshToken? @relation("TokenRotation", fields: [replacedBy], references: [id], onDelete: SetNull)
+  replaced    RefreshToken? @relation("TokenRotation")
+
+  @@index([familyId])
+  @@index([userId, revokedAt])
+  @@index([sessionId])
+  @@index([expiresAt])
+  @@index([clientId])
+  @@map("refresh_tokens")
+}
+
+model Consent {
+  userId    String    @map("user_id") @db.Uuid
+  clientId  String    @map("client_id") @db.Uuid
+  scopes    String[]
+  grantedAt DateTime  @default(now()) @map("granted_at") @db.Timestamptz(6)
+  revokedAt DateTime? @map("revoked_at") @db.Timestamptz(6)
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Restrict)
+  client Client @relation(fields: [clientId], references: [id], onDelete: Restrict)
+
+  @@id([userId, clientId])
+  @@index([clientId])
+  @@map("consents")
+}
+
+model AuditEvent {
+  id         String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  occurredAt DateTime       @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  actorType  AuditActorType @map("actor_type")
+  actorId    String?        @map("actor_id") @db.Uuid
+  action     String         @db.VarChar(128)
+  targetType String?        @map("target_type") @db.VarChar(64)
+  targetId   String?        @map("target_id") @db.Uuid
+  clientId   String?        @map("client_id") @db.Uuid
+  ip         String?        @db.Inet
+  userAgent  String?        @map("user_agent")
+  result     AuditResult
+  metadata   Json           @default("{}") @db.JsonB
+
+  client Client? @relation(fields: [clientId], references: [id], onDelete: Restrict)
+
+  @@index([occurredAt])
+  @@index([actorType, actorId])
+  @@index([targetType, targetId])
+  @@index([clientId, occurredAt])
+  // The documented example filters by `action`; without this the reader scans the whole log.
+  @@index([action, occurredAt])
+  @@map("audit_events")
+}
+
+model SigningKey {
+  kid           String           @id @db.VarChar(64)
+  alg           SigningKeyAlg    @default(ES256)
+  publicKey     String           @map("public_key")
+  privateKeyRef String           @map("private_key_ref")
+  status        SigningKeyStatus @default(active)
+  createdAt     DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  retiredAt     DateTime?        @map("retired_at") @db.Timestamptz(6)
+
+  @@index([status])
+  @@map("signing_keys")
+}
