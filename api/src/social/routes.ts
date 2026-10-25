@@ -85,6 +85,8 @@ export interface SocialLoginRouteOptions {
   cookie: LoginRouteOptions['cookie'];
   /** Requests per window per IP + client + provider (`docs/security.md` 3.4). */
   rateLimit?: { windowSeconds: number; max: number };
+  /** Per-address ceiling across every client and provider (default: four times `rateLimit`). */
+  ipRateLimit?: { windowSeconds: number; max: number };
   now?: () => Date;
 }
 
@@ -97,6 +99,8 @@ type Query = Record<string, string | undefined>;
 
 interface FailureContext {
   clientId: string;
+  /** False while `clientId` is still only the unverified URL segment (no audit attribution). */
+  verified?: boolean;
   provider: SocialProviderId | null;
   returnTo?: string;
 }
@@ -115,6 +119,10 @@ export function registerSocialLoginRoutes(
   const loginUrl = options.loginUrl ?? `${options.issuer.replace(/\/+$/, '')}/login`;
   const buckets = new Map<string, Bucket>();
   const limit = options.rateLimit ?? { windowSeconds: 60, max: 60 };
+  const ipLimit = options.ipRateLimit ?? { windowSeconds: limit.windowSeconds, max: limit.max * 4 };
+
+  const isValidTarget = (clientId: string, provider: string): boolean =>
+    CLIENT_ID_PATTERN.test(clientId) && parseProvider(provider) !== null;
 
   const callbackUrlFor = (clientId: string, provider: SocialProviderId): string =>
     `${callbackBase}/oauth2/social/${encodeURIComponent(clientId)}/${provider}/callback`;
@@ -137,7 +145,8 @@ export function registerSocialLoginRoutes(
         ? { actorType: 'anonymous' as const }
         : { actorType: 'user' as const, actorId: userId, targetType: 'user', targetId: userId }),
       action: 'social.login.failed',
-      clientId: context.clientId,
+      // The path segment is attacker-controlled until a lookup has found the client.
+      ...(context.verified === false ? {} : { clientId: context.clientId }),
       ip: request.ip,
       userAgent: request.headers['user-agent'] ?? null,
       result: 'failure',
@@ -167,11 +176,12 @@ export function registerSocialLoginRoutes(
     provider: SocialProviderId | null,
     code: SocialErrorCode,
     reason: string,
+    verified = false,
   ): Promise<FastifyReply> => {
     await options.audit.record({
       actorType: 'anonymous',
       action: 'social.login.failed',
-      clientId,
+      ...(verified ? { clientId } : {}),
       ip: request.ip,
       userAgent: request.headers['user-agent'] ?? null,
       result: 'failure',
@@ -180,9 +190,21 @@ export function registerSocialLoginRoutes(
     return reply.code(400).header('Cache-Control', 'no-store').send({ error: code });
   };
 
+  /**
+   * Two buckets, both bounded in memory. The per-address bucket is charged first and for every
+   * request, so a caller cannot dodge the limit by rotating `clientId`/`provider` values; the
+   * per-(address, client, provider) bucket only ever sees values that already passed the
+   * format check, so it cannot be inflated with arbitrary strings.
+   */
   const rateLimited = (request: FastifyRequest, clientId: string, provider: string): boolean => {
-    const key = `${request.ip}:${clientId}:${provider}`;
-    return !consume(buckets, key, limit, now().getTime());
+    const at = now().getTime();
+    if (!consume(buckets, `ip:${request.ip}`, ipLimit, at)) {
+      return true;
+    }
+    if (!isValidTarget(clientId, provider)) {
+      return false;
+    }
+    return !consume(buckets, `${request.ip}:${clientId}:${provider}`, limit, at);
   };
 
   app.get(
@@ -255,6 +277,7 @@ export function registerSocialLoginRoutes(
           provider,
           'social_provider_disabled',
           'client_disabled',
+          true,
         );
       }
       if (client.scopes.includes(ADMIN_PANEL_SCOPE)) {
@@ -265,6 +288,7 @@ export function registerSocialLoginRoutes(
           provider,
           'social_provider_disabled',
           'admin_client',
+          true,
         );
       }
       const credentials = await options.repository.findProvider(clientId, provider);
@@ -276,6 +300,7 @@ export function registerSocialLoginRoutes(
           provider,
           'social_provider_disabled',
           'provider_disabled',
+          true,
         );
       }
 
@@ -317,7 +342,7 @@ export function registerSocialLoginRoutes(
         return fail(
           request,
           reply,
-          { clientId, provider },
+          { clientId, provider, verified: false },
           'social_provider_disabled',
           'unknown_client_or_provider',
         );
@@ -328,7 +353,7 @@ export function registerSocialLoginRoutes(
         return fail(
           request,
           reply,
-          { clientId, provider },
+          { clientId, provider, verified: false },
           'social_state_invalid',
           'missing_state',
         );
@@ -340,17 +365,20 @@ export function registerSocialLoginRoutes(
         return fail(
           request,
           reply,
-          { clientId, provider },
+          { clientId, provider, verified: false },
           'social_state_invalid',
           'state_expired_or_replayed',
         );
       }
+      const matches = transactionMatches(transaction, clientId, provider);
       const context: FailureContext = {
         clientId,
         provider,
         returnTo: transaction.returnTo,
+        // The transaction was written by this server, so a match vouches for the client id.
+        verified: matches,
       };
-      if (!transactionMatches(transaction, clientId, provider)) {
+      if (!matches) {
         return fail(request, reply, context, 'social_state_invalid', 'cross_client_callback');
       }
 
@@ -695,6 +723,24 @@ function parseProvider(value: string): SocialProviderId | null {
   return PROVIDER_SET.has(value) ? (value as SocialProviderId) : null;
 }
 
+/** Upper bound for the in-memory limiter so spraying source addresses cannot grow it forever. */
+const MAX_BUCKETS = 10_000;
+
+/** Drops expired buckets; if the map is still full the oldest entries go (insertion order). */
+function pruneBuckets(buckets: Map<string, Bucket>, nowMs: number): void {
+  for (const [key, bucket] of buckets) {
+    if (bucket.resetAt <= nowMs) {
+      buckets.delete(key);
+    }
+  }
+  for (const key of buckets.keys()) {
+    if (buckets.size < MAX_BUCKETS) {
+      break;
+    }
+    buckets.delete(key);
+  }
+}
+
 function consume(
   buckets: Map<string, Bucket>,
   key: string,
@@ -703,6 +749,9 @@ function consume(
 ): boolean {
   const bucket = buckets.get(key);
   if (bucket === undefined || bucket.resetAt <= nowMs) {
+    if (bucket === undefined && buckets.size >= MAX_BUCKETS) {
+      pruneBuckets(buckets, nowMs);
+    }
     buckets.set(key, { count: 1, resetAt: nowMs + limit.windowSeconds * 1000 });
     return true;
   }

@@ -143,33 +143,41 @@ export function createPrismaSocialLoginRepository(
 
     async createUser(input: CreateSocialUserInput) {
       const email = normalizeEmail(input.email);
-      const username = await uniqueUsername(input.tenantId, usernameFromEmail(email));
-      try {
-        const user = await prisma.user.create({
-          data: {
-            tenantId: input.tenantId,
-            username,
-            email,
-            displayName: input.displayName,
-            avatarUrl: input.avatarUrl,
-            locale: input.locale ?? 'fa-IR',
-            status: 'active',
-            emailVerifiedAt: input.emailVerified ? input.now : null,
-          },
-          select: USER_SELECT,
-        });
-        return { user, created: true };
-      } catch (error) {
-        if (!isUniqueViolation(error)) {
-          throw error;
+      let username = await uniqueUsername(input.tenantId, usernameFromEmail(email));
+      // A unique violation is not always the e-mail: two callbacks for different addresses
+      // that normalise to the same username can race past `uniqueUsername`. That case is
+      // retried with a random suffix instead of surfacing as a 500 to a valid sign-in.
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          const user = await prisma.user.create({
+            data: {
+              tenantId: input.tenantId,
+              username,
+              email,
+              displayName: input.displayName,
+              avatarUrl: input.avatarUrl,
+              locale: input.locale ?? 'fa-IR',
+              status: 'active',
+              emailVerifiedAt: input.emailVerified ? input.now : null,
+            },
+            select: USER_SELECT,
+          });
+          return { user, created: true };
+        } catch (error) {
+          if (!isUniqueViolation(error)) {
+            throw error;
+          }
+          // A concurrent callback created a user with this email (or the address belongs to a
+          // soft-deleted account). Never retry blindly: hand the existing row to the policy.
+          const existing = await findUserByEmail(input.tenantId, email);
+          if (existing !== null) {
+            return { user: existing, created: false };
+          }
+          if (attempt >= 2) {
+            throw error;
+          }
+          username = `${usernameFromEmail(email)}-${randomBytes(4).toString('hex')}`;
         }
-        // A concurrent callback created a user with this email (or the address belongs to a
-        // soft-deleted account). Never retry blindly: hand the existing row to the policy.
-        const existing = await findUserByEmail(input.tenantId, email);
-        if (existing === null) {
-          throw error;
-        }
-        return { user: existing, created: false };
       }
     },
 

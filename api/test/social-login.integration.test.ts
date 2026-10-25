@@ -380,7 +380,7 @@ const membershipFor = (clientUuid: string, userId: string) =>
 const auditsSince = (since: Date) =>
   prisma.auditEvent.findMany({
     where: { occurredAt: { gte: since } },
-    select: { action: true, result: true, metadata: true },
+    select: { action: true, result: true, metadata: true, clientId: true },
     orderBy: { occurredAt: 'asc' },
   });
 
@@ -753,6 +753,27 @@ describe('per-client social login', () => {
     );
     // The exchange never happened for either rejected callback.
     expect(googleState.inputs).toHaveLength(0);
+  }, 60_000);
+
+  it('does not attribute a failure to a client id that was never looked up', async () => {
+    const since = new Date();
+    await request(app.server)
+      .get('/oauth2/social/attacker-chosen-id/google/callback')
+      .query({ code: 'x', state: 'y' })
+      .expect(302);
+    await request(app.server)
+      .get('/oauth2/social/attacker-chosen-id/google/start')
+      .query({ login_request: 'nope' })
+      .expect(400);
+    // A callback whose transaction belongs to another app: the URL segment is not trusted.
+    const flow = await startFlow('app-a', 'google');
+    await callback('app-b', 'google', flow).expect(302);
+
+    const failures = (await auditsSince(since)).filter(
+      (event) => event.action === 'social.login.failed',
+    );
+    expect(failures.length).toBeGreaterThanOrEqual(3);
+    expect(failures.every((event) => event.clientId === null)).toBe(true);
   }, 60_000);
 
   it('maps adapter and provider failures to safe social errors', async () => {
