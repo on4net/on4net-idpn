@@ -146,3 +146,10 @@ Cookie: idpn_session=…
 Audit: `user.mfa.enrolled`، `user.mfa.removed`، `user.mfa.failed`، `user.mfa.recovery_codes_rotated`،
 `user.mfa.recovery_used` و `user.login.mfa_enrollment_required`. هیچ Secret، کد یا Hashی در Audit نیست.
 
+## افزودن و حذف Passkey
+
+- `POST /api/v1/account/mfa/webauthn/options` و `DELETE /api/v1/account/mfa/webauthn/{id}` فقط برای نشستی مجازند که حداکثر ۳۰۰ ثانیه پیش احراز هویت شده باشد؛ در غیر این صورت پاسخ `403` با `code: reauthentication_required` است و کاربر باید دوباره وارد شود (یا step-up کند). کوکی نشست به‌تنهایی برای تغییر راه‌های بازیابی حساب کافی نیست.
+- ثبت Passkey با `userVerification: required` انجام می‌شود، هم‌سطح ورود.
+- پس از افزودن یا حذف موفق، یک ایمیل اطلاع‌رسانی (بدون لینک) به صاحب حساب می‌رود. ارسال بهترین‌تلاش است: خطای ایمیل تغییر را برنمی‌گرداند، ولی تغییر همیشه در Audit (`user.mfa.enrolled` / `user.mfa.removed`) ثبت می‌شود.
+- اگر `login_context` درخواست نشود، `stepUpRequired` از Context پیش‌فرض (اشارهگر `defaultLoginContextKey` یا Context علامت‌خورده `is_default`) خوانده می‌شود.
+

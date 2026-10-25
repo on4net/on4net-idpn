@@ -3,6 +3,7 @@ import {
   buildAccountLink,
   inviteEmail,
   inviteNotificationEmail,
+  passkeyChangedEmail,
   passwordChangedEmail,
   passwordResetEmail,
   verificationEmail,
@@ -51,6 +52,8 @@ export interface AccountLifecycle {
   sendVerification(userId: string): Promise<boolean>;
   sendPasswordReset(userId: string): Promise<boolean>;
   sendPasswordChanged(userId: string): Promise<void>;
+  /** Notifies the owner that a passkey was added or removed (account-takeover signal). */
+  sendPasskeyChanged(userId: string, action: 'enrolled' | 'removed'): Promise<void>;
 }
 
 const EXPIRES = {
@@ -172,6 +175,21 @@ export function createAccountLifecycle(
         }),
       );
       return true;
+    },
+
+    async sendPasskeyChanged(userId, action) {
+      const user = await dependencies.users.findById(userId);
+      if (user === null || user.deletedAt !== null) {
+        return;
+      }
+      await dependencies.mailer.send(
+        passkeyChangedEmail({
+          to: user.email,
+          locale: mailLocale(user.locale),
+          displayName: user.displayName,
+          action,
+        }),
+      );
     },
 
     async sendPasswordChanged(userId) {

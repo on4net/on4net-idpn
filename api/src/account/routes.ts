@@ -85,6 +85,11 @@ export interface AccountRoutesOptions {
   /** WebAuthn/passkey ceremonies (docs/security.md 3.3). */
   webauthn?: WebauthnServiceDependencies;
   /**
+   * Tells the account owner that a passkey was added or removed. Best effort: a mail outage
+   * never undoes the change, but the change is always audited.
+   */
+  notifyPasskeyChange?: (userId: string, action: 'enrolled' | 'removed') => Promise<void>;
+  /**
    * Server-side context switch decision (`docs/login-contexts.md` 4.1, 6). Without it the
    * switch endpoint stays disabled and the sessions list advertises no switch targets.
    */
@@ -102,6 +107,9 @@ export interface AccountRoutesOptions {
 }
 
 const PROBLEM_BASE = 'https://on4net.dev/problems';
+
+/** How recent the authentication must be to add or remove a passkey. */
+const PASSKEY_CHANGE_MAX_AGE_SECONDS = 300;
 
 /** Sensitive account mutations per address (password proof). */
 const ACCOUNT_SENSITIVE_LIMIT: RateLimitPolicy = { windowSeconds: 60, max: 10 };
@@ -977,6 +985,35 @@ export function registerAccountRoutes(app: FastifyInstance, options: AccountRout
 
   const tenantOf = (session: IdpSession): string => session.tenantId ?? '';
 
+  /**
+   * Adding or removing a passkey changes how the account can be recovered or taken over, so a
+   * stolen session cookie alone must not be enough: the session has to have authenticated
+   * recently (the same window as the step-up contexts), otherwise the user signs in again.
+   */
+  const requireRecentAuthentication = (reply: FastifyReply, session: IdpSession): boolean => {
+    const ageSeconds = (now().getTime() - new Date(session.authTime).getTime()) / 1000;
+    if (Number.isFinite(ageSeconds) && ageSeconds <= PASSKEY_CHANGE_MAX_AGE_SECONDS) {
+      return true;
+    }
+    void sendProblem(
+      reply,
+      403,
+      'forbidden',
+      'Forbidden',
+      'a recent authentication is required to change passkeys',
+      { code: 'reauthentication_required' },
+    );
+    return false;
+  };
+
+  const notifyPasskey = async (userId: string, action: 'enrolled' | 'removed'): Promise<void> => {
+    try {
+      await options.notifyPasskeyChange?.(userId, action);
+    } catch {
+      // The change stands and is audited; only the courtesy mail failed.
+    }
+  };
+
   app.post('/api/v1/account/mfa/webauthn/options', async (request, reply) => {
     if (!guardMfaMutation(request, reply)) {
       return reply;
@@ -987,6 +1024,9 @@ export function registerAccountRoutes(app: FastifyInstance, options: AccountRout
     }
     if (options.webauthn === undefined) {
       return webauthnUnavailable(reply);
+    }
+    if (!requireRecentAuthentication(reply, auth.session)) {
+      return reply;
     }
     const started = await beginRegistration(options.webauthn, {
       userId: auth.profile.id,
@@ -1033,6 +1073,7 @@ export function registerAccountRoutes(app: FastifyInstance, options: AccountRout
       result: 'success',
       metadata: { type: 'webauthn' },
     });
+    await notifyPasskey(auth.profile.id, 'enrolled');
     return noStore(reply)
       .code(201)
       .send({
@@ -1223,6 +1264,9 @@ export function registerAccountRoutes(app: FastifyInstance, options: AccountRout
       if (options.webauthn === undefined) {
         return webauthnUnavailable(reply);
       }
+      if (!requireRecentAuthentication(reply, auth.session)) {
+        return reply;
+      }
       const factor = await options.webauthn.repository.findWebauthn(
         auth.profile.id,
         request.params.id,
@@ -1252,6 +1296,7 @@ export function registerAccountRoutes(app: FastifyInstance, options: AccountRout
         result: 'success',
         metadata: { type: 'webauthn' },
       });
+      await notifyPasskey(auth.profile.id, 'removed');
       return noStore(reply).send({ ok: true });
     },
   );

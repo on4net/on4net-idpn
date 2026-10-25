@@ -381,15 +381,17 @@ export function createPrismaMfaRepository(
       if (client === null || client.status !== 'active') {
         return false;
       }
-      const key =
-        loginContext !== undefined && loginContext !== ''
-          ? loginContext
-          : (client.defaultLoginContextKey ?? undefined);
-      if (key === undefined) {
-        return false;
-      }
+      const explicit = loginContext !== undefined && loginContext !== '';
+      // Without a requested context the default one applies: the pointer on the client, or the
+      // context flagged `is_default` when the pointer was never written. Returning false here
+      // would let a step-up default context be bypassed by omitting `login_context`.
+      const key = explicit ? loginContext : (client.defaultLoginContextKey ?? undefined);
       const context = await prisma.clientLoginContext.findFirst({
-        where: { clientId: client.id, key, status: 'active' },
+        where: {
+          clientId: client.id,
+          status: 'active',
+          ...(key === undefined ? { isDefault: true } : { key }),
+        },
         select: { stepUpRequired: true },
       });
       return context?.stepUpRequired ?? false;

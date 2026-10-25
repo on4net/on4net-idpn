@@ -112,7 +112,9 @@ export class SimpleWebauthnLibrary implements WebauthnLibrary {
       excludeCredentials: input.excludeCredentials,
       authenticatorSelection: {
         residentKey: 'preferred',
-        userVerification: 'preferred',
+        // A passkey that proves only possession is a weaker second factor than the TOTP it
+        // can replace, and login asks for `required`; enrol under the same bar.
+        userVerification: 'required',
       },
       attestationType: 'none',
     });

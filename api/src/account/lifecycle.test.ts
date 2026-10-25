@@ -229,6 +229,26 @@ describe('account lifecycle delivery', () => {
     expect(mailer.sent[0]?.text).toContain('action=reset-password');
   });
 
+  it('tells the owner when a passkey is added or removed, without any link', async () => {
+    const mailer = new RecordingMailer();
+    const lifecycle = createAccountLifecycle({
+      users: fakeUsers([user({ status: 'active' })]),
+      tokens: fakeTokens(),
+      mailer,
+      links: { uiBaseUrl: 'https://auth.example.com' },
+    });
+
+    await lifecycle.sendPasskeyChanged('user-1', 'enrolled');
+    await lifecycle.sendPasskeyChanged('user-1', 'removed');
+    await lifecycle.sendPasskeyChanged('missing', 'removed');
+
+    expect(mailer.sent.map((message) => message.subject)).toEqual([
+      'یک کلید عبور به حساب شما اضافه شد',
+      'یک کلید عبور از حساب شما حذف شد',
+    ]);
+    expect(mailer.sent.every((message) => !message.text.includes('http'))).toBe(true);
+  });
+
   it('does not send a reset link to a user without a password', async () => {
     const mailer = new RecordingMailer();
     const lifecycle = createAccountLifecycle({

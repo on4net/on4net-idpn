@@ -48,6 +48,7 @@ let redis: Redis;
 let prisma: PrismaClient;
 let store: RedisSessionStore;
 let app: ReturnType<typeof buildServer>;
+let mfaRepository: ReturnType<typeof createPrismaMfaRepository>;
 let tenantId: string;
 
 /** Mutable counter returned by the injected verifier; tests set it per assertion. */
@@ -133,7 +134,7 @@ async function createUser(username: string): Promise<string> {
 async function createClient(
   clientId: string,
   policy: 'optional' | 'required_admins' | 'required_all' = 'optional',
-  loginContexts: { key: string; stepUpRequired: boolean }[] = [],
+  loginContexts: { key: string; stepUpRequired: boolean; isDefault?: boolean }[] = [],
 ): Promise<void> {
   const client = await prisma.client.create({
     data: {
@@ -163,14 +164,19 @@ async function createClient(
         sessionIdleTtl: 1800,
         sessionAbsoluteTtl: 28_800,
         stepUpRequired: context.stepUpRequired,
+        isDefault: context.isDefault ?? false,
       },
     });
   }
 }
 
-async function createSession(userId: string): Promise<IdpSession> {
+async function createSession(
+  userId: string,
+  options: { authTime?: Date } = {},
+): Promise<IdpSession> {
   const session = await store.create({
     userId,
+    ...(options.authTime === undefined ? {} : { authTime: options.authTime }),
     clientId: 'app-a',
     amr: ['pwd'],
     acr: 'urn:on4net:acr:pwd',
@@ -194,6 +200,8 @@ async function createSession(userId: string): Promise<IdpSession> {
   });
   return session;
 }
+
+const passkeyNotices: { userId: string; action: 'enrolled' | 'removed' }[] = [];
 
 const cookie = (session: IdpSession): string => `idpn_session=${session.sid}`;
 const sameOrigin = { Origin: issuer };
@@ -346,7 +354,7 @@ beforeAll(async () => {
   const audit = createPrismaAdminAudit(prisma);
   const permissionReader = createPrismaPermissionReader(prisma);
   const loginRepository = createPrismaLoginRepository(prisma);
-  const mfaRepository = createPrismaMfaRepository(prisma, { permissions: permissionReader });
+  mfaRepository = createPrismaMfaRepository(prisma, { permissions: permissionReader });
   const secretBox = createSecretBox(SECRET_KEY);
   const webauthn = {
     config: resolveWebauthnConfig({ appUrl: issuer, rpName: 'on4net' }),
@@ -387,6 +395,9 @@ beforeAll(async () => {
         recoveryParams: FAST_ARGON2,
       },
       webauthn,
+      notifyPasskeyChange: async (userId, action) => {
+        passkeyNotices.push({ userId, action });
+      },
     },
   });
   await app.ready();
@@ -396,6 +407,9 @@ beforeAll(async () => {
   await createClient('app-a', 'optional');
   await createClient('app-required', 'required_all');
   await createClient('app-stepup', 'optional', [{ key: 'sensitive', stepUpRequired: true }]);
+  await createClient('app-default-stepup', 'optional', [
+    { key: 'vault', stepUpRequired: true, isDefault: true },
+  ]);
 }, 300_000);
 
 afterAll(async () => {
@@ -540,6 +554,59 @@ describe('passkey enrollment', () => {
       .set(sameOrigin);
     expect(deleted.status).toBe(200);
     expect(await prisma.mfaFactor.count({ where: { id: enrolled.factorId } })).toBe(0);
+  });
+});
+
+describe('passkey changes need a recent authentication and notify the owner', () => {
+  it('mails the owner when a passkey is added and when it is removed', async () => {
+    const userId = await createUser('passkey-notice');
+    const enrolled = await enrollPasskey(userId);
+    await request(app.server)
+      .delete(`/api/v1/account/mfa/webauthn/${enrolled.factorId}`)
+      .set('Cookie', cookie(enrolled.session))
+      .set(sameOrigin)
+      .expect(200);
+    expect(passkeyNotices.filter((entry) => entry.userId === userId)).toEqual([
+      { userId, action: 'enrolled' },
+      { userId, action: 'removed' },
+    ]);
+  });
+
+  it('refuses to start an enrolment from a session that authenticated long ago', async () => {
+    const userId = await createUser('passkey-stale-enrol');
+    const stale = await createSession(userId, { authTime: new Date(Date.now() - 3_600_000) });
+    const response = await request(app.server)
+      .post('/api/v1/account/mfa/webauthn/options')
+      .set('Cookie', cookie(stale))
+      .set(sameOrigin)
+      .send({});
+    expect(response.status).toBe(403);
+    expect(response.body.code).toBe('reauthentication_required');
+  });
+
+  it('refuses to delete a passkey from a stale session and keeps the factor', async () => {
+    const userId = await createUser('passkey-stale-delete');
+    const enrolled = await enrollPasskey(userId);
+    const stale = await createSession(userId, { authTime: new Date(Date.now() - 3_600_000) });
+    const response = await request(app.server)
+      .delete(`/api/v1/account/mfa/webauthn/${enrolled.factorId}`)
+      .set('Cookie', cookie(stale))
+      .set(sameOrigin);
+    expect(response.status).toBe(403);
+    expect(response.body.code).toBe('reauthentication_required');
+    expect(await prisma.mfaFactor.count({ where: { id: enrolled.factorId } })).toBe(1);
+    expect(
+      passkeyNotices.some((entry) => entry.action === 'removed' && entry.userId === userId),
+    ).toBe(false);
+  });
+});
+
+describe('step-up default context', () => {
+  it('applies the default context step-up when no login_context is requested', async () => {
+    await expect(
+      mfaRepository.resolveStepUpRequired({ clientId: 'app-default-stepup' }),
+    ).resolves.toBe(true);
+    await expect(mfaRepository.resolveStepUpRequired({ clientId: 'app-a' })).resolves.toBe(false);
   });
 });
 

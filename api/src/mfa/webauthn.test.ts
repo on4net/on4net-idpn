@@ -7,7 +7,7 @@ import {
   WEBAUTHN_CHALLENGE_TTL_SECONDS,
   type WebauthnChallengeRecord,
 } from './webauthn-challenge-store.js';
-import type { WebauthnLibrary } from './webauthn-library.js';
+import { SimpleWebauthnLibrary, type WebauthnLibrary } from './webauthn-library.js';
 import {
   WebauthnConfigError,
   beginAuthentication,
@@ -528,5 +528,18 @@ describe('authentication ceremony', () => {
       },
     );
     expect(result).toEqual({ ok: false, reason: 'verification_failed' });
+  });
+});
+
+describe('SimpleWebauthnLibrary registration policy', () => {
+  it('requires user verification when a passkey is enrolled', async () => {
+    const { options } = await new SimpleWebauthnLibrary().generateRegistrationOptions({
+      rpId: 'auth.example.com',
+      rpName: 'IdP',
+      userId: new Uint8Array([1, 2, 3, 4]),
+      userName: 'user@example.com',
+      excludeCredentials: [],
+    });
+    expect(options.authenticatorSelection?.userVerification).toBe('required');
   });
 });

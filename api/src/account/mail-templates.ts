@@ -122,6 +122,29 @@ export function passwordResetEmail(input: TemplateInput): MailMessage {
   });
 }
 
+export function passkeyChangedEmail(input: {
+  to: string;
+  locale: MailLocale;
+  displayName: string;
+  action: 'enrolled' | 'removed';
+}): MailMessage {
+  const english = input.locale === 'en-US';
+  const added = input.action === 'enrolled';
+  return {
+    to: input.to,
+    subject: english
+      ? added
+        ? 'A passkey was added to your account'
+        : 'A passkey was removed from your account'
+      : added
+        ? 'یک کلید عبور به حساب شما اضافه شد'
+        : 'یک کلید عبور از حساب شما حذف شد',
+    text: english
+      ? `${greeting(input.locale, input.displayName)}\n\nA passkey was ${added ? 'added to' : 'removed from'} your account. If this was not you, change your password and review your security settings immediately.\n\n${closing(input.locale)}`
+      : `${greeting(input.locale, input.displayName)}\n\nیک کلید عبور ${added ? 'به حساب شما اضافه' : 'از حساب شما حذف'} شد. اگر این کار از طرف شما نبوده، فوراً رمز عبور را تغییر دهید و تنظیمات امنیتی را بررسی کنید.\n\n${closing(input.locale)}`,
+  };
+}
+
 export function passwordChangedEmail(input: {
   to: string;
   locale: MailLocale;

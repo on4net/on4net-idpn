@@ -511,6 +511,7 @@ const app = buildServer({
       recoveryParams: passwordParams,
     },
     webauthn: webauthnDependencies,
+    notifyPasskeyChange: (userId, action) => accountLifecycle.sendPasskeyChanged(userId, action),
     // Context switching is decided from the context status, the membership and the
     // authentication the session already proves (`docs/login-contexts.md` 4.1, 6).
     contextSwitch: {
