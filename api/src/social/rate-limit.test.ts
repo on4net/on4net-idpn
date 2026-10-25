@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { consume, limiterAddress, MAX_BUCKETS } from './routes.js';
+import { consume, limiterAddress, MAX_BUCKETS, overflowShard } from './routes.js';
 
 const limit = { windowSeconds: 60, max: 2 };
 
@@ -45,16 +45,25 @@ describe('social limiter', () => {
     expect(consume(buckets, 'attacker', limit, 2)).toBe(false);
   });
 
-  it('charges newcomers to one shared bucket while full, so the service degrades instead of locking', () => {
+  it('charges newcomers to a sharded overflow, so one source cannot drain everyone', () => {
     const buckets = new Map();
     fill(buckets, 1);
-    // limit.max (2) * 20 newcomers fit in the shared overflow bucket, then it throttles.
-    const results = Array.from({ length: 45 }, (_, index) =>
-      consume(buckets, `newcomer-${String(index)}`, limit, 1),
+    // Keys that hash to the same shard share a budget of limit.max * 20 = 40.
+    const first = 'noisy-source';
+    const shard = overflowShard(first);
+    const sameShard = Array.from({ length: 4000 }, (_, index) => `noisy-${String(index)}`)
+      .filter((key) => overflowShard(key) === shard)
+      .slice(0, 45);
+    const results = sameShard.map((key) => consume(buckets, key, limit, 1));
+    expect(results.filter(Boolean).length).toBeLessThanOrEqual(40);
+    expect(results.at(-1)).toBe(false);
+
+    // A newcomer that lands in another shard is still admitted.
+    const other = Array.from({ length: 4000 }, (_, index) => `calm-${String(index)}`).find(
+      (key) => overflowShard(key) !== shard,
     );
-    expect(results.filter(Boolean)).toHaveLength(40);
-    expect(results.slice(40).every((allowed) => !allowed)).toBe(true);
-    // Existing callers are unaffected by the overflow being exhausted.
+    expect(consume(buckets, other ?? 'calm-0', limit, 1)).toBe(true);
+    // Existing callers are unaffected by an exhausted shard.
     expect(consume(buckets, 'filler-0', limit, 2)).toBe(true);
   });
 

@@ -762,8 +762,23 @@ function pruneBuckets(buckets: Map<string, Bucket>, nowMs: number): void {
   }
 }
 
-/** Reserved key of the shared bucket that new keys are charged to while the map is full. */
+/** Prefix of the reserved shared buckets that new keys are charged to while the map is full. */
 const OVERFLOW_KEY = ' overflow';
+/**
+ * The overflow is sharded by a hash of the key, so a source that exhausts its shard leaves the
+ * other 15/16 of the newcomer capacity intact. A shared store (Redis) is the lasting answer;
+ * this keeps the in-memory fallback from being a single point an attacker can drain.
+ */
+const OVERFLOW_SHARDS = 16;
+
+/** Shard of the overflow bucket a key is charged to (FNV-1a, stable across restarts). */
+export function overflowShard(key: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < key.length; index += 1) {
+    hash = Math.imul(hash ^ key.charCodeAt(index), 0x01000193) >>> 0;
+  }
+  return `${OVERFLOW_KEY}:${String(hash % OVERFLOW_SHARDS)}`;
+}
 /** The overflow bucket admits this many times the per-key limit across all unknown keys. */
 const OVERFLOW_FACTOR = 20;
 
@@ -793,7 +808,7 @@ export function consume(
 ): boolean {
   const bucket = buckets.get(key);
   if (bucket === undefined || bucket.resetAt <= nowMs) {
-    if (bucket === undefined && key !== OVERFLOW_KEY && buckets.size >= MAX_BUCKETS) {
+    if (bucket === undefined && !key.startsWith(OVERFLOW_KEY) && buckets.size >= MAX_BUCKETS) {
       pruneBuckets(buckets, nowMs);
       if (buckets.size >= MAX_BUCKETS) {
         // Full of live buckets: neither evict one (that would let a caller reset its own
@@ -802,7 +817,7 @@ export function consume(
         // ceiling rather than to "no limit" or "no service".
         return consume(
           buckets,
-          OVERFLOW_KEY,
+          overflowShard(key),
           { windowSeconds: limit.windowSeconds, max: limit.max * OVERFLOW_FACTOR },
           nowMs,
         );

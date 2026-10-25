@@ -371,3 +371,10 @@
 - [ ] Locale فقط از Allowlist پذیرفته می‌شود.
 - [ ] تغییر Context و ترجمه Audit و Step-up دارد.
 - [ ] تغییر Provider سوشال و نقش حساس Audit و Step-up دارد.
+
+## گزارش CSP، Trusted Types و هدرهای لبه (#78 §7)
+
+- `POST /csp-report` (بدون احراز هویت، ۱۶ KiB، ۳۰ گزارش در دقیقه برای هر آدرس) هر دو قالب `application/csp-report` و `application/reports+json` را می‌پذیرد، URLها را به origin+path کاهش می‌دهد و فقط شمارندهٔ `idpn_csp_reports_total{directive,disposition}` و یک لاگ بدون Secret می‌نویسد. پاسخ همیشه `204` است.
+- سیاست `report-to csp` و هدر `Reporting-Endpoints` از `buildSecurityHeaders({ reportEndpoint })` می‌آیند؛ فاز report-only برای Trusted Types هم به همین مقصد گزارش می‌دهد. `web/src/security/trusted-types.ts` سیاست `idpn` را که هر sink را رد می‌کند پیش از رندر ثبت می‌کند.
+- نمونه‌های `deploy/security/` با `web/src/security/deploy-parity.test.ts` به `headers.ts` گره خورده‌اند: مقدار هر هدر باید یکسان باشد. Nginx بدون `Origin` را مجاز و Origin بیگانه را `403` می‌کند (مثل `decideCors`)، Caddy هم Origin بیگانه را رد می‌کند و هر دو preflight واقعی دارند.
+

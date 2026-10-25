@@ -375,6 +375,11 @@ export class ApiMetrics {
     'Client-secret verifications by outcome; a rise in unknown_pepper means a pepper id was lost or changed.',
   );
 
+  readonly cspReports = this.registry.counter(
+    'idpn_csp_reports_total',
+    'Content-Security-Policy violation reports received, by directive and disposition.',
+  );
+
   readonly collectorErrors = this.registry.counter(
     'idpn_metrics_collector_errors_total',
     'Gauge collectors that failed during a scrape, by collector.',
@@ -459,6 +464,15 @@ export class ApiMetrics {
 
   recordBackchannelDelivery(status: BackchannelDeliveryStatus): void {
     this.backchannel.inc({ status });
+  }
+
+  recordCspReport(directive: string, disposition: string): void {
+    // Directive names come from the browser; keep the label set bounded.
+    const known = /^[a-z-]{1,40}$/.test(directive) ? directive : 'other';
+    this.cspReports.inc({
+      directive: known,
+      disposition: disposition === 'report' ? 'report' : 'enforce',
+    });
   }
 
   recordClientSecretVerification(outcome: string): void {

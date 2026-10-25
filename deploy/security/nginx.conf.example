@@ -7,6 +7,20 @@
 # نکته: Nginx مقدار `add_header` را از بلوک والد به ارث نمی‌برد اگر خودش `add_header`
 # داشته باشد؛ بنابراین هدرهای امنیتی در هر location حساس تکرار شده‌اند.
 
+# http {} context: the allowlist of cross-origin readers of the MFE remote. An empty Origin
+# (a same-origin load, curl, a health probe) is allowed, exactly like `decideCors` in
+# web/src/security/headers.ts; any other Origin must match. $mfe_acao is empty for an empty
+# Origin, and nginx omits an `add_header` whose value is empty, so no CORS header is sent then.
+map $http_origin $mfe_origin_ok {
+    default                    0;
+    ""                         1;
+    "https://app.example.com"  1;
+}
+map $http_origin $mfe_acao {
+    default                    "";
+    "https://app.example.com"  $http_origin;
+}
+
 # ---------------------------------------------------------------- Hosted Auth UI
 server {
     listen 443 ssl;
@@ -22,17 +36,26 @@ server {
     add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
     add_header Cross-Origin-Opener-Policy "same-origin" always;
     add_header Cross-Origin-Resource-Policy "same-origin" always;
-    add_header Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' https://auth.example.com; worker-src 'self' blob:; manifest-src 'self'; upgrade-insecure-requests" always;
+    add_header Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://auth.example.com; worker-src 'self' blob:; manifest-src 'self'; upgrade-insecure-requests; report-to csp" always;
 
     # مرحله ۱ Trusted Types: فقط گزارش. پس از یک بازه بدون نقض، این هدر را حذف و
     # `require-trusted-types-for 'script'; trusted-types idpn 'allow-duplicates'` را به
     # Content-Security-Policy بالا اضافه کنید.
-    add_header Content-Security-Policy-Report-Only "require-trusted-types-for 'script'; trusted-types idpn 'allow-duplicates'" always;
+    add_header Content-Security-Policy-Report-Only "require-trusted-types-for 'script'; trusted-types idpn 'allow-duplicates'; report-to csp" always;
     add_header Reporting-Endpoints 'csp="https://auth.example.com/csp-report"' always;
 
     location / {
         root /srv/idpn/web;
         try_files $uri /index.html;
+    }
+
+    # Receiver for `report-to csp` (CSP violations, Trusted Types report-only phase included).
+    location = /csp-report {
+        proxy_pass http://idpn-api:6000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        client_max_body_size 16k;
     }
 
     # با Hosted UI هم‌مبدأ است؛ اگر API دامنه جدا دارد، origin آن را به connect-src اضافه کنید.
@@ -50,19 +73,30 @@ server {
     http2 on;
     server_name cdn.example.com;
 
-    # فقط Originهای میزبان مجاز؛ هرگز `*`.
-    set $mfe_allowed_origin "https://app.example.com";
-
+    # فقط Originهای میزبان مجاز؛ هرگز `*`. بدون Origin (هم‌مبدأ/curl) مجاز است، مثل decideCors.
     location /idpn-mfe/ {
-        if ($http_origin != $mfe_allowed_origin) {
+        if ($mfe_origin_ok = 0) {
             return 403;
+        }
+
+        # Preflight: answered here, never forwarded to the file system. `add_header` inside
+        # `if` replaces the inherited set, so the headers a preflight needs are repeated.
+        if ($request_method = OPTIONS) {
+            add_header Access-Control-Allow-Origin $mfe_acao always;
+            add_header Access-Control-Allow-Methods "GET, HEAD, OPTIONS" always;
+            add_header Access-Control-Allow-Headers "Content-Type, Range" always;
+            add_header Access-Control-Max-Age "600" always;
+            add_header Vary "Origin" always;
+            return 204;
         }
 
         root /srv/idpn-mfe;
         try_files $uri =404;
 
-        add_header Access-Control-Allow-Origin $mfe_allowed_origin always;
+        add_header Access-Control-Allow-Origin $mfe_acao always;
         add_header Access-Control-Allow-Methods "GET, HEAD, OPTIONS" always;
+        add_header Access-Control-Allow-Headers "Content-Type, Range" always;
+        add_header Access-Control-Max-Age "600" always;
         add_header Vary "Origin" always;
         add_header Cross-Origin-Resource-Policy "cross-origin" always;
         add_header X-Content-Type-Options "nosniff" always;
@@ -78,8 +112,11 @@ server {
     # manifest.json کوتاه‌عمر است تا کشف نسخه سازگار سریع باشد.
     location = /idpn-mfe/manifest.json {
         root /srv/idpn-mfe;
+        if ($mfe_origin_ok = 0) {
+            return 403;
+        }
         add_header Cache-Control "public, max-age=300" always;
-        add_header Access-Control-Allow-Origin $mfe_allowed_origin always;
+        add_header Access-Control-Allow-Origin $mfe_acao always;
         add_header Vary "Origin" always;
     }
 }

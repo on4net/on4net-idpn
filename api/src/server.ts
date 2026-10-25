@@ -34,6 +34,7 @@ import type { LogoutRouteOptions } from './oidc/logout-route.js';
 import { registerLogoutRoute } from './oidc/logout-route.js';
 import { registerOidcRoutes } from './oidc/routes.js';
 import { registerRevokeIntrospectRoutes } from './oidc/revoke-introspect.js';
+import { registerCspReportRoute } from './observability/csp-report.js';
 import { registerPublicConfigRoute } from './public-config/routes.js';
 import type { TranslationBundleRouteOptions } from './translations/routes.js';
 import { registerTranslationBundleRoute } from './translations/routes.js';
@@ -160,6 +161,10 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
   // RFC 6749/7009 clients post `application/x-www-form-urlencoded` to the token and
   // revocation endpoints; the JSON body stays supported for first-party callers.
   registerFormBodyParser(app);
+
+  registerCspReportRoute(app, {
+    ...(options.metrics === undefined ? {} : { metrics: options.metrics.metrics }),
+  });
 
   if (options.metrics !== undefined) {
     registerHttpMetrics(app, { metrics: options.metrics.metrics });
