@@ -132,6 +132,25 @@ describe('permission mapping validation', () => {
     expect(same.problems.join(' ')).toContain('must be different');
   });
 
+  it('refuses delegated-admin permissions on any role but the user-admin role', () => {
+    const result = plan({
+      ...baseConfig,
+      roles: [
+        {
+          key: 'platform-a:member',
+          name: 'Member',
+          description: 'Default member',
+          permissions: ['platform-a:contact:read', 'idp:client-role:assign'],
+        },
+        baseConfig.roles[1],
+      ],
+    });
+    expect(result.ok).toBe(false);
+    expect(result.problems.join(' ')).toContain(
+      'role "platform-a:member" links delegated-administration permission "idp:client-role:assign"',
+    );
+  });
+
   it('rejects duplicate declarations', () => {
     const result = plan({
       ...baseConfig,

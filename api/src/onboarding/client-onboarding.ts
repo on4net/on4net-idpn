@@ -94,6 +94,8 @@ const stateSchema = z.strictObject({
           .strictObject({
             permissionKeys: z.array(z.string()),
             isDefault: z.boolean(),
+            name: z.string().optional(),
+            description: z.string().optional(),
           })
           .nullable(),
       }),
@@ -330,10 +332,12 @@ export async function applyClientOnboarding(
       .map((operation) => `${operation.provider}: ${operation.detail ?? 'failed'}`),
     ...mapping.problems,
   ];
-  if (problems.length > 0) {
-    return { dryRun, problems, social, mapping: mapping.operations, state: null };
-  }
-
+  // A failed run still returns what it wrote, so the CLI records it and a rollback can undo it.
+  const failedProviders = new Set(
+    social
+      .filter((operation) => operation.action === 'error')
+      .map((operation) => operation.provider),
+  );
   const state: ClientOnboardingState | null =
     dryRun || mapping.state === null
       ? null
@@ -342,15 +346,17 @@ export async function applyClientOnboarding(
           generatedAt: now().toISOString(),
           clientId: options.config.clientId,
           issuer: dependencies.issuer.replace(/\/+$/, ''),
-          socialProviders: socialPlan.plans.map((plan) => ({
-            provider: plan.provider,
-            existed: plan.existed,
-            callbackUrl: plan.callbackUrl,
-          })),
+          socialProviders: socialPlan.plans
+            .filter((plan) => !failedProviders.has(plan.provider))
+            .map((plan) => ({
+              provider: plan.provider,
+              existed: plan.existed,
+              callbackUrl: plan.callbackUrl,
+            })),
           mapping: mapping.state,
         };
 
-  return { dryRun, problems: [], social, mapping: mapping.operations, state };
+  return { dryRun, problems, social, mapping: mapping.operations, state };
 }
 
 export interface SocialRollbackOperation {

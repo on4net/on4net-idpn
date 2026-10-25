@@ -223,7 +223,58 @@ describe('committed examples', () => {
   });
 });
 
+describe('role allowlist', () => {
+  it('refuses a user-admin role unless the operator opts in', () => {
+    const csv = 'email,roleKeys\nnew@example.com,platform-a:user-admin';
+    const refused = parseUserCsv(csv, options);
+    expect(refused.rows).toHaveLength(0);
+    expect(refused.problems[0]?.message).toContain('--allow-admin-roles');
+    expect(parseUserCsv(csv, { ...options, allowAdminRoles: true }).rows).toHaveLength(1);
+  });
+
+  it('accepts only allowlisted roles when an allowlist is given', () => {
+    const csv = 'email,roleKeys\nnew@example.com,platform-a:editor';
+    const refused = parseUserCsv(csv, { ...options, allowedRoleKeys: ['platform-a:member'] });
+    expect(refused.problems[0]?.message).toContain('allowlist');
+    const ok = parseUserCsv(csv, { ...options, allowedRoleKeys: ['platform-a:editor'] });
+    expect(ok.rows).toHaveLength(1);
+  });
+});
+
 describe('import run', () => {
+  it('records a throwing row as an error and keeps the rows around it', async () => {
+    const parsed = parseUserJson([{ email: 'a@example.com' }, { email: 'b@example.com' }], options);
+    const state = emptyState();
+    const ports = createFakePorts(state);
+    const baseInvite = ports.invite;
+    ports.invite = async (clientId, input) => {
+      if (input.email === 'a@example.com') {
+        throw new Error('Unique constraint failed on (tenant_id, email)');
+      }
+      return baseInvite(clientId, input);
+    };
+    const summary = await runUserImport({
+      parsed,
+      allowedClients: options.allowedClients,
+      actorId: '00000000-0000-0000-0000-000000000001',
+      ports,
+    });
+    expect(summary.rows.map((row) => row.status)).toEqual(['error', 'created']);
+    expect(summary.rows[0]?.reason).toContain('Unique constraint');
+  });
+
+  it('warns that --mail verification leaves created users pending', async () => {
+    const parsed = parseUserJson([{ email: 'new@example.com' }], options);
+    const summary = await runUserImport({
+      parsed,
+      allowedClients: options.allowedClients,
+      actorId: '00000000-0000-0000-0000-000000000001',
+      mailMode: 'verification',
+      ports: createFakePorts(emptyState()),
+    });
+    expect(summary.warnings?.join(' ')).toContain('stay pending');
+  });
+
   it('creates, links, skips and reports errors per row', async () => {
     const parsed = parseUserCsv(
       [

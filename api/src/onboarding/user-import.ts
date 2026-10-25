@@ -47,6 +47,13 @@ export interface ImportParseOptions {
   allowedClients: string[];
   /** App used when the row does not declare explicit memberships. */
   defaultClient: string;
+  /**
+   * Role keys the file may assign. When set, any other role is a row error; when unset, only
+   * delegated-admin roles (`<clientId>:user-admin`) are refused unless `allowAdminRoles` is set.
+   */
+  allowedRoleKeys?: string[];
+  /** Explicit opt-in for rows that grant a `<clientId>:user-admin` role. */
+  allowAdminRoles?: boolean;
 }
 
 const MAX_EMAIL_LENGTH = 320;
@@ -279,6 +286,19 @@ function validateRawRow(raw: RawRow, options: ImportParseOptions): ValidatedRow 
       if (problems.length > 0) {
         return { row: null, problem: `role "${key}": ${problems.join('; ')}` };
       }
+      if (options.allowedRoleKeys !== undefined && !options.allowedRoleKeys.includes(key)) {
+        return { row: null, problem: `role "${key}" is not in the import role allowlist` };
+      }
+      if (
+        options.allowedRoleKeys === undefined &&
+        options.allowAdminRoles !== true &&
+        key.endsWith(':user-admin')
+      ) {
+        return {
+          row: null,
+          problem: `role "${key}" grants delegated administration; pass --allow-admin-roles to import it`,
+        };
+      }
     }
   }
 
@@ -455,6 +475,8 @@ export interface ImportSummary {
   clients: string[];
   totals: ImportTotals;
   rows: ImportRowOutcome[];
+  /** Operator-facing caveats, e.g. users that cannot sign in until they are invited. */
+  warnings?: string[];
 }
 
 const summarySchema = z.object({
@@ -613,112 +635,128 @@ export async function runUserImport(options: UserImportOptions): Promise<ImportS
       mail: 'not-sent',
     };
 
-    const existing = await options.ports.findUser(row.email);
-    if (dryRun) {
-      outcome.userId = existing?.id ?? null;
-      for (const membership of row.memberships) {
-        const current =
-          existing === null
-            ? null
-            : await options.ports.findMembership(membership.clientId, existing.id);
-        outcome.memberships.push({
-          clientId: membership.clientId,
-          action: current === null ? 'created' : 'exists',
-          roleKeys: membership.roleKeys,
-          ...(current === null ? {} : { membershipId: current.membershipId }),
-        });
-      }
-      if (existing !== null && outcome.memberships.every((item) => item.action === 'exists')) {
-        outcome.status = 'skipped';
-      } else {
-        outcome.status = existing === null ? 'created' : 'linked';
-      }
-      outcomes.push(outcome);
-      continue;
-    }
-
-    let createdUser = false;
-    let firstUserId: string | null = existing?.id ?? null;
-    const failures: string[] = [];
-
-    for (const membership of row.memberships) {
-      const invited = await options.ports.invite(membership.clientId, {
-        email: row.email,
-        ...(row.displayName === undefined ? {} : { displayName: row.displayName }),
-        roleKeys: membership.roleKeys,
-        attributes: {},
-        invitedBy: options.actorId,
-      });
-      if (invited.ok) {
-        createdUser = createdUser || invited.value.createdUser;
-        firstUserId = invited.value.member.userId;
-        outcome.memberships.push({
-          clientId: membership.clientId,
-          action: 'created',
-          membershipId: invited.value.member.membershipId,
-          roleKeys: membership.roleKeys,
-        });
-        continue;
-      }
-      if (invited.reason === 'duplicate') {
-        const user =
-          firstUserId !== null ? { id: firstUserId } : await options.ports.findUser(row.email);
-        const current =
-          user === null ? null : await options.ports.findMembership(membership.clientId, user.id);
-        firstUserId = user?.id ?? firstUserId;
-        outcome.memberships.push({
-          clientId: membership.clientId,
-          action: 'exists',
-          roleKeys: membership.roleKeys,
-          ...(current === null ? {} : { membershipId: current.membershipId }),
-        });
-        continue;
-      }
-      failures.push(`${membership.clientId}: ${invited.reason}`);
-      outcome.memberships.push({
-        clientId: membership.clientId,
-        action: 'error',
-        roleKeys: membership.roleKeys,
-        detail: invited.detail,
-      });
-    }
-
-    outcome.userId = firstUserId;
-
-    if (failures.length > 0) {
-      outcome.status = 'error';
-      outcome.reason = failures.join('; ');
-      outcomes.push(outcome);
-      continue;
-    }
-    const allExisted = outcome.memberships.every((item) => item.action === 'exists');
-    outcome.status = allExisted ? 'skipped' : createdUser ? 'created' : 'linked';
-
-    if (
-      mailMode === 'none' ||
-      firstUserId === null ||
-      (outcome.status === 'skipped' && options.resendMail !== true)
-    ) {
-      outcomes.push(outcome);
-      continue;
-    }
-
-    await throttle();
     try {
-      if (mailMode === 'verification') {
-        outcome.mail = (await options.ports.sendVerification(firstUserId))
-          ? 'verification'
-          : 'skipped';
-      } else {
-        outcome.mail = await options.ports.sendInvite(firstUserId);
+      const existing = await options.ports.findUser(row.email);
+      if (dryRun) {
+        outcome.userId = existing?.id ?? null;
+        for (const membership of row.memberships) {
+          const current =
+            existing === null
+              ? null
+              : await options.ports.findMembership(membership.clientId, existing.id);
+          outcome.memberships.push({
+            clientId: membership.clientId,
+            action: current === null ? 'created' : 'exists',
+            roleKeys: membership.roleKeys,
+            ...(current === null ? {} : { membershipId: current.membershipId }),
+          });
+        }
+        if (existing !== null && outcome.memberships.every((item) => item.action === 'exists')) {
+          outcome.status = 'skipped';
+        } else {
+          outcome.status = existing === null ? 'created' : 'linked';
+        }
+        outcomes.push(outcome);
+        continue;
       }
+
+      let createdUser = false;
+      let firstUserId: string | null = existing?.id ?? null;
+      const failures: string[] = [];
+
+      for (const membership of row.memberships) {
+        const invited = await options.ports.invite(membership.clientId, {
+          email: row.email,
+          ...(row.displayName === undefined ? {} : { displayName: row.displayName }),
+          roleKeys: membership.roleKeys,
+          attributes: {},
+          invitedBy: options.actorId,
+        });
+        if (invited.ok) {
+          createdUser = createdUser || invited.value.createdUser;
+          firstUserId = invited.value.member.userId;
+          outcome.memberships.push({
+            clientId: membership.clientId,
+            action: 'created',
+            membershipId: invited.value.member.membershipId,
+            roleKeys: membership.roleKeys,
+          });
+          continue;
+        }
+        if (invited.reason === 'duplicate') {
+          const user =
+            firstUserId !== null ? { id: firstUserId } : await options.ports.findUser(row.email);
+          const current =
+            user === null ? null : await options.ports.findMembership(membership.clientId, user.id);
+          firstUserId = user?.id ?? firstUserId;
+          outcome.memberships.push({
+            clientId: membership.clientId,
+            action: 'exists',
+            roleKeys: membership.roleKeys,
+            ...(current === null ? {} : { membershipId: current.membershipId }),
+          });
+          continue;
+        }
+        failures.push(`${membership.clientId}: ${invited.reason}`);
+        outcome.memberships.push({
+          clientId: membership.clientId,
+          action: 'error',
+          roleKeys: membership.roleKeys,
+          detail: invited.detail,
+        });
+      }
+
+      outcome.userId = firstUserId;
+
+      if (failures.length > 0) {
+        outcome.status = 'error';
+        outcome.reason = failures.join('; ');
+        outcomes.push(outcome);
+        continue;
+      }
+      const allExisted = outcome.memberships.every((item) => item.action === 'exists');
+      outcome.status = allExisted ? 'skipped' : createdUser ? 'created' : 'linked';
+
+      if (
+        mailMode === 'none' ||
+        firstUserId === null ||
+        (outcome.status === 'skipped' && options.resendMail !== true)
+      ) {
+        outcomes.push(outcome);
+        continue;
+      }
+
+      await throttle();
+      try {
+        if (mailMode === 'verification') {
+          outcome.mail = (await options.ports.sendVerification(firstUserId))
+            ? 'verification'
+            : 'skipped';
+        } else {
+          outcome.mail = await options.ports.sendInvite(firstUserId);
+        }
+      } catch (error) {
+        outcome.mail = 'failed';
+        outcome.reason = `mail-send-failed: ${
+          error instanceof Error ? error.message : 'unknown error'
+        }`;
+      }
+      outcomes.push(outcome);
     } catch (error) {
-      outcome.mail = 'failed';
-      outcome.reason = `mail-send-failed: ${
-        error instanceof Error ? error.message : 'unknown error'
-      }`;
+      // One bad row (a constraint violation, a soft-deleted holder of the address) must not
+      // abort the run or lose the rows that were already written.
+      outcome.status = 'error';
+      outcome.reason = `unexpected: ${error instanceof Error ? error.message : 'unknown error'}`;
+      outcomes.push(outcome);
     }
-    outcomes.push(outcome);
+  }
+
+  const warnings: string[] = [];
+  if (mailMode !== 'invite' && !dryRun && outcomes.some((row) => row.status === 'created')) {
+    warnings.push(
+      `--mail ${mailMode} does not activate imported users: they stay pending and cannot sign ` +
+        'in until they accept an invitation (re-run with --mail invite --resend-mail).',
+    );
   }
 
   return {
@@ -729,6 +767,7 @@ export async function runUserImport(options: UserImportOptions): Promise<ImportS
     clients: [...options.allowedClients],
     totals: totalsOf(outcomes),
     rows: outcomes,
+    ...(warnings.length === 0 ? {} : { warnings }),
   };
 }
 

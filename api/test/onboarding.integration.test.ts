@@ -328,6 +328,61 @@ describe('permission mapping', () => {
   });
 });
 
+describe('failure and rollback fidelity', () => {
+  it('keeps the state of a partly applied run so it can be rolled back', async () => {
+    // A role row owned by nobody blocks the mapping after the new permission was written.
+    await prisma.role.create({
+      data: { key: 'platform-a:ghost', name: 'Ghost', description: 'blocker', clientId: null },
+    });
+    const config = parse({
+      ...configDocument,
+      permissions: [
+        ...configDocument.permissions,
+        { key: 'platform-a:extra:read', description: 'Extra' },
+      ],
+      roles: [
+        ...configDocument.roles,
+        {
+          key: 'platform-a:ghost',
+          name: 'Ghost',
+          description: 'blocker',
+          permissions: ['platform-a:extra:read'],
+        },
+      ],
+    });
+    const result = await applyClientOnboarding({ config, skipSocial: true }, dependencies);
+    expect(result.problems.join(' ')).toContain('platform-a:ghost');
+    expect(result.state?.mapping.permissions.map((entry) => entry.key)).toContain(
+      'platform-a:extra:read',
+    );
+    await prisma.role.delete({ where: { key: 'platform-a:ghost' } });
+  });
+
+  it('restores the name and description of a role the apply step changed', async () => {
+    const renamed = parse({
+      ...configDocument,
+      roles: configDocument.roles.map((role) =>
+        role.key === 'platform-a:member'
+          ? { ...role, name: 'Renamed', description: 'Changed by a later run' }
+          : role,
+      ),
+    });
+    const applied = await applyClientOnboarding(
+      { config: renamed, skipSocial: true },
+      dependencies,
+    );
+    expect(applied.problems).toEqual([]);
+    expect((await prisma.role.findUnique({ where: { key: 'platform-a:member' } }))?.name).toBe(
+      'Renamed',
+    );
+    const rolledBack = await rollbackClientOnboarding({ state: applied.state! }, dependencies);
+    expect(rolledBack.problems).toEqual([]);
+    const restored = await prisma.role.findUnique({ where: { key: 'platform-a:member' } });
+    expect(restored?.name).toBe('Member');
+    expect(restored?.description).toBe('Default member role');
+  });
+});
+
 describe('social provider onboarding', () => {
   it('refuses to write when a credential is missing', async () => {
     const result = await applyClientOnboarding(

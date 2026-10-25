@@ -111,7 +111,16 @@ export function planPermissionMapping(config: AppOnboardingConfig): MappingValid
   const delegated = new Set(DELEGATED_ADMIN_PERMISSION_KEYS);
   for (const role of config.roles) {
     for (const key of role.permissions) {
-      if (appPermissions.has(key) || delegated.has(key)) {
+      if (delegated.has(key)) {
+        if (role.key !== config.userAdminRole) {
+          problems.push(
+            `role "${role.key}" links delegated-administration permission "${key}"; ` +
+              `only userAdminRole "${config.userAdminRole}" may hold it`,
+          );
+        }
+        continue;
+      }
+      if (appPermissions.has(key)) {
         continue;
       }
       problems.push(
@@ -169,7 +178,12 @@ export interface MappingRoleState {
   key: string;
   existed: boolean;
   /** Snapshot before the apply step; `null` when the role did not exist. */
-  previous: { permissionKeys: string[]; isDefault: boolean } | null;
+  previous: {
+    permissionKeys: string[];
+    isDefault: boolean;
+    name?: string;
+    description?: string;
+  } | null;
 }
 
 /** Rollback input written next to the onboarding summary; contains no secret material. */
@@ -248,8 +262,9 @@ export async function applyPermissionMapping(
   }
 
   if (problems.length > 0) {
-    // A partial catalog is never left behind: stop before roles are touched.
-    return { dryRun, problems, operations, state: null };
+    // Stop before roles are touched, but keep the state: permissions created so far must
+    // stay reachable by a rollback.
+    return { dryRun, problems, operations, state };
   }
 
   for (const role of plan.roles) {
@@ -304,6 +319,8 @@ export async function applyPermissionMapping(
       previous: {
         permissionKeys: [...existing.permissionKeys].sort(),
         isDefault: existing.isDefault,
+        name: existing.name,
+        description: existing.description,
       },
     });
     const unchanged =
@@ -347,7 +364,7 @@ export async function applyPermissionMapping(
     dryRun,
     problems,
     operations,
-    state: problems.length > 0 ? null : state,
+    state,
   };
 }
 
@@ -394,7 +411,13 @@ export async function rollbackPermissionMapping(
           problems.push(`role "${roleState.key}": ${restored.detail}`);
           continue;
         }
-        const updated = await rbac.updateRole(role.id, { isDefault: roleState.previous.isDefault });
+        const updated = await rbac.updateRole(role.id, {
+          isDefault: roleState.previous.isDefault,
+          ...(roleState.previous.name === undefined ? {} : { name: roleState.previous.name }),
+          ...(roleState.previous.description === undefined
+            ? {}
+            : { description: roleState.previous.description }),
+        });
         if (!updated.ok) {
           problems.push(`role "${roleState.key}": ${updated.detail}`);
           continue;

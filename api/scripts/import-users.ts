@@ -55,6 +55,7 @@ const USAGE = `usage:
   import-users.ts import --client <clientId> [--client <clientId>...] --file <users.csv|users.json>
                          --actor <operator@example.com> [--mail invite|verification|none]
                          [--resend-mail] [--mail-rate <emails-per-minute>] [--dry-run]
+                         [--allow-role <roleKey>]... [--allow-admin-roles]
                          [--summary <file>] [--confirm]
   import-users.ts rollback --summary <file> [--keep-users] [--dry-run] [--confirm]
 
@@ -151,7 +152,13 @@ async function main(): Promise<void> {
       flagValue(args, 'format') ?? (extname(file).toLowerCase() === '.json' ? 'json' : 'csv');
 
     const content = await readFile(file, 'utf8');
-    const parseOptions = { allowedClients: clients, defaultClient: clients[0]! };
+    const allowedRoleKeys = flagValues(args, 'allow-role');
+    const parseOptions = {
+      allowedClients: clients,
+      defaultClient: clients[0]!,
+      ...(allowedRoleKeys.length === 0 ? {} : { allowedRoleKeys }),
+      allowAdminRoles: hasFlag(args, 'allow-admin-roles'),
+    };
     const parsedImport =
       format === 'json'
         ? parseUserJson(JSON.parse(content) as unknown, parseOptions)
