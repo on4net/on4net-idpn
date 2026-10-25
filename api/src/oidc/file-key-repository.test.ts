@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -46,5 +46,28 @@ describe('FileSigningKeyRepository', () => {
   it('ignores an unknown kid when updating status', async () => {
     await expect(repository.updateStatus('missing', 'retired')).resolves.toBeUndefined();
     expect(await repository.list()).toEqual([]);
+  });
+
+  it('keeps every key when saves run concurrently and leaves no temporary file', async () => {
+    const source = new SigningKeyManager(
+      new FileSigningKeyRepository(join(directory, 'seed.json')),
+    );
+    const seed = await source.ensureKey();
+    await Promise.all(
+      Array.from({ length: 8 }, (_, index) =>
+        repository.save({ ...seed, kid: `kid-${String(index)}` }),
+      ),
+    );
+    expect(await repository.list()).toHaveLength(8);
+    const files = await readdir(directory);
+    expect(files.filter((name) => name.endsWith('.tmp'))).toEqual([]);
+  });
+});
+
+describe('SigningKeyManager retention', () => {
+  it('refuses a retention shorter than the longest access-token lifetime', () => {
+    expect(
+      () => new SigningKeyManager(repository, undefined, { retiredRetentionSeconds: 600 }),
+    ).toThrow(/at least 3600/);
   });
 });

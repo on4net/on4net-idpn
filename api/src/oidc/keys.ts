@@ -35,6 +35,13 @@ type LocalJwkSet = ReturnType<typeof createLocalJWKSet>;
  */
 export const DEFAULT_RETIRED_RETENTION_SECONDS = 3600;
 
+/**
+ * Lower bound for retired-key retention: the longest access-token lifetime a client may
+ * configure (`MAX_ACCESS_TOKEN_TTL`). A shorter window would drop a key from the JWKS while
+ * tokens it signed are still valid.
+ */
+export const MIN_RETIRED_RETENTION_SECONDS = 3600;
+
 /** Default age at which `rotationDue` is reported (docs/security.md T10: rotate every 90 days). */
 export const DEFAULT_ROTATION_DUE_DAYS = 90;
 
@@ -80,8 +87,14 @@ export class SigningKeyManager {
     private readonly now: () => Date = () => new Date(),
     options: SigningKeyManagerOptions = {},
   ) {
-    this.retiredRetentionMs =
-      (options.retiredRetentionSeconds ?? DEFAULT_RETIRED_RETENTION_SECONDS) * 1000;
+    const retentionSeconds = options.retiredRetentionSeconds ?? DEFAULT_RETIRED_RETENTION_SECONDS;
+    if (retentionSeconds < MIN_RETIRED_RETENTION_SECONDS) {
+      throw new RangeError(
+        `retiredRetentionSeconds must be at least ${String(MIN_RETIRED_RETENTION_SECONDS)} ` +
+          '(the longest access-token lifetime)',
+      );
+    }
+    this.retiredRetentionMs = retentionSeconds * 1000;
     this.rotationDueAfterDays = options.rotationDueAfterDays ?? DEFAULT_ROTATION_DUE_DAYS;
     this.cacheTtlMs = (options.keyCacheTtlSeconds ?? DEFAULT_KEY_CACHE_TTL_SECONDS) * 1000;
     this.onWarning = options.onWarning;

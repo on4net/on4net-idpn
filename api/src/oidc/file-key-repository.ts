@@ -1,4 +1,5 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
 import type { SigningKeyRepository, SigningKeyStatus, StoredSigningKey } from './key-types.js';
@@ -20,7 +21,16 @@ interface SerializedKey {
  * instance keeps the same `kid` across restarts while no secret ever enters the repository.
  */
 export class FileSigningKeyRepository implements SigningKeyRepository {
+  /** Serialises read-modify-write cycles of this process so two saves cannot lose an update. */
+  private queue: Promise<unknown> = Promise.resolve();
+
   constructor(private readonly filePath: string) {}
+
+  private exclusive<T>(task: () => Promise<T>): Promise<T> {
+    const run = this.queue.then(task, task);
+    this.queue = run.catch(() => undefined);
+    return run;
+  }
 
   async list(): Promise<StoredSigningKey[]> {
     const keys = await this.read();
@@ -28,13 +38,23 @@ export class FileSigningKeyRepository implements SigningKeyRepository {
   }
 
   async save(key: StoredSigningKey): Promise<void> {
-    const keys = await this.read();
-    const next = keys.filter((entry) => entry.kid !== key.kid);
-    next.push(serialize(key));
-    await this.write(next);
+    await this.exclusive(async () => {
+      const keys = await this.read();
+      const next = keys.filter((entry) => entry.kid !== key.kid);
+      next.push(serialize(key));
+      await this.write(next);
+    });
   }
 
-  async updateStatus(kid: string, status: SigningKeyStatus, retiredAt?: Date): Promise<void> {
+  updateStatus(kid: string, status: SigningKeyStatus, retiredAt?: Date): Promise<void> {
+    return this.exclusive(() => this.applyStatus(kid, status, retiredAt));
+  }
+
+  private async applyStatus(
+    kid: string,
+    status: SigningKeyStatus,
+    retiredAt?: Date,
+  ): Promise<void> {
     const keys = await this.read();
     const index = keys.findIndex((entry) => entry.kid === kid);
     if (index === -1) {
@@ -67,10 +87,19 @@ export class FileSigningKeyRepository implements SigningKeyRepository {
 
   private async write(keys: SerializedKey[]): Promise<void> {
     await mkdir(dirname(resolve(this.filePath)), { recursive: true });
-    await writeFile(this.filePath, `${JSON.stringify(keys, null, 2)}\n`, {
-      encoding: 'utf8',
-      mode: 0o600,
-    });
+    // Write next to the target and rename over it: a crash leaves either the old or the new
+    // file, never a truncated key store that would drop every signing key.
+    const temporary = `${this.filePath}.${randomUUID()}.tmp`;
+    try {
+      await writeFile(temporary, `${JSON.stringify(keys, null, 2)}\n`, {
+        encoding: 'utf8',
+        mode: 0o600,
+      });
+      await rename(temporary, this.filePath);
+    } catch (error) {
+      await rm(temporary, { force: true });
+      throw error;
+    }
   }
 }
 
