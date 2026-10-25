@@ -49,6 +49,7 @@ describe('parseServerEnv', () => {
       ...minimalEnv,
       NODE_ENV: 'production',
       CLIENT_SECRET_PEPPER: 'production-client-secret-pepper-value',
+      RECOVERY_LOOKUP_KEY: 'production-recovery-lookup-key-value-0001',
       SIGNING_KEY_REF: 'file:///var/lib/idpn/signing-keys.json',
       PORT: '8080',
       LOG_LEVEL: 'debug',
@@ -170,6 +171,10 @@ describe('parseServerEnv', () => {
     expect(captureIssues({ ...minimalEnv, NODE_ENV: 'production' })).toEqual([
       {
         key: 'CLIENT_SECRET_PEPPER',
+        message: 'is required in production (supply it from KMS/Vault)',
+      },
+      {
+        key: 'RECOVERY_LOOKUP_KEY',
         message: 'is required in production (supply it from KMS/Vault)',
       },
       {

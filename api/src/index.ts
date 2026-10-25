@@ -57,6 +57,7 @@ import { createPrismaPublicTranslationRepository } from './translations/prisma-r
 import { createPrismaLoginRepository } from './login/prisma-repository.js';
 import { createPrismaMfaRepository } from './mfa/prisma-repository.js';
 import { RedisMfaChallengeStore } from './mfa/challenge-store.js';
+import { createRecoveryLookup, loadRecoveryLookupKeys } from './mfa/recovery-lookup.js';
 import { RedisWebauthnChallengeStore } from './mfa/webauthn-challenge-store.js';
 import { SimpleWebauthnLibrary } from './mfa/webauthn-library.js';
 import { resolveWebauthnConfig } from './mfa/webauthn.js';
@@ -224,8 +225,14 @@ const socialSecretBox = socialSecretKey === null ? null : createSecretBox(social
 const mfaSecretKey = loadMfaSecretKey(env);
 const mfaSecretBox = mfaSecretKey === null ? null : createSecretBox(mfaSecretKey);
 const mfaRepository = createPrismaMfaRepository(prisma, { permissions: permissionReader });
+/**
+ * Keyed lookup that lets recovery-code verification find its one candidate row instead of
+ * Argon2id-checking every unused code (card #79). Production requires `RECOVERY_LOOKUP_KEY`.
+ */
+const recoveryLookup = createRecoveryLookup(loadRecoveryLookupKeys(env));
 const mfaDependencies = {
   repository: mfaRepository,
+  recoveryLookup,
   challenges: new RedisMfaChallengeStore(redis),
   secretBox: mfaSecretBox,
   verify: verifyPassword,
@@ -512,6 +519,7 @@ const app = buildServer({
       issuer: new URL(env.APP_URL).host,
       verify: verifyPassword,
       recoveryParams: passwordParams,
+      recoveryLookup,
     },
     webauthn: webauthnDependencies,
     notifyPasskeyChange: (userId, action) => accountLifecycle.sendPasskeyChanged(userId, action),

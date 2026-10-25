@@ -277,11 +277,15 @@ model MfaRecoveryCode {
   id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   factorId  String    @map("factor_id") @db.Uuid
   codeHash  String    @map("code_hash")
+  /// `<keyId>$HMAC-SHA-256(key, normalised code)`: selects the one row to verify with Argon2id.
+  /// NULL for rows written before migration 0018; they use the bounded fallback until rotated.
+  codeLookup String?  @map("code_lookup") @db.VarChar(100)
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   usedAt    DateTime? @map("used_at") @db.Timestamptz(6)
 
   factor MfaFactor @relation(fields: [factorId], references: [id], onDelete: Cascade)
 
+  @@unique([factorId, codeLookup])
   @@index([factorId, usedAt])
   @@map("mfa_recovery_codes")
 }

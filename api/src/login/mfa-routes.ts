@@ -4,7 +4,8 @@ import { sanitizeAuditMetadata } from '../audit/sanitize.js';
 import { MFA_ACR, type MfaLoginDependencies } from '../mfa/mfa-types.js';
 import { MFA_CHALLENGE_MAX_ATTEMPTS, isChallengeToken } from '../mfa/challenge-store.js';
 import { verifyRecoveryCode, verifyTotpFactor } from '../mfa/verify.js';
-import { DEFAULT_ARGON2_PARAMS } from '../auth/password.js';
+import { DEFAULT_ARGON2_PARAMS, hashPassword } from '../auth/password.js';
+import { randomBytes } from 'node:crypto';
 import type { RateLimiter, RateLimitPolicy } from '../http/rate-limit.js';
 import { serializeSessionCookie } from '../session/cookie.js';
 import type { RedisSessionStore } from '../session/store.js';
@@ -14,10 +15,7 @@ import type { LoginRouteOptions } from './routes.js';
 
 export interface MfaVerifyRouteOptions {
   mfa: MfaLoginDependencies;
-  users: Pick<
-    LoginRouteOptions['users'],
-    'registerSuccessfulLogin' | 'registerFailedAttempt'
-  >;
+  users: Pick<LoginRouteOptions['users'], 'registerSuccessfulLogin' | 'registerFailedAttempt'>;
   sessions: Pick<RedisSessionStore, 'create'>;
   persistSession: LoginRouteOptions['persistSession'];
   audit: LoginRouteOptions['audit'];
@@ -52,6 +50,17 @@ const MFA_RATE_LIMIT: RateLimitPolicy = { windowSeconds: 60, max: 20 };
  * second session. Errors are deliberately generic so they cannot distinguish an expired
  * challenge from a wrong code.
  */
+/**
+ * A valid Argon2id hash of a random value, computed once. A recovery code that matches no row
+ * is verified against it, so a miss costs one Argon2id check just like a hit and the response
+ * time does not tell the caller whether the lookup found anything.
+ */
+let decoy: Promise<string> | undefined;
+const decoyRecoveryHash = (params: typeof DEFAULT_ARGON2_PARAMS): Promise<string> => {
+  decoy ??= hashPassword(randomBytes(16).toString('hex'), params);
+  return decoy;
+};
+
 export function registerMfaVerifyRoute(app: FastifyInstance, options: MfaVerifyRouteOptions): void {
   const now = options.now ?? (() => new Date());
 
@@ -123,6 +132,13 @@ export function registerMfaVerifyRoute(app: FastifyInstance, options: MfaVerifyR
                   options.mfa.recoveryParams ?? DEFAULT_ARGON2_PARAMS,
                 ),
               at,
+              ...(options.mfa.recoveryLookup === undefined
+                ? {}
+                : {
+                    lookup: options.mfa.recoveryLookup,
+                    decoyHash: () =>
+                      decoyRecoveryHash(options.mfa.recoveryParams ?? DEFAULT_ARGON2_PARAMS),
+                  }),
             },
             factor.id,
             code,

@@ -140,6 +140,21 @@ const serverEnvBase = z.object({
    * list of `id:pepper` pairs (each pepper at least 32 characters).
    */
   CLIENT_SECRET_PREVIOUS_PEPPERS: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
+  /**
+   * Key for the recovery-code lookup (HMAC-SHA-256). Supply it from KMS/Vault, outside
+   * PostgreSQL; required in production. At least 32 characters.
+   */
+  RECOVERY_LOOKUP_KEY: z.preprocess(emptyToUndefined, z.string().min(32).optional()),
+  /** Public id stored with every lookup value; change it together with a key rotation. */
+  RECOVERY_LOOKUP_KEY_ID: z.preprocess(
+    emptyToUndefined,
+    z
+      .string()
+      .regex(/^[A-Za-z0-9_-]{1,16}$/, 'must be 1-16 letters, digits, dash or underscore')
+      .default('k1'),
+  ),
+  /** Superseded lookup keys, `id:key` pairs, used to find existing rows only. */
+  RECOVERY_LOOKUP_PREVIOUS_KEYS: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
   ARGON2_MEMORY_KIB: z.coerce.number().int().min(8192).max(1_048_576).default(65_536),
   ARGON2_TIME_COST: z.coerce.number().int().min(1).max(10).default(3),
   ARGON2_PARALLELISM: z.coerce.number().int().min(1).max(8).default(1),
@@ -234,6 +249,13 @@ export const serverEnvSchema = serverEnvBase.superRefine((value, ctx) => {
     ctx.addIssue({
       code: 'custom',
       path: ['CLIENT_SECRET_PEPPER'],
+      message: 'is required in production (supply it from KMS/Vault)',
+    });
+  }
+  if (value.NODE_ENV === 'production' && value.RECOVERY_LOOKUP_KEY === undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['RECOVERY_LOOKUP_KEY'],
       message: 'is required in production (supply it from KMS/Vault)',
     });
   }

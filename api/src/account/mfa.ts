@@ -8,7 +8,13 @@ import {
 import { generateRecoveryCodes, RECOVERY_CODE_COUNT } from '../mfa/recovery-codes.js';
 import { buildOtpauthUri, generateTotpSecret } from '../mfa/totp.js';
 import { verifyTotpFactor } from '../mfa/verify.js';
-import type { MfaFactorRecord, MfaFactorRepository, MfaUserSecurity } from '../mfa/mfa-types.js';
+import type {
+  MfaFactorRecord,
+  MfaFactorRepository,
+  MfaUserSecurity,
+  NewRecoveryCode,
+} from '../mfa/mfa-types.js';
+import type { RecoveryLookup } from '../mfa/recovery-lookup.js';
 import { isAccountLocked, nextFailureState } from '../login/lockout.js';
 
 /**
@@ -29,6 +35,8 @@ export interface AccountMfaDependencies {
   /** Argon2id parameters for recovery code hashes. */
   recoveryParams?: Argon2Params;
   hash?: (value: string, params: Argon2Params) => Promise<string>;
+  /** Server-keyed lookup written next to every new recovery-code hash (card #79). */
+  recoveryLookup?: RecoveryLookup;
   verify?: (hash: string, value: string, params: Argon2Params) => Promise<boolean>;
 }
 
@@ -212,7 +220,8 @@ export type DisableResult =
   | { ok: true }
   | {
       ok: false;
-      reason: 'not_found' | 'invalid_password' | 'invalid_code' | 'denied' | 'last_method' | 'locked';
+      reason:
+        'not_found' | 'invalid_password' | 'invalid_code' | 'denied' | 'last_method' | 'locked';
     };
 
 /**
@@ -395,11 +404,15 @@ async function issueRecoveryCodes(
   const params = deps.recoveryParams ?? DEFAULT_ARGON2_PARAMS;
   const hash = deps.hash ?? hashPassword;
   const codes = generateRecoveryCodes();
-  const hashes: string[] = [];
+  const stored: NewRecoveryCode[] = [];
   for (const code of codes) {
     // Hash the normalized value (no separator) so entry is separator-insensitive.
-    hashes.push(await hash(code.replace(/-/g, ''), params));
+    const normalized = code.replace(/-/g, '');
+    stored.push({
+      codeHash: await hash(normalized, params),
+      codeLookup: deps.recoveryLookup?.create(normalized) ?? null,
+    });
   }
-  await deps.repository.replaceRecoveryCodes(factorId, hashes, at);
+  await deps.repository.replaceRecoveryCodes(factorId, stored, at);
   return codes;
 }

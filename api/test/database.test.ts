@@ -390,11 +390,7 @@ describe('initial schema', () => {
          VALUES ('system', 'test.append_only', 'success')
          RETURNING id`,
       );
-      await expectSqlError(
-        'DELETE FROM audit_events WHERE id = $1',
-        [second.rows[0]?.id],
-        '42501',
-      );
+      await expectSqlError('DELETE FROM audit_events WHERE id = $1', [second.rows[0]?.id], '42501');
     });
   });
 
@@ -409,6 +405,14 @@ describe('initial schema', () => {
   });
 
   it('rolls back and re-applies the migrations', async () => {
+    const lookup = await rollbackLatestMigration({ connectionString, confirm: true });
+    expect(lookup).toBe('0018_recovery_code_lookup');
+    const lookupColumn = await client.query<{ present: boolean }>(
+      `SELECT EXISTS (SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'mfa_recovery_codes' AND column_name = 'code_lookup') AS present`,
+    );
+    expect(lookupColumn.rows[0]?.present).toBe(false);
+
     const newest = await rollbackLatestMigration({ connectionString, confirm: true });
     expect(newest).toBe('0017_backfill_assignment_membership');
 
@@ -499,7 +503,7 @@ describe('initial schema', () => {
     const history = await client.query<{ migration_name: string; rolled_back_at: Date | null }>(
       `SELECT "migration_name", "rolled_back_at" FROM "_prisma_migrations"`,
     );
-    expect(history.rows).toHaveLength(17);
+    expect(history.rows).toHaveLength(18);
     expect(history.rows.every((row) => row.rolled_back_at !== null)).toBe(true);
 
     const afterRollback = await client.query<{ users: string | null }>(
@@ -515,7 +519,8 @@ describe('initial schema', () => {
     expect(afterReapply.rows[0]?.users).not.toBeNull();
   }, 240_000);
 
-  it('seeding twice does not duplicate data', async () => {    const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
+  it('seeding twice does not duplicate data', async () => {
+    const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
     try {
       await seedDatabase(prisma);
       const first = await countSeededRows(prisma);

@@ -2,6 +2,7 @@ import type { AuditEventInput } from '../audit/sanitize.js';
 import type { Argon2Params } from '../auth/password.js';
 import type { SecretBox } from '../crypto/secret-box.js';
 import type { MfaChallengeStore } from './challenge-store.js';
+import type { RecoveryLookup } from './recovery-lookup.js';
 
 /** ACR/AMR values proving a multi-factor session (docs/auth-flows.md 7.3). */
 export const MFA_ACR = 'urn:on4net:acr:mfa';
@@ -52,6 +53,14 @@ export interface MfaUserSecurity {
 export interface RecoveryCodeRecord {
   id: string;
   codeHash: string;
+  /** Stored lookup value; `null` for rows written before the lookup column existed. */
+  codeLookup?: string | null;
+}
+
+/** One recovery code as persisted: the Argon2id hash plus its server-keyed lookup value. */
+export interface NewRecoveryCode {
+  codeHash: string;
+  codeLookup: string | null;
 }
 
 export type CreateTotpFactorResult =
@@ -121,8 +130,20 @@ export interface MfaFactorRepository {
   renameFactor(factorId: string, userId: string, name: string): Promise<boolean>;
   deleteFactor(factorId: string, userId: string): Promise<boolean>;
   /** Replaces every recovery code of the factor, invalidating the previous set atomically. */
-  replaceRecoveryCodes(factorId: string, codeHashes: readonly string[], at: Date): Promise<void>;
+  replaceRecoveryCodes(
+    factorId: string,
+    codes: readonly (string | NewRecoveryCode)[],
+    at: Date,
+  ): Promise<void>;
   listUnusedRecoveryCodes(factorId: string): Promise<RecoveryCodeRecord[]>;
+  /** The unused row stored under one of `lookups`, if any (indexed, at most one row). */
+  findUnusedRecoveryCodeByLookup(
+    factorId: string,
+    lookups: readonly string[],
+  ): Promise<RecoveryCodeRecord | null>;
+  /** Unused rows without a lookup value: the bounded fallback for pre-0018 codes. */
+  listUnusedLegacyRecoveryCodes(factorId: string): Promise<RecoveryCodeRecord[]>;
+
   /** Single-use consumption: `false` when the code was already used. */
   consumeRecoveryCode(codeId: string, at: Date): Promise<boolean>;
   countUnusedRecoveryCodes(factorId: string): Promise<number>;
@@ -168,6 +189,11 @@ export interface MfaLoginRepository {
   findUserSecurity(userId: string): Promise<MfaUserSecurity | null>;
   markTotpUsed(factorId: string, step: bigint, at: Date): Promise<boolean>;
   listUnusedRecoveryCodes(factorId: string): Promise<RecoveryCodeRecord[]>;
+  findUnusedRecoveryCodeByLookup(
+    factorId: string,
+    lookups: readonly string[],
+  ): Promise<RecoveryCodeRecord | null>;
+  listUnusedLegacyRecoveryCodes(factorId: string): Promise<RecoveryCodeRecord[]>;
   consumeRecoveryCode(codeId: string, at: Date): Promise<boolean>;
   recordAudit(event: AuditEventInput): Promise<void>;
   /** Whether the account counts as an administrator for `required_admins`. */
@@ -183,4 +209,6 @@ export interface MfaLoginDependencies {
   /** Argon2id verifier for recovery-code hashes. */
   verify: (hash: string, value: string, params: Argon2Params) => Promise<boolean>;
   recoveryParams?: Argon2Params;
+  /** Keyed lookup that makes recovery-code verification one Argon2id check (card #79). */
+  recoveryLookup?: RecoveryLookup;
 }

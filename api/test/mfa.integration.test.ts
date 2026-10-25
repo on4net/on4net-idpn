@@ -26,6 +26,7 @@ import {
   RedisMfaChallengeStore,
 } from '../src/mfa/challenge-store.js';
 import { createPrismaMfaRepository } from '../src/mfa/prisma-repository.js';
+import { createRecoveryLookup, loadRecoveryLookupKeys } from '../src/mfa/recovery-lookup.js';
 import { totpCode } from '../src/mfa/totp.js';
 import { MemorySigningKeyRepository, SigningKeyManager } from '../src/oidc/keys.js';
 import { buildServer } from '../src/server.js';
@@ -236,6 +237,7 @@ beforeAll(async () => {
         secretBox,
         verify: (hash, value) => verifyPassword(hash, value, FAST_ARGON2),
         recoveryParams: FAST_ARGON2,
+        recoveryLookup,
       },
       cookie: { secure: true, idleTtlSeconds: 600, absoluteTtlSeconds: 3600 },
       alerts: { raise: (alert) => alerts.push(alert) },
@@ -252,6 +254,7 @@ beforeAll(async () => {
         secretBox,
         issuer: 'auth.example.com',
         recoveryParams: FAST_ARGON2,
+        recoveryLookup,
       },
     },
   });
@@ -275,6 +278,8 @@ afterAll(async () => {
   }
   await container?.stop();
 });
+
+const recoveryLookup = createRecoveryLookup(loadRecoveryLookupKeys({ NODE_ENV: 'test' }));
 
 describe('account MFA enrollment', () => {
   it('returns the secret once, stores it encrypted and never exposes it again', async () => {
@@ -397,6 +402,30 @@ describe('account MFA enrollment', () => {
     expect(await prisma.mfaFactor.count({ where: { userId } })).toBe(0);
   });
 
+  it('stores a distinct keyed lookup next to every recovery-code hash', async () => {
+    const userId = await createUser('recovery-lookup');
+    const enrolled = await enrollTotp(userId);
+
+    const rows = await prisma.mfaRecoveryCode.findMany({ where: { factorId: enrolled.factorId } });
+    expect(rows).toHaveLength(10);
+    expect(rows.every((row) => row.codeLookup?.startsWith('dev$') === true)).toBe(true);
+    expect(new Set(rows.map((row) => row.codeLookup)).size).toBe(10);
+    // The lookup is keyed: it is not derivable from the plain code or the hash.
+    for (const code of enrolled.recoveryCodes) {
+      expect(JSON.stringify(rows)).not.toContain(code.replace(/-/g, ''));
+    }
+    // The database refuses two rows of one factor under the same lookup value.
+    await expect(
+      prisma.mfaRecoveryCode.create({
+        data: {
+          factorId: enrolled.factorId,
+          codeHash: rows[0]?.codeHash ?? 'x',
+          codeLookup: rows[0]?.codeLookup ?? 'x',
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'P2002' });
+  });
+
   it('rotates recovery codes and invalidates the previous set', async () => {
     const userId = await createUser('rotate-recovery');
     const session = await createSession(userId);
@@ -428,6 +457,10 @@ describe('account MFA enrollment', () => {
     const fresh = rotated.body.recoveryCodes[0] ?? '';
     const accepted = await verify(challenge.body.challengeToken, fresh, 'recovery');
     expect(accepted.status).toBe(200);
+    const spent = await prisma.mfaRecoveryCode.count({
+      where: { factorId: enrolled.factorId, usedAt: { not: null } },
+    });
+    expect(spent).toBe(1);
   });
 
   it('refuses to remove the last factor when the app policy requires MFA', async () => {
@@ -592,9 +625,7 @@ describe('login with TOTP', () => {
     });
     expect(audited).toBe(MFA_CHALLENGE_MAX_ATTEMPTS);
     expect(responses.some((response) => response.status === 429)).toBe(true);
-    expect(
-      responses.filter((response) => response.status === 200),
-    ).toHaveLength(0);
+    expect(responses.filter((response) => response.status === 200)).toHaveLength(0);
   });
 
   it('locks the account after repeated wrong MFA codes', async () => {

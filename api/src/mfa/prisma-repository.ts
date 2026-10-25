@@ -278,14 +278,41 @@ export function createPrismaMfaRepository(
       return true;
     },
 
-    async replaceRecoveryCodes(factorId, codeHashes, at) {
+    async replaceRecoveryCodes(factorId, codes, at) {
       await prisma.$transaction(async (tx) => {
         await tx.mfaRecoveryCode.deleteMany({ where: { factorId } });
-        if (codeHashes.length > 0) {
+        if (codes.length > 0) {
           await tx.mfaRecoveryCode.createMany({
-            data: codeHashes.map((codeHash) => ({ factorId, codeHash, createdAt: at })),
+            data: codes.map((entry) => {
+              const code =
+                typeof entry === 'string' ? { codeHash: entry, codeLookup: null } : entry;
+              return {
+                factorId,
+                codeHash: code.codeHash,
+                codeLookup: code.codeLookup,
+                createdAt: at,
+              };
+            }),
           });
         }
+      });
+    },
+
+    async findUnusedRecoveryCodeByLookup(factorId, lookups) {
+      if (lookups.length === 0) {
+        return null;
+      }
+      return prisma.mfaRecoveryCode.findFirst({
+        where: { factorId, usedAt: null, codeLookup: { in: [...lookups] } },
+        select: { id: true, codeHash: true, codeLookup: true },
+      });
+    },
+
+    async listUnusedLegacyRecoveryCodes(factorId) {
+      return prisma.mfaRecoveryCode.findMany({
+        where: { factorId, usedAt: null, codeLookup: null },
+        select: { id: true, codeHash: true, codeLookup: true },
+        orderBy: { createdAt: 'asc' },
       });
     },
 
