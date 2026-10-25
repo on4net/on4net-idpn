@@ -14,6 +14,7 @@ import {
   backupFileNames,
   detectPostgresAccess,
   formatBytes,
+  listPublicTables,
   parseDatabaseUrl,
   redactSecrets,
   scratchDatabaseUrl,
@@ -23,7 +24,7 @@ import {
   verifyChecksum,
   writeChecksum,
 } from '../scripts/ops/ops-lib.js';
-import { parseArguments as parseRestoreArguments } from '../scripts/ops/restore.js';
+import { parseArguments as parseRestoreArguments, runRestore } from '../scripts/ops/restore.js';
 import { readBackupStatus } from '../src/observability/backup-status.js';
 
 const execFileAsync = promisify(execFile);
@@ -273,9 +274,12 @@ describe('supply-chain gate', () => {
   });
 
   it('fails when react is not one exact version across the workspace', async () => {
-    await writeWorkspace({ name: 'fixture', dependencies: { react: '19.0.0' } }, {
-      a: { name: 'a', dependencies: { react: '19.1.0' } },
-    });
+    await writeWorkspace(
+      { name: 'fixture', dependencies: { react: '19.0.0' } },
+      {
+        a: { name: 'a', dependencies: { react: '19.1.0' } },
+      },
+    );
 
     const result = await runGate();
     expect(result.code).toBe(1);
@@ -283,12 +287,93 @@ describe('supply-chain gate', () => {
   });
 
   it('passes a pinned fixture', async () => {
-    await writeWorkspace({ name: 'fixture', dependencies: { vite: '7.1.0' } }, {
-      a: { name: 'a', dependencies: { react: '19.1.0' } },
-    });
+    await writeWorkspace(
+      { name: 'fixture', dependencies: { vite: '7.1.0' } },
+      {
+        a: { name: 'a', dependencies: { react: '19.1.0' } },
+      },
+    );
 
     const result = await runGate();
     expect(result.code).toBe(0);
     expect(result.stderr).toBe('');
+  });
+});
+
+describe('restore safety', () => {
+  let directory: string;
+  let backup: string;
+
+  beforeEach(async () => {
+    directory = await mkdtemp(join(tmpdir(), 'idpn-restore-test-'));
+    backup = join(directory, 'idpn.dump');
+    await writeFile(backup, 'not a real dump');
+  });
+
+  afterEach(async () => {
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  const base = () => ({
+    backupFile: backup,
+    skipChecksum: true,
+    access: { mode: 'local' } as const,
+    log: () => undefined,
+  });
+
+  it('parses --confirm and --snapshot-dir', () => {
+    const parsed = parseRestoreArguments([
+      '--backup',
+      backup,
+      '--target-url',
+      'postgresql://u@db/idpn',
+      '--allow-non-scratch',
+      '--confirm',
+      'idpn',
+      '--snapshot-dir',
+      '/var/backups/idpn',
+    ]);
+    expect(parsed.options.confirm).toBe('idpn');
+    expect(parsed.options.snapshotDirectory).toBe('/var/backups/idpn');
+  });
+
+  it('refuses a production-looking target without --allow-non-scratch', async () => {
+    await expect(
+      runRestore({ ...base(), targetUrl: 'postgresql://u@db/idpn_production' }),
+    ).rejects.toThrow(/--allow-non-scratch/);
+  });
+
+  it('refuses to overwrite without the database name typed back', async () => {
+    await expect(
+      runRestore({
+        ...base(),
+        targetUrl: 'postgresql://u@db/idpn_production',
+        allowNonScratch: true,
+      }),
+    ).rejects.toThrow(/needs --confirm idpn_production/);
+    await expect(
+      runRestore({
+        ...base(),
+        targetUrl: 'postgresql://u@db/idpn_production',
+        allowNonScratch: true,
+        confirm: 'idpn_prod',
+      }),
+    ).rejects.toThrow(/needs --confirm idpn_production/);
+  });
+
+  it('does not touch the database before the confirmation passes', async () => {
+    // `psql` would be needed to list tables; a missing binary would surface as a different
+    // error. The confirmation error proves the guard runs first.
+    await expect(
+      runRestore({
+        ...base(),
+        targetUrl: 'postgresql://u@unreachable.invalid/idpn_production',
+        allowNonScratch: true,
+      }),
+    ).rejects.toThrow(/--confirm/);
+  });
+
+  it('exports a catalog-driven table listing instead of a hand-kept list', () => {
+    expect(typeof listPublicTables).toBe('function');
   });
 });

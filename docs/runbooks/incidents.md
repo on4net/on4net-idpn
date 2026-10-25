@@ -168,7 +168,7 @@ curl -s -H "Authorization: Bearer <metrics-token>" http://127.0.0.1:6000/metrics
 **اقدام**:
 
 1. اگر بکاپ تازه شکست خورده، **بکاپ قدیمی را حذف نکنید** تا بکاپ جدید تأیید شود (Retention را دستی تغییر ندهید).
-2. اگر دیتابیس از دست رفته، آخرین Dump معتبر را با `ops:restore --drill` روی یک Scratch تست کنید و سپس با `--allow-non-scratch` بازیابی کنید (تأیید Incident Commander).
+2. اگر دیتابیس از دست رفته، آخرین Dump معتبر را با `ops:restore --drill` روی یک Scratch تست کنید و سپس با `--allow-non-scratch --confirm <نام-دیتابیس>` بازیابی کنید (Snapshot پیش از Restore خودکار گرفته می‌شود) (تأیید Incident Commander).
 3. RTO هدف ۱ ساعت است؛ زمان شروع/پایان Restore و تعداد سطرهای تأییدشده را در تایم‌لاین ثبت کنید.
 4. پس از بازیابی: مهاجرت‌ها (`db:deploy`)، کلیدهای امضا (بکاپ کلید را از KMS بگیرید)، و Sessionها (Redis) را بررسی کنید؛ کاربران ممکن است نیاز به ورود دوباره داشته باشند.
 5. علت را برطرف و Job را مانیتور کنید؛ `IdpnBackupMetricMissing` معمولاً یعنی `BACKUP_STATUS_FILE` در API تنظیم نشده یا فایل قابل خواندن نیست.

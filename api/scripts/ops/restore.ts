@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { rm } from 'node:fs/promises';
+import { chmod, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { performance } from 'node:perf_hooks';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -8,9 +8,12 @@ import { pathToFileURL } from 'node:url';
 import {
   commandExists,
   detectPostgresAccess,
+  dumpDatabase,
+  listPublicTables,
   mustRun,
   parseDatabaseUrl,
   queryScalar,
+  quoteIdentifier,
   restoreDatabase,
   runSql,
   scratchDatabaseUrl,
@@ -37,6 +40,13 @@ export interface RestoreOptions {
   drill?: boolean;
   keep?: boolean;
   allowNonScratch?: boolean;
+  /**
+   * Name of the database being overwritten. A restore into a production-looking database is a
+   * destructive act, so the operator must type the name back (`--confirm <dbname>`).
+   */
+  confirm?: string;
+  /** Where the pre-restore snapshot of the target goes (default: next to the backup). */
+  snapshotDirectory?: string;
   ageIdentity?: string;
   skipChecksum?: boolean;
   access?: PostgresAccess;
@@ -56,6 +66,8 @@ export interface RestoreResult {
   durationSeconds: number;
   rtoSeconds: number;
   checksumVerified: boolean;
+  /** File name of the dump taken of the target before it was overwritten, if it held data. */
+  preRestoreSnapshot: string | null;
   counts: Record<string, RestoreCount>;
 }
 
@@ -84,9 +96,54 @@ async function decryptIfNeeded(
   if (!commandExists('age')) {
     throw new Error('age is not installed; cannot decrypt the backup');
   }
-  const plain = join(tmpdir(), `${basename(file, '.age')}.${process.pid}.restore`);
-  mustRun('age', ['-d', '-i', identity, '-o', plain, file], 'age decryption');
-  return { file: plain, cleanup: plain };
+  // The decrypted dump holds every credential hash and session: it lives in a private (0700)
+  // directory with an unpredictable name, never directly in the shared temp directory.
+  const directory = await mkdtemp(join(tmpdir(), 'idpn-restore-'));
+  await chmod(directory, 0o700);
+  const plain = join(directory, basename(file, '.age'));
+  try {
+    mustRun('age', ['-d', '-i', identity, '-o', plain, file], 'age decryption');
+    await chmod(plain, 0o600);
+  } catch (error) {
+    await rm(directory, { recursive: true, force: true });
+    throw error;
+  }
+  return { file: plain, cleanup: directory };
+}
+
+/**
+ * Dumps the target before it is overwritten. `pg_restore --clean` drops what is there, so a
+ * restore of the wrong backup would otherwise destroy the only copy. A target that does not
+ * exist yet or holds no tables needs no snapshot; a snapshot that fails aborts the restore.
+ */
+function snapshotTarget(input: {
+  access: PostgresAccess;
+  targetUrl: string;
+  database: string;
+  directory: string;
+  now: Date;
+  log: (line: string) => void;
+}): string | null {
+  let tables = 0;
+  try {
+    tables = listPublicTables({ access: input.access, databaseUrl: input.targetUrl }).length;
+  } catch {
+    input.log(`snapshot: ${input.database} is not reachable or empty; nothing to preserve`);
+    return null;
+  }
+  if (tables === 0) {
+    input.log(`snapshot: ${input.database} has no tables; nothing to preserve`);
+    return null;
+  }
+  const fileName = `pre-restore-${input.database}-${utcStamp(input.now)}.dump`;
+  dumpDatabase({
+    access: input.access,
+    databaseUrl: input.targetUrl,
+    outputDirectory: input.directory,
+    fileName,
+  });
+  input.log(`snapshot: preserved ${input.database} as ${fileName} before restoring`);
+  return fileName;
 }
 
 function restoreTargetGuard(targetDatabase: string, sourceDatabase: string | null): void {
@@ -126,6 +183,7 @@ export async function runRestore(options: RestoreOptions): Promise<RestoreResult
 
   const decrypted = await decryptIfNeeded(backupFile, options.ageIdentity);
   let scratchDatabase: string | null = null;
+  let preRestoreSnapshot: string | null = null;
   let targetUrl: string;
   let sourceDatabase: string | null;
 
@@ -170,8 +228,20 @@ export async function runRestore(options: RestoreOptions): Promise<RestoreResult
       sourceDatabase = source?.database ?? null;
       if (options.allowNonScratch !== true) {
         restoreTargetGuard(target.database, sourceDatabase);
+      } else if (options.confirm !== target.database) {
+        throw new Error(
+          `overwriting "${target.database}" needs --confirm ${target.database} (the exact database name)`,
+        );
       }
       targetUrl = target.url;
+      preRestoreSnapshot = snapshotTarget({
+        access,
+        targetUrl,
+        database: target.database,
+        directory: options.snapshotDirectory ?? dirname(backupFile),
+        now,
+        log,
+      });
       restoreDatabase({
         access,
         databaseUrl: targetUrl,
@@ -182,11 +252,29 @@ export async function runRestore(options: RestoreOptions): Promise<RestoreResult
 
     const targetDatabase = parseDatabaseUrl(targetUrl).database;
     const counts: Record<string, RestoreCount> = {};
-    for (const table of VERIFIED_TABLES) {
+    // The table list comes from the restored catalog, not from a hand-kept list, so a table a
+    // later migration adds is verified too. The source must have exactly the same tables.
+    const targetTables = listPublicTables({ access, databaseUrl: targetUrl });
+    const missing = VERIFIED_TABLES.filter((table) => !targetTables.includes(table));
+    if (missing.length > 0) {
+      throw new Error(`restore verification failed: missing tables ${missing.join(', ')}`);
+    }
+    const sourceTables =
+      sourceDatabase === null || options.sourceUrl === undefined
+        ? null
+        : listPublicTables({ access, databaseUrl: options.sourceUrl });
+    if (sourceTables !== null && sourceTables.join(',') !== targetTables.join(',')) {
+      const differing = [
+        ...sourceTables.filter((table) => !targetTables.includes(table)),
+        ...targetTables.filter((table) => !sourceTables.includes(table)),
+      ];
+      throw new Error(`restore verification failed: table sets differ (${differing.join(', ')})`);
+    }
+    for (const table of targetTables) {
       const targetCount = queryScalar({
         access,
         databaseUrl: targetUrl,
-        sql: `SELECT count(*) FROM "${table}"`,
+        sql: `SELECT count(*) FROM ${quoteIdentifier(table)}`,
       });
       const sourceCount =
         sourceDatabase === null || options.sourceUrl === undefined
@@ -194,7 +282,7 @@ export async function runRestore(options: RestoreOptions): Promise<RestoreResult
           : queryScalar({
               access,
               databaseUrl: options.sourceUrl,
-              sql: `SELECT count(*) FROM "${table}"`,
+              sql: `SELECT count(*) FROM ${quoteIdentifier(table)}`,
             });
       if (sourceCount !== null && sourceCount !== targetCount) {
         throw new Error(
@@ -206,7 +294,7 @@ export async function runRestore(options: RestoreOptions): Promise<RestoreResult
 
     const rtoSeconds = Math.max(0, (performance.now() - startedAt) / 1000);
     log(
-      `restore: verified ${VERIFIED_TABLES.length} tables in ${targetDatabase} (RTO ${rtoSeconds.toFixed(2)}s)`,
+      `restore: verified ${targetTables.length} tables in ${targetDatabase} (RTO ${rtoSeconds.toFixed(2)}s)`,
     );
 
     return {
@@ -216,11 +304,12 @@ export async function runRestore(options: RestoreOptions): Promise<RestoreResult
       durationSeconds: rtoSeconds,
       rtoSeconds,
       checksumVerified: checksum !== null && checksum.verified,
+      preRestoreSnapshot,
       counts,
     };
   } finally {
     if (decrypted.cleanup !== null) {
-      await rm(decrypted.cleanup, { force: true });
+      await rm(decrypted.cleanup, { recursive: true, force: true });
     }
     if (scratchDatabase !== null && options.keep !== true) {
       const source = options.sourceUrl === undefined ? null : parseDatabaseUrl(options.sourceUrl);
@@ -303,6 +392,10 @@ export function parseArguments(argv: readonly string[]): ParsedArguments {
       ...(flags.has('drill') ? { drill: true } : {}),
       ...(flags.has('keep') ? { keep: true } : {}),
       ...(flags.has('allow-non-scratch') ? { allowNonScratch: true } : {}),
+      ...(values.get('confirm') === undefined ? {} : { confirm: values.get('confirm') }),
+      ...(values.get('snapshot-dir') === undefined
+        ? {}
+        : { snapshotDirectory: values.get('snapshot-dir') }),
       ...(values.get('age-identity') === undefined
         ? {}
         : { ageIdentity: values.get('age-identity') }),
@@ -319,6 +412,8 @@ const HELP = `Usage: tsx scripts/ops/restore.ts --backup FILE [options]
   --target-url URL       Target database for a real restore (required without --drill)
   --keep                 Keep the drill scratch database for inspection
   --allow-non-scratch    Allow restoring into a production-looking database (disaster recovery)
+  --confirm DBNAME       Required with --allow-non-scratch: the exact name of the database overwritten
+  --snapshot-dir DIR     Where the pre-restore snapshot of the target is written (default: backup dir)
   --age-identity FILE    age identity used to decrypt a .age backup
   --skip-checksum        Do not require the .sha256 sidecar (not recommended)
   --redis-backup FILE    Also validate an RDB snapshot and print restore instructions

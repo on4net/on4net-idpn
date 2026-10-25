@@ -335,7 +335,28 @@ export function queryScalar(options: SqlOptions): number {
   return Number.parseInt(output, 10);
 }
 
-/** Tables compared between the source and the restored database (FK-safe order not needed). */
+/** Base tables of the `public` schema, sorted; what a restore must reproduce. */
+export function listPublicTables(options: Omit<SqlOptions, 'sql'>): string[] {
+  const output = runSql({
+    ...options,
+    sql:
+      "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' " +
+      "AND table_type = 'BASE TABLE' ORDER BY table_name",
+  });
+  return output
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '');
+}
+
+/** Quotes an identifier read back from the catalog before it is used in a count query. */
+export const quoteIdentifier = (name: string): string => `"${name.replace(/"/g, '""')}"`;
+
+/**
+ * Tables that must exist after any restore. The comparison itself is driven by
+ * `listPublicTables`, so a table added by a later migration is verified without editing this
+ * list; this one only guards against a restore that silently lost a core table.
+ */
 export const VERIFIED_TABLES = [
   'users',
   'identities',
