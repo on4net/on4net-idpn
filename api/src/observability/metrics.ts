@@ -370,6 +370,11 @@ export class ApiMetrics {
     'Back-channel logout delivery results, by status.',
   );
 
+  readonly clientSecretVerifications = this.registry.counter(
+    'idpn_client_secret_verifications_total',
+    'Client-secret verifications by outcome; a rise in unknown_pepper means a pepper id was lost or changed.',
+  );
+
   readonly collectorErrors = this.registry.counter(
     'idpn_metrics_collector_errors_total',
     'Gauge collectors that failed during a scrape, by collector.',
@@ -454,6 +459,10 @@ export class ApiMetrics {
 
   recordBackchannelDelivery(status: BackchannelDeliveryStatus): void {
     this.backchannel.inc({ status });
+  }
+
+  recordClientSecretVerification(outcome: string): void {
+    this.clientSecretVerifications.inc({ outcome });
   }
 
   /** Records a security alert so dashboards and the `IdpnSecurityAlert` rule can fire. */

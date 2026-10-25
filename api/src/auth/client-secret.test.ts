@@ -1,3 +1,5 @@
+import { createHmac } from 'node:crypto';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -220,7 +222,7 @@ describe('loadClientSecretPeppers', () => {
       valid: true,
       needsRehash: true,
     });
-    expect(hashClientSecret(SECRET, loaded).startsWith('v2$k2$')).toBe(true);
+    expect(hashClientSecret(SECRET, loaded).startsWith('v3$k2$')).toBe(true);
   });
 });
 
@@ -235,6 +237,81 @@ describe('defaultClientSecretService', () => {
     const first = defaultClientSecretService(env);
     expect(first.pepperId).toBe('k3');
     expect(defaultClientSecretService(env)).toBe(first);
-    expect(first.hash(SECRET).startsWith('v2$k3$')).toBe(true);
+    expect(first.hash(SECRET).startsWith('v3$k3$')).toBe(true);
+  });
+});
+
+describe('hash format v3', () => {
+  const legacyV2 = (secret: string, pepper: Buffer): string =>
+    `v2$k1$${createHmac('sha256', pepper).update(secret, 'utf8').digest().toString('base64url')}`;
+  const pepperValue = Buffer.from('unit-test-client-secret-pepper-value-1', 'utf8');
+
+  it('separates the MAC input by domain, so v3 is not the bare HMAC of the secret', () => {
+    const v3 = hashClientSecret(SECRET, peppers).split('$')[2];
+    const bare = createHmac('sha256', pepperValue).update(SECRET, 'utf8').digest('base64url');
+    expect(v3).not.toBe(bare);
+  });
+
+  it('still accepts a v2 hash and asks for a rewrite to v3', async () => {
+    const stored = legacyV2(SECRET, pepperValue);
+    await expect(verifyClientSecret(SECRET, stored, peppers)).resolves.toEqual({
+      valid: true,
+      needsRehash: true,
+    });
+    await expect(verifyClientSecret('wrong', stored, peppers)).resolves.toEqual({
+      valid: false,
+      needsRehash: false,
+    });
+  });
+
+  it('does not accept the v2 digest relabelled as v3 (and the reverse)', async () => {
+    const [, , v2digest] = legacyV2(SECRET, pepperValue).split('$');
+    const [, , v3digest] = hashClientSecret(SECRET, peppers).split('$');
+    await expect(verifyClientSecret(SECRET, `v3$k1$${v2digest}`, peppers)).resolves.toMatchObject({
+      valid: false,
+    });
+    await expect(verifyClientSecret(SECRET, `v2$k1$${v3digest}`, peppers)).resolves.toMatchObject({
+      valid: false,
+    });
+  });
+});
+
+describe('service observability and the legacy gate', () => {
+  it('reports valid, invalid, unknown_pepper and unknown_format outcomes', async () => {
+    const seen: string[] = [];
+    const service = createClientSecretService(peppers, {
+      onVerify: (outcome) => seen.push(outcome),
+    });
+    const stored = service.hash(SECRET);
+    await service.verify(SECRET, stored);
+    await service.verify('wrong', stored);
+    await service.verify(SECRET, stored.replace('$k1$', '$gone$'));
+    await service.verify(SECRET, 'garbage');
+    expect(seen).toEqual(['valid', 'invalid', 'unknown_pepper', 'unknown_format']);
+  });
+
+  it('refuses legacy Argon2id verifications beyond the concurrency and queue bounds', async () => {
+    const seen: string[] = [];
+    const service = createClientSecretService(peppers, {
+      legacyConcurrency: 1,
+      legacyQueue: 0,
+      onVerify: (outcome) => seen.push(outcome),
+    });
+    const legacy = await hashPassword(SECRET, FAST);
+    const results = await Promise.all([
+      service.verify(SECRET, legacy),
+      service.verify(SECRET, legacy),
+    ]);
+    expect(results.map((entry) => entry.valid).sort()).toEqual([false, true]);
+    expect(seen.sort()).toEqual(['legacy_busy', 'valid']);
+  });
+
+  it('lets queued legacy verifications through once a slot frees up', async () => {
+    const service = createClientSecretService(peppers, { legacyConcurrency: 1, legacyQueue: 4 });
+    const legacy = await hashPassword(SECRET, FAST);
+    const results = await Promise.all(
+      Array.from({ length: 3 }, () => service.verify(SECRET, legacy)),
+    );
+    expect(results.every((entry) => entry.valid)).toBe(true);
   });
 });

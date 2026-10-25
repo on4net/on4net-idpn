@@ -24,7 +24,20 @@ import { verifyPassword } from './password.js';
  */
 
 /** Version tag of the current hash format. A future scheme gets its own tag. */
-export const CLIENT_SECRET_HASH_VERSION = 'v2';
+export const CLIENT_SECRET_HASH_VERSION = 'v3';
+
+/**
+ * Previous format: HMAC over the bare secret. Still accepted and rewritten to the current
+ * version on the first successful verification.
+ */
+export const CLIENT_SECRET_HASH_VERSION_V2 = 'v2';
+
+/**
+ * Domain separator mixed into the v3 MAC input. The pepper is a shared key, so without a
+ * context string the same key could be reused for another MAC over attacker-influenced input
+ * and produce a value that verifies here.
+ */
+const V3_DOMAIN = 'idpn.client-secret.v3' + String.fromCharCode(0);
 
 const ARGON2ID_PREFIX = '$argon2id$';
 const DIGEST_BYTES = 32;
@@ -60,6 +73,18 @@ export interface ClientSecretVerification {
   needsRehash: boolean;
 }
 
+/** What a verification concluded, for metrics: no secret or hash value is ever included. */
+export type ClientSecretVerifyOutcome =
+  'valid' | 'invalid' | 'unknown_pepper' | 'unknown_format' | 'legacy_busy';
+
+export interface ClientSecretServiceOptions {
+  /** Concurrent legacy Argon2id verifications (default 2). */
+  legacyConcurrency?: number;
+  /** Legacy verifications allowed to wait for a slot; more are refused (default 16). */
+  legacyQueue?: number;
+  onVerify?: (outcome: ClientSecretVerifyOutcome) => void;
+}
+
 export interface ClientSecretService {
   /** Public id of the pepper used for new hashes (never the pepper itself). */
   readonly pepperId: string;
@@ -72,33 +97,79 @@ export class ClientSecretConfigError extends Error {
   override readonly name = 'ClientSecretConfigError';
 }
 
-const digest = (secret: string, pepper: ClientSecretPepper): Buffer =>
-  createHmac('sha256', pepper.value).update(secret, 'utf8').digest();
+const digest = (secret: string, pepper: ClientSecretPepper, version: string): Buffer =>
+  createHmac('sha256', pepper.value)
+    .update(version === CLIENT_SECRET_HASH_VERSION ? V3_DOMAIN + secret : secret, 'utf8')
+    .digest();
 
 /** Computes the current-format hash. Deterministic, so seeding stays idempotent. */
 export function hashClientSecret(secret: string, peppers: ClientSecretPeppers): string {
-  const value = digest(secret, peppers.current).toString('base64url');
+  const value = digest(secret, peppers.current, CLIENT_SECRET_HASH_VERSION).toString('base64url');
   return `${CLIENT_SECRET_HASH_VERSION}$${peppers.current.id}$${value}`;
 }
 
 const findPepper = (peppers: ClientSecretPeppers, id: string): ClientSecretPepper | undefined =>
   peppers.current.id === id ? peppers.current : peppers.previous.find((pepper) => pepper.id === id);
 
+interface LegacyGate {
+  run<T>(task: () => Promise<T>): Promise<T | 'busy'>;
+}
+
+/**
+ * Bounds the memory-hard legacy branch. Every wrong guess against a not-yet-migrated secret
+ * costs an Argon2id run, so an unauthenticated caller could otherwise saturate the libuv pool;
+ * past the queue the attempt is refused (fail closed) instead of waiting without limit.
+ */
+function createLegacyGate(concurrency: number, queueLimit: number): LegacyGate {
+  let running = 0;
+  const waiting: (() => void)[] = [];
+  return {
+    async run(task) {
+      if (running >= concurrency) {
+        if (waiting.length >= queueLimit) {
+          return 'busy';
+        }
+        await new Promise<void>((resolve) => waiting.push(resolve));
+      } else {
+        running += 1;
+      }
+      try {
+        return await task();
+      } finally {
+        const next = waiting.shift();
+        if (next === undefined) {
+          running -= 1;
+        } else {
+          next();
+        }
+      }
+    },
+  };
+}
+
+interface Verification extends ClientSecretVerification {
+  outcome: ClientSecretVerifyOutcome;
+}
+
 async function verifyInternal(
   secret: string,
   storedHash: string,
   peppers: ClientSecretPeppers,
-): Promise<ClientSecretVerification> {
-  if (storedHash.startsWith(`${CLIENT_SECRET_HASH_VERSION}$`)) {
+  gate: LegacyGate,
+): Promise<Verification> {
+  const hmacVersion = [CLIENT_SECRET_HASH_VERSION, CLIENT_SECRET_HASH_VERSION_V2].find((version) =>
+    storedHash.startsWith(`${version}$`),
+  );
+  if (hmacVersion !== undefined) {
     const parts = storedHash.split('$');
     if (parts.length !== 3) {
-      return { valid: false, needsRehash: false };
+      return { valid: false, needsRehash: false, outcome: 'unknown_format' };
     }
     const [, pepperId, encoded] = parts;
     const pepper = pepperId === undefined ? undefined : findPepper(peppers, pepperId);
     // Compute the digest even for an unknown pepper id so a malformed row does not become
     // observably cheaper than a valid one.
-    const expected = digest(secret, pepper ?? peppers.current);
+    const expected = digest(secret, pepper ?? peppers.current, hmacVersion);
     const presented = Buffer.from(encoded ?? '', 'base64url');
     const valid =
       pepper !== undefined &&
@@ -106,36 +177,59 @@ async function verifyInternal(
       timingSafeEqual(presented, expected);
     return {
       valid,
-      needsRehash: valid && pepper !== undefined && pepper.id !== peppers.current.id,
+      needsRehash:
+        valid &&
+        pepper !== undefined &&
+        (pepper.id !== peppers.current.id || hmacVersion !== CLIENT_SECRET_HASH_VERSION),
+      outcome: valid ? 'valid' : pepper === undefined ? 'unknown_pepper' : 'invalid',
     };
   }
 
   if (storedHash.startsWith(ARGON2ID_PREFIX)) {
     // Legacy client secrets were hashed with `hashPassword(plain)` (default parameters, no
     // pepper), so the PHC string carries everything verification needs.
-    const valid = await verifyPassword(storedHash, secret);
-    return { valid, needsRehash: valid };
+    const valid = await gate.run(() => verifyPassword(storedHash, secret));
+    if (valid === 'busy') {
+      return { valid: false, needsRehash: false, outcome: 'legacy_busy' };
+    }
+    return { valid, needsRehash: valid, outcome: valid ? 'valid' : 'invalid' };
   }
 
   // Unknown format or version: fail closed. A client must rotate its secret, and the error
   // path is identical to a wrong secret (no format enumeration).
-  return { valid: false, needsRehash: false };
+  return { valid: false, needsRehash: false, outcome: 'unknown_format' };
 }
 
+const DEFAULT_GATE = createLegacyGate(2, 16);
+
 /** Verifies a presented secret against a stored hash without leaking timing. */
-export function verifyClientSecret(
+export async function verifyClientSecret(
   secret: string,
   storedHash: string,
   peppers: ClientSecretPeppers,
 ): Promise<ClientSecretVerification> {
-  return verifyInternal(secret, storedHash, peppers);
+  const { valid, needsRehash } = await verifyInternal(secret, storedHash, peppers, DEFAULT_GATE);
+  return { valid, needsRehash };
 }
 
-export function createClientSecretService(peppers: ClientSecretPeppers): ClientSecretService {
+export function createClientSecretService(
+  peppers: ClientSecretPeppers,
+  options: ClientSecretServiceOptions = {},
+): ClientSecretService {
+  const gate = createLegacyGate(options.legacyConcurrency ?? 2, options.legacyQueue ?? 16);
   return {
     pepperId: peppers.current.id,
     hash: (secret) => hashClientSecret(secret, peppers),
-    verify: (secret, storedHash) => verifyClientSecret(secret, storedHash, peppers),
+    async verify(secret, storedHash) {
+      const { valid, needsRehash, outcome } = await verifyInternal(
+        secret,
+        storedHash,
+        peppers,
+        gate,
+      );
+      options.onVerify?.(outcome);
+      return { valid, needsRehash };
+    },
   };
 }
 

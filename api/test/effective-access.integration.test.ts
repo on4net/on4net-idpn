@@ -300,7 +300,9 @@ describe('effective access', () => {
       });
       expect(bound.roles).toEqual(['app-a:editor']);
     } finally {
-      await prisma.clientMembership.create({ data: row });
+      await prisma.clientMembership.create({
+        data: { ...row, attributes: { department: 'sales' } },
+      });
     }
   });
 

@@ -136,19 +136,13 @@ redis.on('error', (error: unknown) => {
 // per-replica key file can never silently become the production signing key.
 // When scheduled rotation is disabled the health flag still reports a rotation after the
 // documented 90-day threshold, so operators keep getting an alert.
-const keys = new SigningKeyManager(
-  createSigningKeyRepository(env),
-  () => new Date(),
-  {
-    retiredRetentionSeconds: env.KEY_RETIRED_RETENTION_SECONDS,
-    rotationDueAfterDays:
-      env.KEY_ROTATION_INTERVAL_DAYS > 0
-        ? env.KEY_ROTATION_INTERVAL_DAYS
-        : DEFAULT_ROTATION_DUE_DAYS,
-    keyCacheTtlSeconds: env.KEY_CACHE_TTL_SECONDS,
-    onWarning: (message) => logWarning({ component: 'signing-key' }, message),
-  },
-);
+const keys = new SigningKeyManager(createSigningKeyRepository(env), () => new Date(), {
+  retiredRetentionSeconds: env.KEY_RETIRED_RETENTION_SECONDS,
+  rotationDueAfterDays:
+    env.KEY_ROTATION_INTERVAL_DAYS > 0 ? env.KEY_ROTATION_INTERVAL_DAYS : DEFAULT_ROTATION_DUE_DAYS,
+  keyCacheTtlSeconds: env.KEY_CACHE_TTL_SECONDS,
+  onWarning: (message) => logWarning({ component: 'signing-key' }, message),
+});
 await keys.ensureKey();
 
 const sessionCache = new RedisSessionCache(redis);
@@ -181,7 +175,9 @@ const clientsRepository = createPrismaClientRepository(prisma);
  * `/token` request pay ~120ms. Production refuses to start without `CLIENT_SECRET_PEPPER`;
  * the public pepper id supports rotation while previous peppers keep verifying.
  */
-const clientSecrets = createClientSecretService(loadClientSecretPeppers(env));
+const clientSecrets = createClientSecretService(loadClientSecretPeppers(env), {
+  onVerify: (outcome) => metrics.recordClientSecretVerification(outcome),
+});
 const adminTranslationsRepository = createPrismaAdminTranslationRepository(prisma);
 const publicTranslationsRepository = createPrismaPublicTranslationRepository(prisma);
 const translationBundleCache = createRedisBundleCache(redis);
@@ -686,14 +682,17 @@ backchannelQueueTimer.unref();
  * rows are deleted hourly, so the table keeps the `expires_at` index meaningful instead of
  * growing forever (docs/domain-model.md 4).
  */
-const accountTokenPurgeTimer = setInterval(() => {
-  void accountTokens.purge({ now: new Date() }).catch((error: unknown) => {
-    logWarning(
-      { component: 'account-tokens', phase: 'purge' },
-      `token purge failed: ${sanitizeLogMessage(error)}`,
-    );
-  });
-}, 60 * 60 * 1000);
+const accountTokenPurgeTimer = setInterval(
+  () => {
+    void accountTokens.purge({ now: new Date() }).catch((error: unknown) => {
+      logWarning(
+        { component: 'account-tokens', phase: 'purge' },
+        `token purge failed: ${sanitizeLogMessage(error)}`,
+      );
+    });
+  },
+  60 * 60 * 1000,
+);
 accountTokenPurgeTimer.unref();
 
 /**
