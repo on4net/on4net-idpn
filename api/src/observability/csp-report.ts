@@ -1,5 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 
+import { consume, limiterAddress, type Bucket } from '../http/memory-limiter.js';
+
 /**
  * Receiver for Content-Security-Policy violation reports (`report-to csp`, docs/security.md 7).
  *
@@ -13,7 +15,6 @@ const REPORT_TYPES = ['application/csp-report', 'application/reports+json'] as c
 const MAX_BODY_BYTES = 16 * 1024;
 const MAX_REPORTS_PER_REQUEST = 10;
 const MAX_FIELD_LENGTH = 200;
-const MAX_TRACKED_ADDRESSES = 5_000;
 
 export interface CspReportMetrics {
   recordCspReport(directive: string, disposition: string): void;
@@ -100,28 +101,13 @@ export function parseCspReports(payload: unknown): CspViolation[] {
 export function registerCspReportRoute(app: FastifyInstance, options: CspReportOptions = {}): void {
   const now = options.now ?? Date.now;
   const perMinute = options.perMinute ?? 30;
-  const windows = new Map<string, { count: number; resetAt: number }>();
+  const buckets = new Map<string, Bucket>();
+  const limit = { windowSeconds: 60, max: perMinute };
 
-  const allow = (address: string): boolean => {
-    const at = now();
-    const window = windows.get(address);
-    if (window === undefined || window.resetAt <= at) {
-      if (windows.size >= MAX_TRACKED_ADDRESSES) {
-        for (const [key, value] of windows) {
-          if (value.resetAt <= at) {
-            windows.delete(key);
-          }
-        }
-        if (windows.size >= MAX_TRACKED_ADDRESSES) {
-          return false;
-        }
-      }
-      windows.set(address, { count: 1, resetAt: at + 60_000 });
-      return true;
-    }
-    window.count += 1;
-    return window.count <= perMinute;
-  };
+  // Same limiter as the social endpoints: IPv6 grouped by /64, bounded memory, and a sharded
+  // overflow bucket once the map is full, so a flood cannot silence legitimate reports.
+  const allow = (ip: string): boolean =>
+    consume(buckets, `csp:${limiterAddress(ip)}`, limit, now());
 
   // Encapsulated so the extra content types never leak to the rest of the API.
   void app.register((scope, _opts, done) => {

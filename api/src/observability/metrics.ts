@@ -321,6 +321,38 @@ function normalizeGrantType(grantType: string): string {
 }
 
 /** All IDPN metrics and their recording helpers (docs/monitoring.md). */
+/**
+ * CSP directive names a report may carry. The value comes from the browser (or from whoever
+ * posts to the unauthenticated endpoint), so only these become label values; anything else is
+ * `other`, which keeps the series count fixed and the alerting on it meaningful.
+ */
+const CSP_DIRECTIVES: ReadonlySet<string> = new Set([
+  'default-src',
+  'script-src',
+  'script-src-elem',
+  'script-src-attr',
+  'style-src',
+  'style-src-elem',
+  'style-src-attr',
+  'img-src',
+  'font-src',
+  'connect-src',
+  'media-src',
+  'object-src',
+  'frame-src',
+  'child-src',
+  'worker-src',
+  'manifest-src',
+  'base-uri',
+  'form-action',
+  'frame-ancestors',
+  'navigate-to',
+  'require-trusted-types-for',
+  'trusted-types',
+  'upgrade-insecure-requests',
+  'sandbox',
+]);
+
 export class ApiMetrics {
   readonly registry = new MetricsRegistry();
 
@@ -468,7 +500,7 @@ export class ApiMetrics {
 
   recordCspReport(directive: string, disposition: string): void {
     // Directive names come from the browser; keep the label set bounded.
-    const known = /^[a-z-]{1,40}$/.test(directive) ? directive : 'other';
+    const known = CSP_DIRECTIVES.has(directive) ? directive : 'other';
     this.cspReports.inc({
       directive: known,
       disposition: disposition === 'report' ? 'report' : 'enforce',

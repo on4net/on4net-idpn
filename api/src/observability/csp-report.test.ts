@@ -135,3 +135,42 @@ describe('POST /csp-report', () => {
     await app.close();
   });
 });
+
+describe('csp report hardening', () => {
+  it('maps unknown directive names to "other" so labels stay bounded', async () => {
+    const metrics = new ApiMetrics();
+    const app = await build({ metrics });
+    for (const directive of ['totally-made-up-1', 'totally-made-up-2', 'x'.repeat(30)]) {
+      await app.inject({
+        method: 'POST',
+        url: '/csp-report',
+        headers: { 'content-type': 'application/csp-report' },
+        payload: JSON.stringify({ 'csp-report': { 'effective-directive': directive } }),
+      });
+    }
+    const text = metrics.registry.render();
+    expect(text).toContain('idpn_csp_reports_total{directive="other",disposition="enforce"} 3');
+    expect(text).not.toContain('made-up');
+    await app.close();
+  });
+
+  it('shares one budget across an IPv6 /64', async () => {
+    const metrics = new ApiMetrics();
+    const app = await build({ metrics, perMinute: 2, now: () => 1_000 });
+    const send = (remoteAddress: string) =>
+      app.inject({
+        method: 'POST',
+        url: '/csp-report',
+        remoteAddress,
+        headers: { 'content-type': 'application/csp-report' },
+        payload: JSON.stringify(legacy),
+      });
+    await send('2001:db8:1:2::1');
+    await send('2001:db8:1:2::2');
+    await send('2001:db8:1:2:ffff::3');
+    expect(metrics.registry.render()).toContain(
+      'idpn_csp_reports_total{directive="script-src-elem",disposition="enforce"} 2',
+    );
+    await app.close();
+  });
+});
