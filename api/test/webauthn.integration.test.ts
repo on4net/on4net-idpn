@@ -565,6 +565,23 @@ describe('passkey login and MFA policy', () => {
     expect(stored.signCount).toBe(1n);
   });
 
+  it('records the login context on the session and on its PostgreSQL mirror', async () => {
+    const userId = await createUser('passkey-context');
+    const enrolled = await enrollPasskey(userId);
+
+    const { verified } = await loginWithPasskey(
+      'passkey-context',
+      'app-stepup',
+      enrolled.credentialId,
+      { loginContext: 'sensitive' },
+    );
+    expect(verified.status).toBe(200);
+    const sid = cookieFrom(verified);
+    expect((await store.read(sid))?.loginContext).toBe('sensitive');
+    const mirror = await prisma.session.findUniqueOrThrow({ where: { id: sid } });
+    expect(mirror.loginContext).toBe('sensitive');
+  });
+
   it('rejects a replayed assertion whose counter does not advance', async () => {
     const userId = await createUser('passkey-counter');
     const enrolled = await enrollPasskey(userId);

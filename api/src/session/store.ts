@@ -75,7 +75,9 @@ export class RedisSessionStore implements ClientSessionRevoker {
       lastSeenAt: now.toISOString(),
       authTime: (input.authTime ?? now).toISOString(),
       idleExpiresAt: new Date(now.getTime() + this.policy.idleTtlSeconds * 1000).toISOString(),
-      absoluteExpiresAt: (input.absoluteExpiresAt ?? new Date(now.getTime() + this.policy.absoluteTtlSeconds * 1000)).toISOString(),
+      absoluteExpiresAt: (
+        input.absoluteExpiresAt ?? new Date(now.getTime() + this.policy.absoluteTtlSeconds * 1000)
+      ).toISOString(),
       ...definedOptional('ip', input.ip),
       ...definedOptional('userAgent', input.userAgent),
       amr: [...input.amr],
@@ -212,10 +214,23 @@ export class RedisSessionStore implements ClientSessionRevoker {
    * (`docs/login-contexts.md` 3.4). The session id, `auth_time`, `acr` and `amr` are kept:
    * switching context is not a new authentication, and the step-up checks keep looking at
    * the time the user actually proved a factor. Returns `null` for an inactive session.
+   *
+   * `clientId` is the app the context belongs to. A session created for another app keeps its
+   * own context: context keys are only unique per app, so recording `customer-admin` of app B
+   * on an app A session would make a per-context revocation of one app hit the other
+   * (`revokeForContext` matches on `clientId` + `loginContext`). Returns `null` in that case
+   * and writes nothing.
    */
-  async rebindContext(sid: string, loginContext: string): Promise<IdpSession | null> {
+  async rebindContext(
+    sid: string,
+    loginContext: string,
+    clientId?: string,
+  ): Promise<IdpSession | null> {
     const current = await this.read(sid);
     if (current === null) {
+      return null;
+    }
+    if (clientId !== undefined && current.clientId !== undefined && current.clientId !== clientId) {
       return null;
     }
     const next: IdpSession = { ...current, loginContext };
@@ -456,10 +471,7 @@ export class RedisSessionStore implements ClientSessionRevoker {
     }
   }
 
-  private async writeUserRevocation(
-    userId: string,
-    revocation: UserRevocation,
-  ): Promise<void> {
+  private async writeUserRevocation(userId: string, revocation: UserRevocation): Promise<void> {
     await this.cache.set(
       userRevokedKey(userId),
       JSON.stringify(revocation),

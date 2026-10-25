@@ -126,6 +126,34 @@ describe('RedisSessionStore', () => {
     await expect(store.rebindContext(session.sid, 'customer-admin')).resolves.toBeNull();
   });
 
+  it('does not record a context of another app on the session', async () => {
+    const { cache } = createMemoryCache();
+    const store = new RedisSessionStore({ cache, policy });
+    const session = await store.create({
+      userId: 'user-1',
+      clientId: 'app-a',
+      loginContext: 'customer-admin',
+      amr: ['pwd'],
+      acr: 'pwd',
+    });
+
+    // `customer-admin` of app-b must not overwrite app-a's context: a per-context revocation
+    // of app-b would otherwise hit this app-a session.
+    await expect(store.rebindContext(session.sid, 'customer-admin', 'app-b')).resolves.toBeNull();
+    await expect(store.read(session.sid)).resolves.toMatchObject({
+      clientId: 'app-a',
+      loginContext: 'customer-admin',
+    });
+    await expect(
+      store.revokeForUserClientContext('user-1', 'app-b', 'customer-admin', 'admin'),
+    ).resolves.toEqual([]);
+
+    // The owning app still rebinds.
+    await expect(store.rebindContext(session.sid, 'customer-team', 'app-a')).resolves.toMatchObject(
+      { loginContext: 'customer-team' },
+    );
+  });
+
   it('returns null for an unknown sid', async () => {
     const { cache } = createMemoryCache();
     const store = new RedisSessionStore({ cache, policy });

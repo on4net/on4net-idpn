@@ -14,10 +14,7 @@ import type { LoginRouteOptions } from './routes.js';
 export interface LoginWebauthnRouteOptions {
   mfa: MfaLoginDependencies;
   webauthn: NonNullable<LoginRouteOptions['webauthn']>;
-  users: Pick<
-    LoginRouteOptions['users'],
-    'registerSuccessfulLogin' | 'registerFailedAttempt'
-  >;
+  users: Pick<LoginRouteOptions['users'], 'registerSuccessfulLogin' | 'registerFailedAttempt'>;
   sessions: Pick<RedisSessionStore, 'create'>;
   persistSession: LoginRouteOptions['persistSession'];
   audit: LoginRouteOptions['audit'];
@@ -104,10 +101,10 @@ export function registerLoginWebauthnRoutes(
       }
 
       if (options.rateLimiter !== undefined) {
-        const allowed = await options.rateLimiter.consume(
-          `login:mfa:${request.ip}`,
-          { windowSeconds: 60, max: 20 },
-        );
+        const allowed = await options.rateLimiter.consume(`login:mfa:${request.ip}`, {
+          windowSeconds: 60,
+          max: 20,
+        });
         if (!allowed) {
           return failure(reply, 429, 'too_many_requests', RATE_LIMITED_MESSAGE);
         }
@@ -207,6 +204,7 @@ export function registerLoginWebauthnRoutes(
         userId: user.id,
         tenantId: user.tenantId,
         ...(session.clientId === undefined ? {} : { clientId: session.clientId }),
+        ...(session.loginContext === undefined ? {} : { loginContext: session.loginContext }),
         ...(session.ip === undefined ? {} : { ip: session.ip }),
         ...(session.userAgent === undefined ? {} : { userAgent: session.userAgent }),
         amr: session.amr,

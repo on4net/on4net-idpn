@@ -24,7 +24,7 @@ export interface SessionReader {
    * session switches context the new context is stored so listings, revocation scoping and
    * the next switch all see the same value.
    */
-  rebindContext?(sid: string, loginContext: string): Promise<IdpSession | null>;
+  rebindContext?(sid: string, loginContext: string, clientId?: string): Promise<IdpSession | null>;
 }
 
 /**
@@ -435,7 +435,11 @@ export function registerAuthorizeRoute(app: FastifyInstance, options: AuthorizeR
       const previous = session.loginContext ?? null;
       const nextContext = authorize.loginContext;
       try {
-        const rebound = await options.sessions.rebindContext?.(session.sid, nextContext);
+        const rebound = await options.sessions.rebindContext?.(
+          session.sid,
+          nextContext,
+          authorize.client.clientId,
+        );
         if (rebound !== null && rebound !== undefined) {
           await options.persistContextSwitch?.(rebound.sid, nextContext);
         }
@@ -447,7 +451,13 @@ export function registerAuthorizeRoute(app: FastifyInstance, options: AuthorizeR
           targetId: session.sid,
           clientId: authorize.client.clientId,
           result: 'success',
-          metadata: { from: previous, to: nextContext, source: 'authorize' },
+          metadata: {
+            from: previous,
+            to: nextContext,
+            source: 'authorize',
+            // False when the session belongs to another app and keeps its own context.
+            sessionBound: rebound !== null && rebound !== undefined,
+          },
         });
       } catch {
         // The authorization code is already issued: a bookkeeping failure must not turn a
