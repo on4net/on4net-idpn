@@ -124,6 +124,7 @@ function buildTestServer(repository: SocialLoginRepository = socialRepository) {
       sessions,
     },
     authorize: {
+      allowUnenforced: true,
       clients: createPrismaClientRepository(prisma),
       loginUrl: `${issuer}/login`,
       loginRequests: {

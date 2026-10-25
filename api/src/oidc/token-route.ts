@@ -219,6 +219,11 @@ async function authorizationCodeGrant(
     client.clientId,
     exchange.record.loginContext,
   );
+  // A client-wide (unbound) code is not covered by the context check above. A membership
+  // suspended after `/authorize` must not yield a token, only an empty one.
+  if (access?.membership?.status === 'suspended') {
+    return tokenError(reply, oauthError('invalid_grant', 'membership is suspended'));
+  }
   const accessToken = await signAccessToken(
     options,
     client,
@@ -326,12 +331,13 @@ async function refreshTokenGrant(
   // written (in that order): a rejected request writes nothing, and a signing failure cannot
   // spend a refresh token the client never gets a successor for (card #70 finding 3).
   const issuedAt = Math.floor(at.getTime() / 1000);
-  const access = await resolveAccess(
-    options,
-    profile.id,
-    client.clientId,
-    issued.loginContext,
-  );
+  const access = await resolveAccess(options, profile.id, client.clientId, issued.loginContext);
+  // Same rule for an unbound refresh token: suspension ends the family rather than minting a
+  // token with no roles that still looks like a live grant.
+  if (access?.membership?.status === 'suspended') {
+    await options.refreshTokens.revokeFamily(issued.familyId, at);
+    return tokenError(reply, oauthError('invalid_grant', 'refresh token is not valid'));
+  }
   const accessToken = await options.keys.signAccessToken(
     {
       iss: options.issuer,
@@ -349,9 +355,7 @@ async function refreshTokenGrant(
       jti: randomUUID(),
       scope: issued.scope.join(' '),
       tenant_id: profile.tenantId,
-      ...(issued.loginContext === undefined
-        ? {}
-        : { login_context: issued.loginContext }),
+      ...(issued.loginContext === undefined ? {} : { login_context: issued.loginContext }),
       ...accessClaimsFor(access),
     },
     {
@@ -422,7 +426,10 @@ async function clientCredentialsGrant(
   // A machine token must never be mintable with a published public `client_id`: only a
   // confidential machine client (with a stored secret) may use this grant (card #70 finding 10).
   if (client.type !== 'm2m') {
-    return tokenError(reply, oauthError('unauthorized_client', 'grant not allowed for this client'));
+    return tokenError(
+      reply,
+      oauthError('unauthorized_client', 'grant not allowed for this client'),
+    );
   }
 
   const requested = (payload.scope ?? '').split(/\s+/).filter((scope) => scope !== '');

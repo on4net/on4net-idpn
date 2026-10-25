@@ -1114,7 +1114,7 @@ describe('token and userinfo claims stay scoped to the context', () => {
     expect(admin.body.membership).toMatchObject({ context: 'customer-admin' });
   });
 
-  it('withdraws userinfo roles when the context membership is suspended', async () => {
+  it('rejects the access token at userinfo once the context membership is suspended', async () => {
     const token = await world.infra.keys.signAccessToken(
       {
         scope: 'openid',
@@ -1134,14 +1134,9 @@ describe('token and userinfo claims stay scoped to the context', () => {
     const response = await request(app.server)
       .get('/oauth2/userinfo')
       .set('Authorization', `Bearer ${token}`)
-      .expect(200);
+      .expect(401);
 
-    expect(response.body.roles).toEqual([]);
-    expect(response.body.permissions).toEqual([]);
-    expect(response.body.membership).toMatchObject({
-      context: 'customer-admin',
-      status: 'suspended',
-    });
+    expect(response.body).toEqual({ error: 'invalid_token' });
   });
 
   it('refuses to issue a code for a required_all context from a password-only session', async () => {

@@ -98,6 +98,8 @@ export interface BuildServerOptions {
     >[1]['authenticationRequirement'];
     /** Membership lookup for the client/login context (CTX-003). */
     membershipStatus?: Parameters<typeof registerAuthorizeRoute>[1]['membershipStatus'];
+    /** Test harnesses only: skips the startup check for the two enforcement callbacks. */
+    allowUnenforced?: boolean;
     /** Issues the opaque `login_request` used by the per-client social start endpoint. */
     loginRequests?: Parameters<typeof registerAuthorizeRoute>[1]['loginRequests'];
     /** Audit hook for an audited context switch at code issuance. */
@@ -203,9 +205,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
         ? {}
         : { clientSecrets: options.token.clientSecrets }),
       ...(options.token.sessions === undefined ? {} : { sessions: options.token.sessions }),
-      ...(options.userInfo?.denyList === undefined
-        ? {}
-        : { denyList: options.userInfo.denyList }),
+      ...(options.userInfo?.denyList === undefined ? {} : { denyList: options.userInfo.denyList }),
       ...(options.token.now === undefined ? {} : { now: options.token.now }),
     });
 
@@ -233,6 +233,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
         ...(options.authorize.membershipStatus === undefined
           ? {}
           : { membershipStatus: options.authorize.membershipStatus }),
+        ...(options.authorize.allowUnenforced === true ? { allowUnenforced: true } : {}),
         ...(options.authorize.loginRequests === undefined
           ? {}
           : { loginRequests: options.authorize.loginRequests }),
@@ -267,9 +268,7 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
       keys,
       users: options.userInfo.users,
       ...(options.userInfo.access === undefined ? {} : { access: options.userInfo.access }),
-      ...(options.userInfo.denyList === undefined
-        ? {}
-        : { denyList: options.userInfo.denyList }),
+      ...(options.userInfo.denyList === undefined ? {} : { denyList: options.userInfo.denyList }),
     });
   }
 

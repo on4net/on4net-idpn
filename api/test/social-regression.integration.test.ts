@@ -108,6 +108,7 @@ function buildTestServer(): ReturnType<typeof buildServer> {
       sessions,
     },
     authorize: {
+      allowUnenforced: true,
       clients: createPrismaClientRepository(infra.prisma),
       loginUrl: `${issuer}/login`,
       loginRequests: {

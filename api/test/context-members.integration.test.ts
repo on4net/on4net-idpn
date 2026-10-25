@@ -13,7 +13,11 @@ import { createPrismaAdminAudit } from '../src/admin/prisma-audit.js';
 import { createPrismaPermissionReader } from '../src/admin/prisma-permission-reader.js';
 import { createPrismaRbacRepository } from '../src/admin/rbac/prisma-rbac-repository.js';
 import { PrismaClient } from '../src/generated/prisma/client.js';
-import { createAuthorizeMembershipStatus } from '../src/oidc/authorize-enforcement.js';
+import {
+  createAuthorizeAuthenticationRequirement,
+  createAuthorizeMembershipStatus,
+} from '../src/oidc/authorize-enforcement.js';
+import { createPrismaMfaRepository } from '../src/mfa/prisma-repository.js';
 import { s256Challenge } from '../src/oidc/authorization-code.js';
 import { createPrismaEffectiveAccessSource } from '../src/oidc/effective-access.js';
 import { MemorySigningKeyRepository, SigningKeyManager } from '../src/oidc/keys.js';
@@ -268,6 +272,9 @@ beforeAll(async () => {
     authorize: {
       clients,
       membershipStatus: createAuthorizeMembershipStatus(prisma),
+      authenticationRequirement: createAuthorizeAuthenticationRequirement(
+        createPrismaMfaRepository(prisma, { permissions: permissionReader }),
+      ),
     },
     userInfo: { users, access: effectiveAccess },
     rbac: {

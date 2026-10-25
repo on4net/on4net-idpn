@@ -164,7 +164,11 @@ beforeAll(async () => {
       users: createPrismaUserRepository(prisma),
       sessions: store,
     },
-    authorize: { clients, isConsentGranted: async () => true },
+    authorize: {
+      allowUnenforced: true,
+      clients,
+      isConsentGranted: async () => true,
+    },
     admin: { adminClientId, permissions, users, audit, sessions: store },
     adminMembers: { adminClientId, permissions, members, audit },
     adminSessions: {

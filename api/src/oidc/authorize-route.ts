@@ -111,6 +111,12 @@ export interface AuthorizeRouteOptions {
   };
   /** Mirrors the new context into the PostgreSQL session row used by the Admin API. */
   persistContextSwitch?: (sid: string, loginContext: string) => Promise<void>;
+  /**
+   * Registration refuses to start without `membershipStatus` and `authenticationRequirement`:
+   * a server that validates a context key but cannot enforce membership or MFA would issue
+   * codes that bypass both. Only test harnesses that exercise something else set this.
+   */
+  allowUnenforced?: boolean;
   now?: () => Date;
 }
 
@@ -184,6 +190,15 @@ function isAbsoluteUrl(value: string): boolean {
  * a code from an existing IdP session or redirects the user agent to the login/consent page.
  */
 export function registerAuthorizeRoute(app: FastifyInstance, options: AuthorizeRouteOptions): void {
+  if (
+    options.allowUnenforced !== true &&
+    (options.membershipStatus === undefined || options.authenticationRequirement === undefined)
+  ) {
+    throw new Error(
+      '/oauth2/authorize requires membershipStatus and authenticationRequirement; ' +
+        'refusing to start without the enforcement callbacks',
+    );
+  }
   const now = options.now ?? (() => new Date());
   const loginUrl = options.loginUrl ?? `${options.issuer.replace(/\/+$/, '')}/login`;
   const consentUrl = options.consentUrl ?? `${options.issuer.replace(/\/+$/, '')}/consent`;
@@ -265,29 +280,49 @@ export function registerAuthorizeRoute(app: FastifyInstance, options: AuthorizeR
       ...(authorize.loginContext === undefined ? {} : { loginContext: authorize.loginContext }),
     };
 
+    // A refused authorization is a security-relevant event (a suspended or missing membership
+    // is exactly what an attacker probing contexts produces), so it leaves an audit row.
+    const deny = async (reason: string, description: string): Promise<FastifyReply> => {
+      try {
+        await options.audit?.record({
+          actorType: 'user',
+          actorId: session.userId,
+          action: 'authorize.denied',
+          targetType: 'client',
+          targetId: authorize.client.clientId,
+          clientId: authorize.client.clientId,
+          ip: request.ip ?? null,
+          userAgent: request.headers['user-agent'] ?? null,
+          result: 'failure',
+          metadata: {
+            reason,
+            ...(authorize.loginContext === undefined
+              ? {}
+              : { loginContext: authorize.loginContext }),
+          },
+        });
+      } catch {
+        // The denial stands even when the audit store is unavailable.
+      }
+      return redirect(
+        reply,
+        buildErrorRedirect(
+          authorize.redirectUri,
+          oauthError('access_denied', description),
+          authorize.state,
+        ),
+      );
+    };
+
     // A suspended membership cuts access to that app, and a requested login context requires
     // an active membership in that exact context (`docs/login-contexts.md` 4.1, CTX-003).
     if (options.membershipStatus !== undefined) {
       const membership = await options.membershipStatus(subject);
       if (membership === 'suspended') {
-        return redirect(
-          reply,
-          buildErrorRedirect(
-            authorize.redirectUri,
-            oauthError('access_denied', 'membership is suspended'),
-            authorize.state,
-          ),
-        );
+        return deny('membership_suspended', 'membership is suspended');
       }
       if (authorize.loginContext !== undefined && membership !== 'active') {
-        return redirect(
-          reply,
-          buildErrorRedirect(
-            authorize.redirectUri,
-            oauthError('access_denied', 'membership is required for this login context'),
-            authorize.state,
-          ),
-        );
+        return deny('context_membership_required', 'membership is required for this login context');
       }
       // A client with active login contexts manages access per context. An unbound request
       // is not context-bound (`docs/login-contexts.md` 4.1), so the only thing it can rely
@@ -300,14 +335,7 @@ export function registerAuthorizeRoute(app: FastifyInstance, options: AuthorizeR
         (authorize.client.loginContexts?.length ?? 0) > 0 &&
         membership !== 'active'
       ) {
-        return redirect(
-          reply,
-          buildErrorRedirect(
-            authorize.redirectUri,
-            oauthError('access_denied', 'an active client membership is required'),
-            authorize.state,
-          ),
-        );
+        return deny('client_membership_required', 'an active client membership is required');
       }
     }
 

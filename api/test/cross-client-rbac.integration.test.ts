@@ -14,7 +14,11 @@ import { createPrismaRbacRepository } from '../src/admin/rbac/prisma-rbac-reposi
 import { PrismaClient } from '../src/generated/prisma/client.js';
 import type { AuthorizationCodeRecord } from '../src/oidc/authorization-code.js';
 import { s256Challenge } from '../src/oidc/authorization-code.js';
-import { createAuthorizeMembershipStatus } from '../src/oidc/authorize-enforcement.js';
+import {
+  createAuthorizeAuthenticationRequirement,
+  createAuthorizeMembershipStatus,
+} from '../src/oidc/authorize-enforcement.js';
+import { createPrismaMfaRepository } from '../src/mfa/prisma-repository.js';
 import { createPrismaEffectiveAccessSource } from '../src/oidc/effective-access.js';
 import { createPrismaLoginContextAccessSource } from '../src/oidc/login-context-access.js';
 import { MemorySigningKeyRepository, SigningKeyManager } from '../src/oidc/keys.js';
@@ -341,6 +345,9 @@ beforeAll(async () => {
       clients: clientsRepository,
       isClientAdminEligible,
       membershipStatus: createAuthorizeMembershipStatus(prisma),
+      authenticationRequirement: createAuthorizeAuthenticationRequirement(
+        createPrismaMfaRepository(prisma, { permissions: permissionReader }),
+      ),
     },
     userInfo: { users: usersRepository, access: effectiveAccess },
     rbac: {

@@ -9,7 +9,12 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { PrismaClient } from '../src/generated/prisma/client.js';
 import { s256Challenge } from '../src/oidc/authorization-code.js';
-import { createAuthorizeMembershipStatus } from '../src/oidc/authorize-enforcement.js';
+import {
+  createAuthorizeAuthenticationRequirement,
+  createAuthorizeMembershipStatus,
+} from '../src/oidc/authorize-enforcement.js';
+import { createPrismaMfaRepository } from '../src/mfa/prisma-repository.js';
+import { createPrismaPermissionReader } from '../src/admin/prisma-permission-reader.js';
 import { createPrismaEffectiveAccessSource } from '../src/oidc/effective-access.js';
 import { MemorySigningKeyRepository, SigningKeyManager } from '../src/oidc/keys.js';
 import { createPrismaLoginContextAccessSource } from '../src/oidc/login-context-access.js';
@@ -239,6 +244,9 @@ beforeAll(async () => {
     authorize: {
       clients,
       membershipStatus: createAuthorizeMembershipStatus(prisma),
+      authenticationRequirement: createAuthorizeAuthenticationRequirement(
+        createPrismaMfaRepository(prisma, { permissions: createPrismaPermissionReader(prisma) }),
+      ),
     },
     userInfo: { users, access: effectiveAccess },
   });

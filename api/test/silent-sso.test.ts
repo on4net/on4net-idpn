@@ -158,6 +158,7 @@ beforeAll(async () => {
       now: () => now,
     },
     authorize: {
+      allowUnenforced: true,
       clients,
       isConsentGranted: async (_userId, clientId) => !deniedConsent.has(clientId),
     },

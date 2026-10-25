@@ -383,6 +383,7 @@ beforeAll(async () => {
       sessions,
     },
     authorize: {
+      allowUnenforced: true,
       clients,
       loginUrl: `${issuer}/login`,
     },

@@ -132,7 +132,13 @@ by the owner-backed rule set (H4). The main OIDC flows pass the available confor
 - **Regression tests:** `api/test/authorize-route.test.ts` (suspended → `access_denied`,
   context without membership → `access_denied`, active context membership → code issued) and
   `api/src/oidc/authorize-enforcement.test.ts` (scoping of the lookup).
-- **Accepted residual (owner decision):** for clients that define **no login context**, a
+- **Hardening after the follow-up review (#78 §6):** `registerAuthorizeRoute` refuses to start
+  without `membershipStatus` and `authenticationRequirement`; every denial writes an
+  `authorize.denied` audit row (`membership_suspended`, `context_membership_required`,
+  `client_membership_required`); a `suspended` membership is re-checked for client-wide codes
+  and refresh tokens at `/token` (the family is revoked) and at `/oauth2/userinfo`
+  (`401 invalid_token`), not only for context-bound grants.
+- **Open owner decision (not an accepted risk):** for clients that define **no login context**, a
   user without a `ClientMembership` can still obtain a client-wide token. Making membership
   mandatory for every client is a product decision: the seed and the documented first-party
   bootstrap flows create no memberships, and `docs/auth-flows.md:470` expects membership to be
@@ -413,7 +419,7 @@ selector (#63), per-client localization (#59, #66) and the MFE/JWKS/operations w
 | H1 | High | **Fixed** | `sanitizeReturnTo` only accepts rooted paths or the IdP origin (`api/src/login/login-types.ts:50-73`); the UI never falls back to the raw query (`web/src/app/hosted-login.tsx:423-437, 776, 800`); regression tests in `web/src/app/hosted-login.test.tsx`. |
 | H2 | High | **Fixed** | Policy re-evaluated at code issuance for password, social and SSO sessions, including `acr_values` (`api/src/oidc/authorize-route.ts:300-331`, `authorize-enforcement.ts:24-42`); `api/test/authorize-route.test.ts`. |
 | H3 | High | **Fixed** | `login_context` persisted on codes and refresh tokens (`prisma-code-repository.ts:20-55`, `prisma-refresh-repository.ts:20-68`), taken only from the stored row (`token-route.ts:185-213, 306-311, 358-382`); cross-client RBAC integration test. |
-| H4 | High | **Partially fixed — accepted (owner)** | Context-scoped and context-less-request paths fail closed (`authorize-route.ts:255-291`, `effective-access.ts:118-135`); clients without active contexts keep the legacy membership-free path. Owner action §7.1. |
+| H4 | High | **Partially fixed — owner decision open** | Context-scoped and context-less-request paths fail closed (`authorize-route.ts:255-291`, `effective-access.ts:118-135`); clients without active contexts keep the legacy membership-free path. Owner action §7.1. |
 | M1 | Medium | **Open — accepted** | `/api/v1/login` has no origin check (`api/src/login/routes.ts:90`); owner action §7.2. |
 | M2 | Medium | **Open — accepted** | Signing store hard-coded to `FileSigningKeyRepository('.idpn-keys.json')` (`api/src/index.ts:133`); `SIGNING_KEY_REF` unused. Owner action §7.3. |
 | M3 | Medium | **Fixed** | `invalid_client` + 401 + `WWW-Authenticate: Basic` (`token-route.ts:134-140`); `api/test/token-route.test.ts`. |

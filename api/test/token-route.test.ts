@@ -16,6 +16,7 @@ import {
 } from '../src/oidc/authorization-code.js';
 import type { ClientAuthClientRecord, ClientAuthRepository } from '../src/oidc/client-auth.js';
 import { MemorySigningKeyRepository, SigningKeyManager } from '../src/oidc/keys.js';
+import type { EffectiveAccess, EffectiveAccessSource } from '../src/oidc/effective-access.js';
 import type { LoginContextAccessSource } from '../src/oidc/login-context-access.js';
 import {
   hashRefreshToken,
@@ -174,6 +175,7 @@ interface HarnessOptions {
   sessionValid?: boolean;
   clientAdminEligible?: boolean;
   contextAccess?: LoginContextAccessSource;
+  access?: EffectiveAccessSource;
   metrics?: TokenMetricsSink;
   audit?: { record(event: AuditEventInput): Promise<void> };
 }
@@ -218,6 +220,7 @@ async function harness(options: HarnessOptions = {}) {
     now: () => options.now ?? new Date('2026-10-18T12:00:00Z'),
     isClientAdminEligible: async () => options.clientAdminEligible ?? true,
     ...(options.contextAccess === undefined ? {} : { contextAccess: options.contextAccess }),
+    ...(options.access === undefined ? {} : { access: options.access }),
     ...(options.metrics === undefined ? {} : { metrics: options.metrics }),
     ...(options.audit === undefined ? {} : { audit: options.audit }),
   });
@@ -785,6 +788,70 @@ describe('POST /oauth2/token — login context enforcement', () => {
         client_id: 'spa-app',
       })
       .expect(400);
+    expect(rejected.body).toMatchObject({ error: 'invalid_grant' });
+    expect([...refreshTokens.records.values()].every((record) => record.revokedAt !== null)).toBe(
+      true,
+    );
+    await app.close();
+  });
+});
+
+describe('POST /oauth2/token — client-wide membership suspension', () => {
+  const accessWith = (status: 'active' | 'suspended'): EffectiveAccess => ({
+    roles: status === 'active' ? ['app:member'] : [],
+    permissions: [],
+    membership: { context: null, status, attributes: {} },
+  });
+
+  it('refuses a client-wide code once the membership is suspended', async () => {
+    const { app, codes } = await harness({
+      access: { resolve: async () => accessWith('suspended') },
+    });
+    const code = await seedCode(codes, ['openid']);
+
+    const response = await request(app.server)
+      .post('/oauth2/token')
+      .send({
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: 'https://spa.example.com/cb',
+        code_verifier: verifier,
+        client_id: 'spa-app',
+      })
+      .expect(400);
+
+    expect(response.body).toMatchObject({ error: 'invalid_grant' });
+    expect(response.body.access_token).toBeUndefined();
+    await app.close();
+  });
+
+  it('ends the refresh family of a client-wide token after suspension', async () => {
+    let status: 'active' | 'suspended' = 'active';
+    const { app, codes, refreshTokens } = await harness({
+      access: { resolve: async () => accessWith(status) },
+    });
+    const code = await seedCode(codes, ['openid', 'offline_access']);
+    const issued = await request(app.server)
+      .post('/oauth2/token')
+      .send({
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: 'https://spa.example.com/cb',
+        code_verifier: verifier,
+        client_id: 'spa-app',
+      })
+      .expect(200);
+
+    status = 'suspended';
+    const rejected = await request(app.server)
+      .post('/oauth2/token')
+      .send({
+        grant_type: 'refresh_token',
+        refresh_token: issued.body.refresh_token,
+        client_id: 'spa-app',
+      })
+      .expect(400);
+
     expect(rejected.body).toMatchObject({ error: 'invalid_grant' });
     expect([...refreshTokens.records.values()].every((record) => record.revokedAt !== null)).toBe(
       true,

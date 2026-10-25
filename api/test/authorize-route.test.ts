@@ -92,6 +92,7 @@ function buildApp(options: {
     clientId: string;
     loginContext?: string;
   }) => Promise<'active' | 'invited' | 'suspended' | null>;
+  audit?: Parameters<typeof registerAuthorizeRoute>[1]['audit'];
 }) {
   const app = Fastify({ logger: false });
   const codes = memoryCodes();
@@ -120,6 +121,8 @@ function buildApp(options: {
     ...(options.membershipStatus === undefined
       ? {}
       : { membershipStatus: options.membershipStatus }),
+    allowUnenforced: true,
+    ...(options.audit === undefined ? {} : { audit: options.audit }),
     now: () => options.now ?? new Date('2026-10-18T12:00:00Z'),
   });
   return { app, codes };
@@ -346,9 +349,7 @@ describe('GET /oauth2/authorize', () => {
       .get('/oauth2/authorize')
       .query({ ...baseQuery, max_age: '60', prompt: 'none' })
       .expect(302);
-    expect(new URL(silent.headers.location ?? '').searchParams.get('error')).toBe(
-      'login_required',
-    );
+    expect(new URL(silent.headers.location ?? '').searchParams.get('error')).toBe('login_required');
 
     const interactive = await request(app.server)
       .get('/oauth2/authorize')
@@ -504,6 +505,84 @@ describe('GET /oauth2/authorize — MFA and membership enforcement', () => {
     expect(location.searchParams.get('error')).toBe('access_denied');
     expect(codes.records.size).toBe(0);
     await app.close();
+  });
+
+  it('audits every membership denial with the reason and the context', async () => {
+    const events: { action: string; result: string; metadata?: Record<string, unknown> }[] = [];
+    const audit = {
+      async record(event: {
+        action: string;
+        result: 'success' | 'failure';
+        metadata?: Record<string, unknown>;
+      }) {
+        events.push(event);
+      },
+    };
+    const cases = [
+      { status: 'suspended' as const, query: {}, reason: 'membership_suspended' },
+      {
+        status: null,
+        query: { login_context: 'customer-admin' },
+        reason: 'context_membership_required',
+      },
+    ];
+    for (const entry of cases) {
+      const { app } = buildApp({
+        currentSession: session(),
+        clientOverrides: { loginContexts: ['customer-admin'] },
+        membershipStatus: async () => entry.status,
+        audit,
+      });
+      await app.ready();
+      await request(app.server)
+        .get('/oauth2/authorize')
+        .query({ ...baseQuery, ...entry.query })
+        .set('Cookie', 'idpn_session=session-abc')
+        .expect(302);
+      await app.close();
+    }
+    expect(events.map((event) => [event.action, event.result, event.metadata?.['reason']])).toEqual(
+      [
+        ['authorize.denied', 'failure', 'membership_suspended'],
+        ['authorize.denied', 'failure', 'context_membership_required'],
+      ],
+    );
+    expect(events[1]?.metadata?.['loginContext']).toBe('customer-admin');
+  });
+
+  it('keeps the denial when the audit store is unavailable', async () => {
+    const { app, codes } = buildApp({
+      currentSession: session(),
+      membershipStatus: async () => 'suspended',
+      audit: {
+        async record() {
+          throw new Error('audit store down');
+        },
+      },
+    });
+    await app.ready();
+    const response = await request(app.server)
+      .get('/oauth2/authorize')
+      .query(baseQuery)
+      .set('Cookie', 'idpn_session=session-abc')
+      .expect(302);
+    expect(new URL(response.headers.location ?? '').searchParams.get('error')).toBe(
+      'access_denied',
+    );
+    expect(codes.records.size).toBe(0);
+    await app.close();
+  });
+
+  it('refuses to start without the enforcement callbacks', () => {
+    const app = Fastify({ logger: false });
+    expect(() =>
+      registerAuthorizeRoute(app, {
+        issuer,
+        clients: { findByClientId: async () => null },
+        codes: memoryCodes(),
+        sessions: { read: async () => null },
+      }),
+    ).toThrow(/requires membershipStatus and authenticationRequirement/);
   });
 
   it('denies a requested login context without an active membership', async () => {

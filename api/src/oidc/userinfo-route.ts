@@ -104,7 +104,6 @@ export function registerUserInfoRoute(app: FastifyInstance, options: UserInfoRou
 
     const response = buildUserInfo(claims, profile);
     if (
-      claims.permissions_source === 'userinfo' &&
       options.access !== undefined &&
       typeof claims.sub === 'string' &&
       typeof claims.client_id === 'string'
@@ -114,6 +113,18 @@ export function registerUserInfoRoute(app: FastifyInstance, options: UserInfoRou
         clientId: claims.client_id,
         ...(typeof claims.login_context === 'string' ? { loginContext: claims.login_context } : {}),
       });
+      // An access token outlives a suspension by up to its lifetime; the profile endpoint is
+      // the one place that can cut it off immediately.
+      if (access.membership?.status === 'suspended') {
+        return reply
+          .code(401)
+          .header('WWW-Authenticate', 'Bearer error="invalid_token"')
+          .header('Cache-Control', 'no-store')
+          .send({ error: 'invalid_token' });
+      }
+      if (claims.permissions_source !== 'userinfo') {
+        return reply.header('Cache-Control', 'no-store').send(response);
+      }
       response.roles = access.roles;
       response.permissions = access.permissions;
       if (access.membership !== null) {
