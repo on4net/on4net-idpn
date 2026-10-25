@@ -704,6 +704,32 @@ describe('delegated context administration stays inside its scope', () => {
     expect(denials).toBeGreaterThanOrEqual(3);
   });
 
+  it('denies a context-limited admin on every remaining client-wide member route', async () => {
+    const before = await world.snapshot('app-a');
+    const denialsBefore = await world.infra.prisma.auditEvent.count({
+      where: { action: 'member.scope.denied', actorId: world.users.delegatedContext },
+    });
+    const target = world.users.admin;
+    const base = `/api/v1/clients/app-a/members/${target}`;
+    const attempts = [
+      () => request(app.server).post(`${base}/invite/resend`),
+      () => request(app.server).get(base),
+      () => request(app.server).patch(base).send({ status: 'suspended' }),
+      () => request(app.server).delete(base),
+      () => request(app.server).get(`${base}/sessions`),
+    ];
+    for (const attempt of attempts) {
+      const response = await attempt().set('Authorization', delegatedContextAuth);
+      expect(response.status).toBe(403);
+    }
+
+    await expect(world.snapshot('app-a')).resolves.toEqual(before);
+    const denialsAfter = await world.infra.prisma.auditEvent.count({
+      where: { action: 'member.scope.denied', actorId: world.users.delegatedContext },
+    });
+    expect(denialsAfter - denialsBefore).toBe(attempts.length);
+  });
+
   it('denies a suspended context admin on the client-wide surface instead of widening it', async () => {
     const prisma = world.infra.prisma;
     const user = await prisma.user.create({

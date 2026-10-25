@@ -278,6 +278,32 @@ describe('effective access', () => {
     expect(access.permissions).toEqual(['idp:member:read', 'idp:user:read']);
   });
 
+  it('does not fall back to the role set when the client-wide membership is missing', async () => {
+    // app-a defines login contexts, so omitting `login_context` resolves the client-wide row.
+    // The user still holds an active context membership and the role assignments, which must
+    // not substitute for it (otherwise omitting the parameter would bypass the context gate).
+    const row = await prisma.clientMembership.findUniqueOrThrow({
+      where: { id: defaultMembershipId },
+    });
+    await prisma.clientMembership.delete({ where: { id: defaultMembershipId } });
+    try {
+      const access = await source.resolve({ userId: user.id, clientId: 'app-a' });
+      expect(access.roles).toEqual([]);
+      expect(access.permissions).toEqual([]);
+      expect(access.membership).toBeNull();
+
+      // The explicit context path is unaffected.
+      const bound = await source.resolve({
+        userId: user.id,
+        clientId: 'app-a',
+        loginContext: 'customer-admin',
+      });
+      expect(bound.roles).toEqual(['app-a:editor']);
+    } finally {
+      await prisma.clientMembership.create({ data: row });
+    }
+  });
+
   it('withdraws roles and permissions when the membership is suspended', async () => {
     await prisma.clientMembership.update({
       where: { id: defaultMembershipId },

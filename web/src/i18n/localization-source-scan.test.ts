@@ -58,7 +58,10 @@ function normalize(file: string): string {
 }
 
 function scan(file: string): Finding[] {
-  const text = readFileSync(file, 'utf8');
+  return scanText(file, readFileSync(file, 'utf8'));
+}
+
+function scanText(file: string, text: string): Finding[] {
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const findings: Finding[] = [];
 
@@ -154,5 +157,47 @@ describe('localization source scan', () => {
     );
 
     expect(format(unsafe)).toBe('');
+  });
+
+  // Positive control: a scan that finds nothing in the shipped code proves nothing unless it
+  // also finds each violation class in a file that is known to be bad.
+  it('detects every violation class in a deliberately bad fixture', () => {
+    const fixture = [
+      'export const Bad = () => (',
+      '  <div title="Close" aria-label="بستن">',
+      '    Hello world',
+      '    {"Sign in"}',
+      '    <span dangerouslySetInnerHTML={{ __html: x }} />',
+      '    {new Date().toLocaleString()}',
+      '  </div>',
+      ');',
+    ].join('\n');
+    const messages = scanText(join(WEB_ROOT, 'src/app/bad-fixture.tsx'), fixture).map(
+      (entry) => entry.message,
+    );
+
+    expect(messages).toEqual(
+      expect.arrayContaining([
+        'hardcoded title: "Close"',
+        'hardcoded aria-label: "بستن"',
+        'hardcoded JSX text: "Hello world"',
+        'hardcoded JSX expression: "Sign in"',
+        'dangerouslySetInnerHTML is forbidden for translated text',
+        'locale-less toLocale*String() call',
+      ]),
+    );
+  });
+
+  it('accepts a fixture that only uses translated text', () => {
+    const fixture = [
+      'export const Good = ({ t }) => (',
+      '  <div title={t("close")} className="card">',
+      '    {t("hello")}',
+      '    {new Date().toLocaleString(locale)}',
+      '  </div>',
+      ');',
+    ].join('\n');
+
+    expect(scanText(join(WEB_ROOT, 'src/app/good-fixture.tsx'), fixture)).toEqual([]);
   });
 });

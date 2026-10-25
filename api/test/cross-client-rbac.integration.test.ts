@@ -985,6 +985,22 @@ function crossClientAttacks(attacker: AppClientId, victim: AppClientId): CrossCl
           .send({ key: `${victim}:attack-${attacker}`, name: 'Attack', clientId: victim }),
     },
     {
+      name: 'patching a role of another client',
+      invoke: (authorization) =>
+        request(app.server)
+          .patch(`/api/v1/roles/${victimRoleId()}`)
+          .set('Authorization', authorization)
+          .send({ name: `Renamed by ${attacker}` }),
+    },
+    {
+      name: 'replacing the permissions of a role of another client',
+      invoke: (authorization) =>
+        request(app.server)
+          .put(`/api/v1/roles/${victimRoleId()}/permissions`)
+          .set('Authorization', authorization)
+          .send({ permissions: [] }),
+    },
+    {
       name: 'deleting a role of another client',
       invoke: (authorization) =>
         request(app.server)
@@ -1143,6 +1159,22 @@ for (const direction of DIRECTIONS) {
         .get(`/api/v1/roles/${created.body.id as string}`)
         .set('Authorization', header)
         .expect(200);
+
+      // The same guard that refuses the victim's role lets the owner through, so the two
+      // attack rows above cannot be passing for an unrelated reason (MFA, step-up, schema).
+      const renamed = await request(app.server)
+        .patch(`/api/v1/roles/${created.body.id as string}`)
+        .set('Authorization', header)
+        .send({ name: 'Billing team' })
+        .expect(200);
+      expect(renamed.body.name).toBe('Billing team');
+
+      const relinked = await request(app.server)
+        .put(`/api/v1/roles/${created.body.id as string}/permissions`)
+        .set('Authorization', header)
+        .send({ permissions: [] })
+        .expect(200);
+      expect(relinked.body.permissionKeys).toEqual([]);
 
       await request(app.server)
         .delete(`/api/v1/roles/${created.body.id as string}`)
