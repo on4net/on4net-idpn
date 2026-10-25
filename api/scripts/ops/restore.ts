@@ -124,7 +124,7 @@ function snapshotTarget(input: {
   now: Date;
   log: (line: string) => void;
 }): string | null {
-  let tables = 0;
+  let tables: number;
   try {
     tables = listPublicTables({ access: input.access, databaseUrl: input.targetUrl }).length;
   } catch {
