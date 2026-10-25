@@ -22,32 +22,46 @@ describe('social limiter', () => {
     expect(consume(buckets, 'a', limit, 61_000)).toBe(true);
   });
 
-  it('evicts a caller that is under its limit, never a throttled one', () => {
+  const fill = (buckets: Map<string, unknown>, hits: number) => {
+    for (let index = 0; buckets.size < MAX_BUCKETS; index += 1) {
+      for (let hit = 0; hit < hits; hit += 1) {
+        consume(buckets as never, `filler-${String(index)}`, limit, 0);
+      }
+    }
+  };
+
+  it('never evicts a live bucket, throttled or not, to admit a new key', () => {
     const buckets = new Map();
     consume(buckets, 'attacker', limit, 0);
     consume(buckets, 'attacker', limit, 0);
     expect(consume(buckets, 'attacker', limit, 0)).toBe(false);
-    for (let index = 0; buckets.size < MAX_BUCKETS; index += 1) {
-      consume(buckets, `filler-${String(index)}`, limit, 0);
-    }
-    // A new key still gets in: one idle bucket is forgotten to make room, so a flood of
-    // distinct keys cannot lock every other caller out.
-    expect(consume(buckets, 'brand-new', limit, 1)).toBe(true);
-    expect(buckets.size).toBe(MAX_BUCKETS);
-    // The throttled bucket survived, so the flood did not reset it.
+    consume(buckets, 'polite', limit, 0);
+    fill(buckets, 1);
+
+    consume(buckets, 'brand-new', limit, 1);
+    expect(buckets.has('brand-new')).toBe(false);
+    expect(buckets.has('polite')).toBe(true);
+    // The flood did not reset the throttled bucket.
     expect(consume(buckets, 'attacker', limit, 2)).toBe(false);
   });
 
-  it('fails closed only when every bucket is throttled', () => {
+  it('charges newcomers to one shared bucket while full, so the service degrades instead of locking', () => {
     const buckets = new Map();
-    for (let index = 0; buckets.size < MAX_BUCKETS; index += 1) {
-      const key = `hot-${String(index)}`;
-      consume(buckets, key, limit, 0);
-      consume(buckets, key, limit, 0);
-    }
-    expect(consume(buckets, 'brand-new', limit, 1)).toBe(false);
-    expect(buckets.has('brand-new')).toBe(false);
-    // Windows expire, the map is pruned, new keys are admitted again.
+    fill(buckets, 1);
+    // limit.max (2) * 20 newcomers fit in the shared overflow bucket, then it throttles.
+    const results = Array.from({ length: 45 }, (_, index) =>
+      consume(buckets, `newcomer-${String(index)}`, limit, 1),
+    );
+    expect(results.filter(Boolean)).toHaveLength(40);
+    expect(results.slice(40).every((allowed) => !allowed)).toBe(true);
+    // Existing callers are unaffected by the overflow being exhausted.
+    expect(consume(buckets, 'filler-0', limit, 2)).toBe(true);
+  });
+
+  it('prunes expired buckets so newcomers get their own bucket again', () => {
+    const buckets = new Map();
+    fill(buckets, 1);
     expect(consume(buckets, 'brand-new', limit, 61_000)).toBe(true);
+    expect(buckets.has('brand-new')).toBe(true);
   });
 });

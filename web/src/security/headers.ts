@@ -26,7 +26,16 @@ export interface SecurityHeaderOptions {
   remoteOrigins?: readonly string[];
   /** Sends a report-only Trusted Types policy; never blocks. */
   trustedTypesReportOnly?: boolean;
+  /**
+   * Absolute URL of the CSP report receiver (`POST /csp-report`). When set, the policy names a
+   * `report-to` group and the `Reporting-Endpoints` header defines it, so violations — the
+   * Trusted Types report-only phase included — actually reach the operator.
+   */
+  reportEndpoint?: string;
 }
+
+/** Name of the reporting group shared by `report-to` and `Reporting-Endpoints`. */
+export const CSP_REPORT_GROUP = 'csp';
 
 const unique = (values: readonly (string | undefined)[]): string[] => [
   ...new Set(values.filter((value): value is string => value !== undefined && value !== '')),
@@ -95,6 +104,9 @@ export function contentSecurityPolicy(options: SecurityHeaderOptions): string {
   if (!dev) {
     directives.push('upgrade-insecure-requests');
   }
+  if (options.reportEndpoint !== undefined) {
+    directives.push(`report-to ${CSP_REPORT_GROUP}`);
+  }
   return directives.join('; ');
 }
 
@@ -126,7 +138,11 @@ export function buildSecurityHeaders(options: SecurityHeaderOptions): Record<str
 
   if (options.trustedTypesReportOnly === true) {
     headers['Content-Security-Policy-Report-Only'] =
-      "require-trusted-types-for 'script'; trusted-types idpn 'allow-duplicates'";
+      "require-trusted-types-for 'script'; trusted-types idpn 'allow-duplicates'" +
+      (options.reportEndpoint === undefined ? '' : `; report-to ${CSP_REPORT_GROUP}`);
+  }
+  if (options.reportEndpoint !== undefined && options.profile !== 'remote') {
+    headers['Reporting-Endpoints'] = `${CSP_REPORT_GROUP}="${options.reportEndpoint}"`;
   }
 
   return headers;

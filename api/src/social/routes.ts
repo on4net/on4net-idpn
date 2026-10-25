@@ -753,28 +753,19 @@ function parseProvider(value: string): SocialProviderId | null {
 /** Upper bound for the in-memory limiter so spraying source addresses cannot grow it forever. */
 export const MAX_BUCKETS = 10_000;
 
-/**
- * Makes room for one new bucket. Expired buckets go first, then the oldest bucket that is not
- * throttled: forgetting a caller that is still under its limit costs it nothing, whereas a
- * throttled bucket is never evicted, so flooding new keys cannot reset a throttle. If every
- * bucket is throttled the map stays full and the caller fails closed.
- */
+/** Drops expired buckets only. A live bucket is never evicted: that would reset a throttle. */
 function pruneBuckets(buckets: Map<string, Bucket>, nowMs: number): void {
   for (const [key, bucket] of buckets) {
     if (bucket.resetAt <= nowMs) {
       buckets.delete(key);
     }
   }
-  if (buckets.size < MAX_BUCKETS) {
-    return;
-  }
-  for (const [key, bucket] of buckets) {
-    if (bucket.count < bucket.max) {
-      buckets.delete(key);
-      return;
-    }
-  }
 }
+
+/** Reserved key of the shared bucket that new keys are charged to while the map is full. */
+const OVERFLOW_KEY = ' overflow';
+/** The overflow bucket admits this many times the per-key limit across all unknown keys. */
+const OVERFLOW_FACTOR = 20;
 
 /**
  * Groups IPv6 addresses by /64: a single subscriber controls a whole /64, so per-address
@@ -802,11 +793,19 @@ export function consume(
 ): boolean {
   const bucket = buckets.get(key);
   if (bucket === undefined || bucket.resetAt <= nowMs) {
-    if (bucket === undefined && buckets.size >= MAX_BUCKETS) {
+    if (bucket === undefined && key !== OVERFLOW_KEY && buckets.size >= MAX_BUCKETS) {
       pruneBuckets(buckets, nowMs);
       if (buckets.size >= MAX_BUCKETS) {
-        // Every bucket is throttled: admitting another would mean evicting a throttle.
-        return false;
+        // Full of live buckets: neither evict one (that would let a caller reset its own
+        // throttle) nor reject every newcomer (that would let a flood lock everyone out).
+        // Newcomers share one coarse bucket instead, so the service degrades to a global
+        // ceiling rather than to "no limit" or "no service".
+        return consume(
+          buckets,
+          OVERFLOW_KEY,
+          { windowSeconds: limit.windowSeconds, max: limit.max * OVERFLOW_FACTOR },
+          nowMs,
+        );
       }
     }
     buckets.set(key, { count: 1, max: limit.max, resetAt: nowMs + limit.windowSeconds * 1000 });

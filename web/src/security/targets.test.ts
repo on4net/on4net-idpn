@@ -22,7 +22,14 @@ describe('isSafeTarget', () => {
   });
 
   it('rejects non-http schemes, bare segments and whitespace', () => {
-    for (const target of ['javascript:alert(1)', 'data:text/html,x', 'auth', '', ' /auth', '/a b']) {
+    for (const target of [
+      'javascript:alert(1)',
+      'data:text/html,x',
+      'auth',
+      '',
+      ' /auth',
+      '/a b',
+    ]) {
       expect(isSafeTarget(target), target).toBe(false);
     }
   });
