@@ -255,6 +255,30 @@ beforeAll(async () => {
   await newProvider(appDisabled, 'google', 'app-disabled-google-key', appAGoogleSecret);
   await newProvider(adminPanel, 'google', 'admin-panel-google-key', appAGoogleSecret);
 
+  // A client whose default context only allows passwords, plus one that also allows Google.
+  const appMethods = await newClient('app-methods', { registrationPolicy: 'self_service' });
+  await newProvider(appMethods, 'google', 'app-methods-google-key', appAGoogleSecret);
+  const methodContext = (key: string, loginMethods: string[], isDefault: boolean) =>
+    prisma.clientLoginContext.create({
+      data: {
+        clientId: appMethods.id,
+        key,
+        name: key,
+        allowedRoles: [],
+        defaultRoles: [],
+        loginMethods,
+        sessionIdleTtl: 1800,
+        sessionAbsoluteTtl: 28800,
+        isDefault,
+      },
+    });
+  await methodContext('password-only', ['password'], true);
+  await methodContext('with-google', ['password', 'google'], false);
+  await prisma.client.update({
+    where: { id: appMethods.id },
+    data: { defaultLoginContextKey: 'password-only' },
+  });
+
   const role = await prisma.role.create({
     data: {
       key: 'app-a:member',
@@ -774,6 +798,48 @@ describe('per-client social login', () => {
     );
     expect(failures.length).toBeGreaterThanOrEqual(3);
     expect(failures.every((event) => event.clientId === null)).toBe(true);
+  }, 60_000);
+
+  it('enforces the login methods of the context on the start endpoint', async () => {
+    const loginRequestFor = async (loginContext?: string): Promise<string> => {
+      const params = new URLSearchParams({
+        response_type: 'code',
+        client_id: 'app-methods',
+        redirect_uri: redirectUriFor('app-methods'),
+        scope: 'openid profile',
+        state: CLIENT_STATE,
+        nonce: CLIENT_NONCE,
+        code_challenge: CLIENT_CHALLENGE,
+        code_challenge_method: 'S256',
+        ...(loginContext === undefined ? {} : { login_context: loginContext }),
+      });
+      const login = await request(app.server)
+        .get(`/oauth2/authorize?${params.toString()}`)
+        .expect(302);
+      return String(new URL(String(login.headers.location)).searchParams.get('login_request'));
+    };
+
+    // No context requested: the default one allows passwords only, so Google is refused.
+    const defaultRequest = await loginRequestFor();
+    const denied = await request(app.server)
+      .get('/oauth2/social/app-methods/google/start')
+      .query({ login_request: defaultRequest })
+      .expect(400);
+    expect(denied.body).toEqual({ error: 'social_provider_disabled' });
+
+    const explicitRequest = await loginRequestFor('password-only');
+    const deniedExplicit = await request(app.server)
+      .get('/oauth2/social/app-methods/google/start')
+      .query({ login_request: explicitRequest })
+      .expect(400);
+    expect(deniedExplicit.body).toEqual({ error: 'social_provider_disabled' });
+
+    // The context that lists Google starts the flow.
+    const allowedRequest = await loginRequestFor('with-google');
+    await request(app.server)
+      .get('/oauth2/social/app-methods/google/start')
+      .query({ login_request: allowedRequest })
+      .expect(302);
   }, 60_000);
 
   it('maps adapter and provider failures to safe social errors', async () => {

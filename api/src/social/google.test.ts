@@ -344,6 +344,20 @@ describe('GoogleSocialAdapter', () => {
     );
 
     expect(error.code).toBe('invalid_response');
-    expect(error.message).toBe('google ID token is missing required claims');
+    expect(error.message).toBe('google ID token failed validation');
+  });
+
+  it('fails closed when the flow carries no nonce to compare', async () => {
+    const signer = await createIdTokenSigner();
+    const idToken = await signer.sign(baseClaims());
+    const fake = fakeFetch(() => jsonResponse({ id_token: idToken }));
+    const { nonce: _nonce, ...withoutNonce } = exchange;
+
+    const error = await captureError(() =>
+      createAdapter(fake, signer).exchangeAuthorizationCode(withoutNonce),
+    );
+
+    expect(error.code).toBe('invalid_response');
+    expect(error.message).toBe('google ID token nonce mismatch');
   });
 });

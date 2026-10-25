@@ -41,7 +41,8 @@ export interface UpsertSocialProviderInput {
 }
 
 export type SocialProviderRepositoryResult<T> =
-  { ok: true; value: T } | { ok: false; reason: 'client-not-found' };
+  | { ok: true; value: T }
+  | { ok: false; reason: 'client-not-found' | 'conflict' | 'provider-not-found' };
 
 /**
  * Persistence port for the admin surface. Implementations must never expose

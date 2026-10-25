@@ -102,6 +102,35 @@ export function createPrismaSocialLoginRepository(
       });
     },
 
+    async findLoginMethods(clientId, loginContext) {
+      const client = await prisma.client.findUnique({
+        where: { clientId },
+        select: { id: true, defaultLoginContextKey: true },
+      });
+      if (client === null) {
+        return [];
+      }
+      const key = loginContext ?? client.defaultLoginContextKey ?? undefined;
+      const context = await prisma.clientLoginContext.findFirst({
+        where: {
+          clientId: client.id,
+          status: 'active',
+          ...(key === undefined ? { isDefault: true } : { key }),
+        },
+        select: { loginMethods: true },
+      });
+      if (context !== null) {
+        return context.loginMethods;
+      }
+      if (loginContext !== undefined) {
+        return [];
+      }
+      const anyActive = await prisma.clientLoginContext.count({
+        where: { clientId: client.id, status: 'active' },
+      });
+      return anyActive === 0 ? null : [];
+    },
+
     async findProvider(
       clientId: string,
       provider: SocialProviderId,

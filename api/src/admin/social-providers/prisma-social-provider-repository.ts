@@ -105,23 +105,37 @@ export function createPrismaSocialProviderRepository(
         enabled: input.enabled,
         ...(secret === undefined ? {} : { clientSecretEncrypted: secret }),
       };
-      const row =
-        existing === null
-          ? await prisma.clientSocialProvider.create({
-              data: {
-                clientId: internalId,
-                provider,
-                ...data,
-                clientSecretEncrypted: requiredSecret(),
-              },
-              select: SELECT,
-            })
-          : await prisma.clientSocialProvider.update({
-              where: { id: existing.id },
-              data,
-              select: SELECT,
-            });
-      return { ok: true, value: toRecord(row) };
+      try {
+        const row =
+          existing === null
+            ? await prisma.clientSocialProvider.create({
+                data: {
+                  clientId: internalId,
+                  provider,
+                  ...data,
+                  clientSecretEncrypted: requiredSecret(),
+                },
+                select: SELECT,
+              })
+            : await prisma.clientSocialProvider.update({
+                where: { id: existing.id },
+                data,
+                select: SELECT,
+              });
+        return { ok: true, value: toRecord(row) };
+      } catch (error) {
+        // The read above and the write are not one statement: a concurrent create hits the
+        // `(client, provider)` unique (P2002), a concurrent delete leaves nothing to update
+        // (P2025). Both are answers for the caller, not server errors.
+        const code = (error as { code?: unknown } | null)?.code;
+        if (code === 'P2002') {
+          return { ok: false, reason: 'conflict' };
+        }
+        if (code === 'P2025') {
+          return { ok: false, reason: 'provider-not-found' };
+        }
+        throw error;
+      }
     },
 
     async remove(clientId, provider) {

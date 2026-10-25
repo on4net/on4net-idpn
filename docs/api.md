@@ -520,6 +520,11 @@ POST /api/v1/users
 | PUT    | `/api/v1/clients/{clientId}/social-providers/{provider}` | `idp:social-provider:write` | ایجاد/به‌روزرسانی Credential |
 | DELETE | `/api/v1/clients/{clientId}/social-providers/{provider}` | `idp:social-provider:write` | حذف/غیرفعال‌سازی             |
 
+- `callbackUrl` در پاسخ از `SOCIAL_CALLBACK_BASE_URL` ساخته می‌شود (در نبود آن از issuer)، همان مقداری که runtime به Provider می‌دهد.
+- `PUT` هم‌زمان با ایجاد/حذف همان ردیف `409` (تغییر هم‌زمان) یا `404` (ردیف حذف شده) برمی‌گرداند، نه `500`.
+- `/oauth2/social/{clientId}/{provider}/start` فقط وقتی شروع می‌شود که `login_methods` Context درخواستی (یا پیش‌فرض) آن Provider را شامل شود؛ در غیر این صورت `400 social_provider_disabled` (`login_method_not_allowed` در Audit). پاسخ Provider حداکثر ۲۵۶ KiB خوانده می‌شود و توکن Google بدون `nonce` منطبق رد می‌شود.
+- محدودیت نرخ در حافظه: یک سطل برای هر آدرس (IPv6 به‌صورت /64) و یک سطل برای هر (آدرس، client، provider) با سقف ۱۰٬۰۰۰ سطل؛ هنگام پر بودن سطل‌های زنده، درخواست‌هایی که سطل تازه می‌خواهند `429` می‌گیرند (fail closed). شکست‌های قبل از یافتن client در Audit به `clientId` نسبت داده نمی‌شوند.
+
 ```json
 {
   "clientKey": "1234567890-abc.apps.googleusercontent.com",

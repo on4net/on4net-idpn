@@ -160,6 +160,9 @@ export class GoogleSocialAdapter implements SocialProviderAdapter {
       const result = await jwtVerify(idToken, this.keyResolver, {
         issuer: [...GOOGLE_ISSUERS],
         audience: input.clientKey,
+        // Without this a token lacking `sub`/`iat`/`exp` would parse as valid until the claims
+        // schema runs; require them at signature-verification time.
+        requiredClaims: ['iss', 'aud', 'sub', 'exp', 'iat'],
         algorithms: GOOGLE_ALGORITHMS,
         clockTolerance: this.clockToleranceSeconds,
       });
@@ -176,7 +179,9 @@ export class GoogleSocialAdapter implements SocialProviderAdapter {
       );
     }
 
-    if (input.nonce !== undefined && payload.nonce !== input.nonce) {
+    // The nonce binds the ID token to this browser's flow. A flow that carries none cannot
+    // prove that, so it fails closed instead of skipping the comparison.
+    if (input.nonce === undefined || payload.nonce !== input.nonce) {
       throw new SocialAdapterError('invalid_response', 'google', 'google ID token nonce mismatch');
     }
 

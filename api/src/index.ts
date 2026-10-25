@@ -459,6 +459,9 @@ const app = buildServer({
     providers: createPrismaSocialProviderRepository(prisma),
     audit: createPrismaAdminAudit(prisma),
     secretBox: socialSecretBox,
+    ...(env.SOCIAL_CALLBACK_BASE_URL === undefined
+      ? {}
+      : { callbackBaseUrl: env.SOCIAL_CALLBACK_BASE_URL }),
   },
   rbac: {
     adminClientId: env.ADMIN_CLIENT_ID,

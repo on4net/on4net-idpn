@@ -87,6 +87,12 @@ export type LinkIdentityOutcome =
 
 export interface SocialLoginRepository {
   findClient(clientId: string): Promise<SocialClient | null>;
+  /**
+   * `login_methods` of the login context a flow runs in: the requested one, else the client's
+   * default. `null` means the client defines no usable context, so nothing restricts the
+   * provider; an unknown requested context yields `[]` (nothing allowed).
+   */
+  findLoginMethods?(clientId: string, loginContext: string | undefined): Promise<string[] | null>;
   findProvider(
     clientId: string,
     provider: SocialProviderId,

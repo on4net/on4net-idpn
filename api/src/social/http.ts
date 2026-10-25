@@ -131,14 +131,55 @@ async function fetchWithTimeout(
   }
 }
 
+class OversizedBodyError extends Error {}
+
+/**
+ * Reads at most `limit` bytes. `response.text()` buffers the whole body first, so a provider
+ * (or whatever answers in its place) could make the process hold an arbitrarily large payload
+ * before the size check ran.
+ */
+async function readBounded(response: Response, limit: number): Promise<string> {
+  const declared = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > limit) {
+    await response.body?.cancel();
+    throw new OversizedBodyError();
+  }
+  if (response.body === null) {
+    return '';
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    received += value.byteLength;
+    if (received > limit) {
+      await reader.cancel();
+      throw new OversizedBodyError();
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
 async function readJsonBody(
   response: Response,
   request: SocialHttpRequest,
 ): Promise<Record<string, unknown>> {
   let text: string;
   try {
-    text = await response.text();
+    text = await readBounded(response, MAX_BODY_BYTES);
   } catch (cause) {
+    if (cause instanceof OversizedBodyError) {
+      throw new SocialAdapterError(
+        'invalid_response',
+        request.provider,
+        `${request.provider} ${request.operation} returned an oversized response`,
+      );
+    }
     throw new SocialAdapterError(
       'provider_unavailable',
       request.provider,

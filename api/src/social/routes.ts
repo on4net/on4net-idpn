@@ -198,13 +198,14 @@ export function registerSocialLoginRoutes(
    */
   const rateLimited = (request: FastifyRequest, clientId: string, provider: string): boolean => {
     const at = now().getTime();
-    if (!consume(buckets, `ip:${request.ip}`, ipLimit, at)) {
+    const address = limiterAddress(request.ip);
+    if (!consume(buckets, `ip:${address}`, ipLimit, at)) {
       return true;
     }
     if (!isValidTarget(clientId, provider)) {
       return false;
     }
-    return !consume(buckets, `${request.ip}:${clientId}:${provider}`, limit, at);
+    return !consume(buckets, `${address}:${clientId}:${provider}`, limit, at);
   };
 
   app.get(
@@ -288,6 +289,30 @@ export function registerSocialLoginRoutes(
           provider,
           'social_provider_disabled',
           'admin_client',
+          true,
+        );
+      }
+      // The login page only offers the methods of the context, but this endpoint is reachable
+      // directly: without this check a context limited to `password` could still be entered
+      // through a provider.
+      const requestedContext =
+        new URL(authorize.authorizeUrl).searchParams.get('login_context') ?? undefined;
+      const allowedMethods = await options.repository.findLoginMethods?.(
+        clientId,
+        requestedContext === '' ? undefined : requestedContext,
+      );
+      if (
+        allowedMethods !== undefined &&
+        allowedMethods !== null &&
+        !allowedMethods.includes(provider)
+      ) {
+        return rejectStart(
+          request,
+          reply,
+          clientId,
+          provider,
+          'social_provider_disabled',
+          'login_method_not_allowed',
           true,
         );
       }
@@ -724,24 +749,36 @@ function parseProvider(value: string): SocialProviderId | null {
 }
 
 /** Upper bound for the in-memory limiter so spraying source addresses cannot grow it forever. */
-const MAX_BUCKETS = 10_000;
+export const MAX_BUCKETS = 10_000;
 
-/** Drops expired buckets; if the map is still full the oldest entries go (insertion order). */
+/** Drops expired buckets only; a live bucket is never evicted to make room. */
 function pruneBuckets(buckets: Map<string, Bucket>, nowMs: number): void {
   for (const [key, bucket] of buckets) {
     if (bucket.resetAt <= nowMs) {
       buckets.delete(key);
     }
   }
-  for (const key of buckets.keys()) {
-    if (buckets.size < MAX_BUCKETS) {
-      break;
-    }
-    buckets.delete(key);
-  }
 }
 
-function consume(
+/**
+ * Groups IPv6 addresses by /64: a single subscriber controls a whole /64, so per-address
+ * buckets would let one host mint 2^64 keys. IPv4 (and IPv4-mapped) addresses are kept whole.
+ */
+export function limiterAddress(ip: string): string {
+  if (!ip.includes(':') || ip.toLowerCase().startsWith('::ffff:')) {
+    return ip;
+  }
+  const [head = ''] = ip.toLowerCase().split('%');
+  const [left = '', right] = head.split('::');
+  const groups = left === '' ? [] : left.split(':');
+  if (right === undefined && groups.length >= 4) {
+    return `${groups.slice(0, 4).join(':')}::/64`;
+  }
+  const padded = [...groups, ...Array.from({ length: Math.max(0, 4 - groups.length) }, () => '0')];
+  return `${padded.slice(0, 4).join(':')}::/64`;
+}
+
+export function consume(
   buckets: Map<string, Bucket>,
   key: string,
   limit: { windowSeconds: number; max: number },
@@ -751,6 +788,11 @@ function consume(
   if (bucket === undefined || bucket.resetAt <= nowMs) {
     if (bucket === undefined && buckets.size >= MAX_BUCKETS) {
       pruneBuckets(buckets, nowMs);
+      if (buckets.size >= MAX_BUCKETS) {
+        // Fail closed: evicting a live bucket would let a caller reset its own throttle by
+        // flooding new keys. Legitimate callers retry once the windows expire.
+        return false;
+      }
     }
     buckets.set(key, { count: 1, resetAt: nowMs + limit.windowSeconds * 1000 });
     return true;

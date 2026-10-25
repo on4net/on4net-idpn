@@ -33,6 +33,12 @@ export interface SocialProviderRoutesOptions {
    * `SOCIAL_SECRET_KEY` is configured; writes then fail closed with `503`.
    */
   secretBox: SecretBox | null;
+  /**
+   * Public base of the callback URL, `SOCIAL_CALLBACK_BASE_URL`. The social runtime builds the
+   * redirect URI from the same value, so the URL shown to the admin is the URL a provider
+   * actually receives; falling back to the issuer would show a different one behind a proxy.
+   */
+  callbackBaseUrl?: string;
 }
 
 const SOCIAL_READ = 'idp:social-provider:read';
@@ -124,7 +130,11 @@ export function registerSocialProviderAdminRoutes(
     scopes: record.scopes,
     allowedEmailDomains: record.allowedEmailDomains,
     enabled: record.enabled,
-    callbackUrl: socialCallbackUrl(options.issuer, clientId, record.provider),
+    callbackUrl: socialCallbackUrl(
+      options.callbackBaseUrl ?? options.issuer,
+      clientId,
+      record.provider,
+    ),
     updatedAt: record.updatedAt,
   });
 
@@ -225,6 +235,18 @@ export function registerSocialProviderAdminRoutes(
         ...(secret === undefined ? {} : { clientSecretEncrypted: secret }),
       });
       if (!saved.ok) {
+        if (saved.reason === 'conflict') {
+          return sendProblem(
+            reply,
+            409,
+            'conflict',
+            'Conflict',
+            'the provider was changed concurrently; read it again and retry',
+          );
+        }
+        if (saved.reason === 'provider-not-found') {
+          return sendProblem(reply, 404, 'not-found', 'Not found', 'provider does not exist');
+        }
         return clientNotFound(reply);
       }
       await audit(

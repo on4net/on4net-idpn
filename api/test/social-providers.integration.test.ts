@@ -20,6 +20,8 @@ const API_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const PRISMA_CLI = fileURLToPath(new URL('../node_modules/prisma/build/index.js', import.meta.url));
 
 const issuer = 'http://127.0.0.1:3200';
+/** Public base behind the proxy; differs from the issuer on purpose (SOCIAL_CALLBACK_BASE_URL). */
+const callbackBase = 'https://login.public.example.com';
 const adminClientId = 'admin-panel';
 const secretKey = 'MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=';
 const appASecret = 'GOCSPX-app-a-google-secret';
@@ -117,6 +119,7 @@ beforeAll(async () => {
       providers: createPrismaSocialProviderRepository(prisma),
       audit: createPrismaAdminAudit(prisma),
       secretBox: box,
+      callbackBaseUrl: callbackBase,
     },
   });
   await app.ready();
@@ -252,7 +255,7 @@ describe('social provider credentials', () => {
       scopes: ['openid', 'email', 'profile'],
       allowedEmailDomains: ['example.com'],
       enabled: true,
-      callbackUrl: `${issuer}/oauth2/social/app-a/google/callback`,
+      callbackUrl: `${callbackBase}/oauth2/social/app-a/google/callback`,
       updatedAt: expect.any(String),
     });
     const payload = jsonOf(response.body);
@@ -282,7 +285,7 @@ describe('social provider credentials', () => {
       scopes: ['openid', 'email', 'profile'],
       allowedEmailDomains: ['example.com'],
       enabled: true,
-      callbackUrl: `${issuer}/oauth2/social/app-a/google/callback`,
+      callbackUrl: `${callbackBase}/oauth2/social/app-a/google/callback`,
     });
     expect(jsonOf(response.body)).not.toContain(appASecret);
     expect(jsonOf(response.body)).not.toContain('clientSecret');
@@ -353,7 +356,7 @@ describe('social provider credentials', () => {
       .set('Authorization', await globalToken())
       .send({ clientKey: 'app-b-facebook-key', clientSecret: appBSecret })
       .expect(200);
-    expect(createdB.body.callbackUrl).toBe(`${issuer}/oauth2/social/app-b/facebook/callback`);
+    expect(createdB.body.callbackUrl).toBe(`${callbackBase}/oauth2/social/app-b/facebook/callback`);
 
     await request(app.server)
       .get('/api/v1/clients/app-b/social-providers')
