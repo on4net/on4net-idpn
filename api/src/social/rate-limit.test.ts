@@ -22,20 +22,32 @@ describe('social limiter', () => {
     expect(consume(buckets, 'a', limit, 61_000)).toBe(true);
   });
 
-  it('never evicts a live bucket to admit a new key: a flood fails closed', () => {
+  it('evicts a caller that is under its limit, never a throttled one', () => {
     const buckets = new Map();
-    // The caller exhausts its own bucket, then floods other keys to try to push it out.
     consume(buckets, 'attacker', limit, 0);
     consume(buckets, 'attacker', limit, 0);
     expect(consume(buckets, 'attacker', limit, 0)).toBe(false);
     for (let index = 0; buckets.size < MAX_BUCKETS; index += 1) {
       consume(buckets, `filler-${String(index)}`, limit, 0);
     }
+    // A new key still gets in: one idle bucket is forgotten to make room, so a flood of
+    // distinct keys cannot lock every other caller out.
+    expect(consume(buckets, 'brand-new', limit, 1)).toBe(true);
+    expect(buckets.size).toBe(MAX_BUCKETS);
+    // The throttled bucket survived, so the flood did not reset it.
+    expect(consume(buckets, 'attacker', limit, 2)).toBe(false);
+  });
+
+  it('fails closed only when every bucket is throttled', () => {
+    const buckets = new Map();
+    for (let index = 0; buckets.size < MAX_BUCKETS; index += 1) {
+      const key = `hot-${String(index)}`;
+      consume(buckets, key, limit, 0);
+      consume(buckets, key, limit, 0);
+    }
     expect(consume(buckets, 'brand-new', limit, 1)).toBe(false);
     expect(buckets.has('brand-new')).toBe(false);
-    // The throttled bucket survived, so the attacker is still limited.
-    expect(consume(buckets, 'attacker', limit, 2)).toBe(false);
-    // Once the windows expire the map is pruned and new keys are admitted again.
+    // Windows expire, the map is pruned, new keys are admitted again.
     expect(consume(buckets, 'brand-new', limit, 61_000)).toBe(true);
   });
 });

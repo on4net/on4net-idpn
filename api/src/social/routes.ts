@@ -107,6 +107,8 @@ interface FailureContext {
 
 interface Bucket {
   count: number;
+  /** Limit that applies to this bucket, so "throttled" can be decided without the caller. */
+  max: number;
   resetAt: number;
 }
 
@@ -751,11 +753,25 @@ function parseProvider(value: string): SocialProviderId | null {
 /** Upper bound for the in-memory limiter so spraying source addresses cannot grow it forever. */
 export const MAX_BUCKETS = 10_000;
 
-/** Drops expired buckets only; a live bucket is never evicted to make room. */
+/**
+ * Makes room for one new bucket. Expired buckets go first, then the oldest bucket that is not
+ * throttled: forgetting a caller that is still under its limit costs it nothing, whereas a
+ * throttled bucket is never evicted, so flooding new keys cannot reset a throttle. If every
+ * bucket is throttled the map stays full and the caller fails closed.
+ */
 function pruneBuckets(buckets: Map<string, Bucket>, nowMs: number): void {
   for (const [key, bucket] of buckets) {
     if (bucket.resetAt <= nowMs) {
       buckets.delete(key);
+    }
+  }
+  if (buckets.size < MAX_BUCKETS) {
+    return;
+  }
+  for (const [key, bucket] of buckets) {
+    if (bucket.count < bucket.max) {
+      buckets.delete(key);
+      return;
     }
   }
 }
@@ -789,12 +805,11 @@ export function consume(
     if (bucket === undefined && buckets.size >= MAX_BUCKETS) {
       pruneBuckets(buckets, nowMs);
       if (buckets.size >= MAX_BUCKETS) {
-        // Fail closed: evicting a live bucket would let a caller reset its own throttle by
-        // flooding new keys. Legitimate callers retry once the windows expire.
+        // Every bucket is throttled: admitting another would mean evicting a throttle.
         return false;
       }
     }
-    buckets.set(key, { count: 1, resetAt: nowMs + limit.windowSeconds * 1000 });
+    buckets.set(key, { count: 1, max: limit.max, resetAt: nowMs + limit.windowSeconds * 1000 });
     return true;
   }
   if (bucket.count >= limit.max) {
