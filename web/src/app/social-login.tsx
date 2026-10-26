@@ -67,42 +67,35 @@ export function selectSocialProviders(
   return selected.filter((entry) => allowed.has(entry.provider));
 }
 
-/** Query parameters the social start endpoint understands (the rest is bound server-side). */
+/**
+ * Query parameters of the social start endpoint. There is exactly one: everything else (the
+ * authorize URL to return to, the client, scopes, PKCE) is bound server-side to the
+ * single-use `login_request`. The endpoint ignores `return_to` and `login_hint`, so sending
+ * them would only copy the authorize URL and the user's e-mail address into proxy and access
+ * logs for no effect.
+ */
 export interface SocialStartUrlInput {
   clientId: string;
   provider: SocialProviderId;
   loginRequest?: string | null;
-  /** Current `/oauth2/authorize` URL; the server never trusts it, but it is preserved. */
-  returnTo?: string | null;
-  loginHint?: string | null;
 }
-
-const MAX_LOGIN_HINT_LENGTH = 254;
 
 /**
  * Builds `/oauth2/social/{clientId}/{provider}/start` (`docs/api.md` 2.8).
  *
  * `login_request` is the opaque handle issued by `/oauth2/authorize`; it is what makes the
- * request startable. `return_to` and `login_hint` are carried along, but no secret, scope or
- * provider credential ever appears in a URL built here.
+ * request startable. No secret, scope, provider credential or personal data appears in a URL
+ * built here.
  */
 export function buildSocialStartUrl(input: SocialStartUrlInput): string {
   const path = `/oauth2/social/${encodeURIComponent(input.clientId)}/${input.provider}/start`;
   const params = new URLSearchParams();
   append(params, 'login_request', input.loginRequest);
-  append(params, 'return_to', input.returnTo);
-  // Only the hint is capped: it is the one value the login page itself normalizes.
-  append(params, 'login_hint', input.loginHint, MAX_LOGIN_HINT_LENGTH);
   const query = params.toString();
   return query === '' ? path : `${path}?${query}`;
 }
 
-function append(
-  params: URLSearchParams,
-  name: string,
-  value: string | null | undefined,
-  maxLength?: number,
-): void {
+function append(params: URLSearchParams, name: string, value: string | null | undefined): void {
   if (value === null || value === undefined) {
     return;
   }
@@ -110,7 +103,7 @@ function append(
   if (trimmed === '') {
     return;
   }
-  params.set(name, maxLength === undefined ? trimmed : trimmed.slice(0, maxLength));
+  params.set(name, trimmed);
 }
 
 /**
@@ -141,8 +134,6 @@ export interface SocialLoginProps {
   providers: readonly SocialProviderSummary[];
   /** Server-issued handle; without it the start endpoint cannot run. */
   loginRequest?: string;
-  returnTo?: string;
-  loginHint?: string;
   /** Raw `error` query value; only allowlisted social codes produce a message. */
   errorCode?: string | null;
   /** Injectable navigation for tests; defaults to `window.location.assign`. */
@@ -154,8 +145,6 @@ export function SocialLogin({
   clientId,
   providers,
   loginRequest,
-  returnTo,
-  loginHint,
   errorCode,
   navigate,
 }: SocialLoginProps) {
@@ -186,13 +175,7 @@ export function SocialLogin({
       return;
     }
     setPending(provider);
-    const target = buildSocialStartUrl({
-      clientId,
-      provider,
-      loginRequest,
-      returnTo,
-      loginHint,
-    });
+    const target = buildSocialStartUrl({ clientId, provider, loginRequest });
     if (navigate !== undefined) {
       navigate(target);
     } else if (typeof window !== 'undefined') {

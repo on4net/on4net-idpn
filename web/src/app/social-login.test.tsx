@@ -40,51 +40,26 @@ describe('buildSocialStartUrl', () => {
     );
   });
 
-  it('preserves login_request, return_to and login_hint', () => {
+  it('sends only the opaque login_request: return_to and login_hint are inert and stay out of URLs', () => {
     const url = buildSocialStartUrl({
       clientId: 'app-a',
       provider: 'facebook',
       loginRequest: 'opaque-request',
-      returnTo: 'https://auth.example.com/oauth2/authorize?client_id=app-a&state=state-123',
-      loginHint: 'sara@example.com',
     });
 
-    expect(url.startsWith('/oauth2/social/app-a/facebook/start?')).toBe(true);
-    const params = new URLSearchParams(url.split('?')[1]);
-    expect(params.get('login_request')).toBe('opaque-request');
-    expect(params.get('return_to')).toBe(
-      'https://auth.example.com/oauth2/authorize?client_id=app-a&state=state-123',
-    );
-    expect(params.get('login_hint')).toBe('sara@example.com');
+    expect(url).toBe('/oauth2/social/app-a/facebook/start?login_request=opaque-request');
+    expect(url).not.toContain('return_to');
+    expect(url).not.toContain('login_hint');
   });
 
-  it('encodes the client id and drops blank optional parameters', () => {
+  it('encodes the client id and drops a blank login_request', () => {
     const url = buildSocialStartUrl({
       clientId: 'app/a?b',
       provider: 'google',
       loginRequest: '   ',
-      returnTo: '',
-      loginHint: null,
     });
 
     expect(url).toBe('/oauth2/social/app%2Fa%3Fb/google/start');
-  });
-
-  it('caps a long login_hint so the URL stays bounded', () => {
-    const url = buildSocialStartUrl({
-      clientId: 'app-a',
-      provider: 'google',
-      loginHint: 'x'.repeat(400),
-    });
-    const params = new URLSearchParams(url.split('?')[1]);
-    expect(params.get('login_hint')).toHaveLength(254);
-  });
-
-  it('preserves a long return_to verbatim', () => {
-    const returnTo = `https://auth.example.com/oauth2/authorize?${'state='.concat('s'.repeat(400))}`;
-    const url = buildSocialStartUrl({ clientId: 'app-a', provider: 'google', returnTo });
-
-    expect(new URLSearchParams(url.split('?')[1]).get('return_to')).toBe(returnTo);
   });
 });
 
@@ -174,11 +149,7 @@ describe('SocialLogin', () => {
 
   it('navigates to the start endpoint and shows a disabled loading state', async () => {
     const user = userEvent.setup();
-    const { navigate } = renderSocial({
-      providers: [google, facebook],
-      returnTo: '/oauth2/authorize?client_id=app-a',
-      loginHint: 'sara@example.com',
-    });
+    const { navigate } = renderSocial({ providers: [google, facebook] });
 
     await user.click(screen.getByRole('button', { name: 'ادامه با Google' }));
 
@@ -187,8 +158,7 @@ describe('SocialLogin', () => {
     const params = new URLSearchParams(target.split('?')[1]);
     expect(target.startsWith('/oauth2/social/app-a/google/start?')).toBe(true);
     expect(params.get('login_request')).toBe('request-123');
-    expect(params.get('return_to')).toBe('/oauth2/authorize?client_id=app-a');
-    expect(params.get('login_hint')).toBe('sara@example.com');
+    expect([...params.keys()]).toEqual(['login_request']);
 
     const pending = screen.getByRole('button', { name: /در حال انتقال/ });
     expect(pending).toBeDisabled();

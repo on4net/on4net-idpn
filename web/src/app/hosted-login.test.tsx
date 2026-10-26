@@ -375,7 +375,7 @@ describe('HostedLoginPage', () => {
     expect(screen.queryByRole('button', { name: /Facebook/ })).not.toBeInTheDocument();
   });
 
-  it('starts social login with the client, provider, return_to and login_hint', async () => {
+  it('starts social login with only the client, provider and login_request', async () => {
     const user = userEvent.setup();
     const navigate = vi.fn();
     const fetchConfig = vi.fn().mockResolvedValue({
@@ -398,8 +398,9 @@ describe('HostedLoginPage', () => {
     const params = new URLSearchParams(target.split('?')[1]);
     expect(target.startsWith('/oauth2/social/app-a/google/start?')).toBe(true);
     expect(params.get('login_request')).toBe('request-123');
-    expect(params.get('return_to')).toBe('/oauth2/authorize?client_id=app-a');
-    expect(params.get('login_hint')).toBe('sara@example.com');
+    // The e-mail hint and the return URL are inert server-side, so they never reach the URL.
+    expect([...params.keys()]).toEqual(['login_request']);
+    expect(target).not.toContain('sara');
     expect(target).not.toMatch(/clientKey|secret|scope/i);
   });
 

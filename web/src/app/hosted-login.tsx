@@ -443,8 +443,7 @@ export function safeRedirectTarget(value: string | undefined): string {
     return '/';
   }
   try {
-    const origin =
-      typeof window === 'undefined' ? 'http://localhost' : window.location.origin;
+    const origin = typeof window === 'undefined' ? 'http://localhost' : window.location.origin;
     const resolved = new URL(trimmed, origin);
     if (resolved.origin !== origin) {
       return '/';
@@ -821,9 +820,7 @@ export function HostedLoginPage({
         (typeof window !== 'undefined' &&
           new URLSearchParams(window.location.search).has('ui_locales'));
       const boundReturnTo = withLoginContext(returnTo, activeContextKey);
-      const withLocale = localeWasChosen
-        ? withUiLocales(boundReturnTo, locale)
-        : boundReturnTo;
+      const withLocale = localeWasChosen ? withUiLocales(boundReturnTo, locale) : boundReturnTo;
       const result = await submit({
         ...values,
         ...(clientId === undefined ? {} : { clientId }),
@@ -917,8 +914,6 @@ export function HostedLoginPage({
         clientId={clientId ?? ''}
         providers={socialProviders}
         loginRequest={loginRequest}
-        returnTo={returnTo}
-        loginHint={loginHint}
         errorCode={socialError}
         navigate={navigate}
       />
