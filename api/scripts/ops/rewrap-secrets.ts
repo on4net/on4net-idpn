@@ -7,6 +7,7 @@ import { PrismaClient } from '../../src/generated/prisma/client.js';
 import {
   createKeyringSecretBox,
   loadMfaSecretKeyring,
+  loadSigningKeyWrapKeyring,
   loadSocialSecretKeyring,
   type KeyringSecretBox,
 } from '../../src/crypto/secret-box.js';
@@ -118,6 +119,35 @@ async function main(): Promise<void> {
           await prisma.mfaFactor.update({
             where: { id },
             data: { secretEncrypted: new Uint8Array(envelope) },
+          });
+        },
+      });
+    }
+    const wrap = loadSigningKeyWrapKeyring(process.env);
+    if (wrap !== null) {
+      const prefix = 'enc:';
+      targets.push({
+        name: 'signing_keys.private_key_ref',
+        box: createKeyringSecretBox(wrap),
+        list: async (after, take) =>
+          (
+            await prisma.signingKey.findMany({
+              where: {
+                privateKeyRef: { startsWith: prefix },
+                ...(after === null ? {} : { kid: { gt: after } }),
+              },
+              orderBy: { kid: 'asc' },
+              take,
+              select: { kid: true, privateKeyRef: true },
+            })
+          ).map((row) => ({
+            id: row.kid,
+            envelope: Buffer.from(row.privateKeyRef.slice(prefix.length), 'base64'),
+          })),
+        write: async (id, envelope) => {
+          await prisma.signingKey.update({
+            where: { kid: id },
+            data: { privateKeyRef: `${prefix}${envelope.toString('base64')}` },
           });
         },
       });

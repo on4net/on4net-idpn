@@ -283,6 +283,33 @@ export function createKeyringSecretBox(ring: SecretKeyring): KeyringSecretBox {
   };
 }
 
+export interface SigningKeyWrapEnv {
+  SIGNING_KEY_WRAP_KEY?: string | undefined;
+  SIGNING_KEY_WRAP_KEY_ID?: string | number | undefined;
+  SIGNING_KEY_WRAP_PREVIOUS_KEYS?: string | undefined;
+}
+
+/**
+ * Key ring that wraps signing-key private material in the `db://` store. `null` when
+ * `SIGNING_KEY_WRAP_KEY` is not set; the caller decides whether that is acceptable.
+ */
+export function loadSigningKeyWrapKeyring(env: SigningKeyWrapEnv): SecretKeyring | null {
+  const raw = env.SIGNING_KEY_WRAP_KEY?.trim();
+  if (raw === undefined || raw === '') {
+    return null;
+  }
+  return {
+    current: {
+      id: parseKeyId(env.SIGNING_KEY_WRAP_KEY_ID, 'SIGNING_KEY_WRAP_KEY_ID'),
+      key: parseSecretKey(raw),
+    },
+    previous: parsePreviousKeys(
+      env.SIGNING_KEY_WRAP_PREVIOUS_KEYS,
+      'SIGNING_KEY_WRAP_PREVIOUS_KEYS',
+    ),
+  };
+}
+
 export interface SecretKeyringEnv {
   NODE_ENV?: string | undefined;
   SOCIAL_SECRET_KEY?: string | undefined;

@@ -24,6 +24,7 @@ import { createPrismaSocialProviderRepository } from './admin/social-providers/p
 import {
   createKeyringSecretBox,
   loadMfaSecretKeyring,
+  loadSigningKeyWrapKeyring,
   loadSocialSecretKeyring,
 } from './crypto/secret-box.js';
 import { createPrismaSocialLoginRepository } from './social/prisma-social-login-repository.js';
@@ -141,14 +142,24 @@ redis.on('error', (error: unknown) => {
 // per-replica key file can never silently become the production signing key.
 // When scheduled rotation is disabled the health flag still reports a rotation after the
 // documented 90-day threshold, so operators keep getting an alert.
-const keys = new SigningKeyManager(createSigningKeyRepository(env), () => new Date(), {
-  retiredRetentionSeconds: env.KEY_RETIRED_RETENTION_SECONDS,
-  rotationCooldownSeconds: env.KEY_ROTATION_COOLDOWN_SECONDS,
-  rotationDueAfterDays:
-    env.KEY_ROTATION_INTERVAL_DAYS > 0 ? env.KEY_ROTATION_INTERVAL_DAYS : DEFAULT_ROTATION_DUE_DAYS,
-  keyCacheTtlSeconds: env.KEY_CACHE_TTL_SECONDS,
-  onWarning: (message) => logWarning({ component: 'signing-key' }, message),
-});
+const signingKeyWrapRing = loadSigningKeyWrapKeyring(env);
+const keys = new SigningKeyManager(
+  createSigningKeyRepository(env, {
+    prisma,
+    wrapBox: signingKeyWrapRing === null ? null : createKeyringSecretBox(signingKeyWrapRing),
+  }),
+  () => new Date(),
+  {
+    retiredRetentionSeconds: env.KEY_RETIRED_RETENTION_SECONDS,
+    rotationCooldownSeconds: env.KEY_ROTATION_COOLDOWN_SECONDS,
+    rotationDueAfterDays:
+      env.KEY_ROTATION_INTERVAL_DAYS > 0
+        ? env.KEY_ROTATION_INTERVAL_DAYS
+        : DEFAULT_ROTATION_DUE_DAYS,
+    keyCacheTtlSeconds: env.KEY_CACHE_TTL_SECONDS,
+    onWarning: (message) => logWarning({ component: 'signing-key' }, message),
+  },
+);
 await keys.ensureKey();
 
 const sessionCache = new RedisSessionCache(redis);

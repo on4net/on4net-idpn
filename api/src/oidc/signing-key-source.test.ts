@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { createKeyringSecretBox } from '../crypto/secret-box.js';
 import { FileSigningKeyRepository } from './file-key-repository.js';
 import { createSigningKeyRepository, DEFAULT_SIGNING_KEY_FILE } from './signing-key-source.js';
 
@@ -8,9 +9,7 @@ describe('createSigningKeyRepository', () => {
     const repository = createSigningKeyRepository({ NODE_ENV: 'development' });
 
     expect(repository).toBeInstanceOf(FileSigningKeyRepository);
-    expect((repository as unknown as { filePath: string }).filePath).toBe(
-      DEFAULT_SIGNING_KEY_FILE,
-    );
+    expect((repository as unknown as { filePath: string }).filePath).toBe(DEFAULT_SIGNING_KEY_FILE);
   });
 
   it('refuses to start in production without a reference', () => {
@@ -42,10 +41,23 @@ describe('createSigningKeyRepository', () => {
         NODE_ENV: 'production',
         SIGNING_KEY_REF: 'vault://idpn/signing',
       }),
-    ).toThrow(/scheme "vault" is not supported yet/);
+    ).toThrow(/scheme "vault" is not supported/);
 
     expect(() =>
       createSigningKeyRepository({ NODE_ENV: 'production', SIGNING_KEY_REF: 'CHANGE_ME' }),
-    ).toThrow(/scheme "CHANGE_ME" is not supported yet/);
+    ).toThrow(/scheme "CHANGE_ME" is not supported/);
+  });
+
+  it('builds the shared database store only with a connection and a wrap key', () => {
+    const env = { NODE_ENV: 'production', SIGNING_KEY_REF: 'db://signing_keys' } as const;
+    expect(() => createSigningKeyRepository(env)).toThrow(/needs the database connection/);
+    expect(() => createSigningKeyRepository(env, { prisma: {} as never, wrapBox: null })).toThrow(
+      /requires SIGNING_KEY_WRAP_KEY/,
+    );
+    const box = createKeyringSecretBox({
+      current: { id: 1, key: Buffer.alloc(32, 3) },
+      previous: [],
+    });
+    expect(createSigningKeyRepository(env, { prisma: {} as never, wrapBox: box })).toBeDefined();
   });
 });

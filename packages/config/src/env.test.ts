@@ -179,8 +179,7 @@ describe('parseServerEnv', () => {
       },
       {
         key: 'SIGNING_KEY_REF',
-        message:
-          'is required in production (file:// on a shared volume, or a KMS/Vault reference)',
+        message: 'is required in production (file:// on a shared volume, or a KMS/Vault reference)',
       },
     ]);
 
@@ -262,5 +261,20 @@ describe('redactConfig', () => {
       MFE_ALLOWED_ORIGINS: 'https://app.example.com',
       ADMIN_URL: '',
     });
+  });
+
+  it('requires a wrap key when the signing keys live in the database', () => {
+    expect(captureIssues({ ...minimalEnv, SIGNING_KEY_REF: 'db://signing_keys' })).toEqual([
+      {
+        key: 'SIGNING_KEY_WRAP_KEY',
+        message: 'is required when SIGNING_KEY_REF is db:// (inject it from KMS/Vault)',
+      },
+    ]);
+    const ok = parseServerEnv({
+      ...minimalEnv,
+      SIGNING_KEY_REF: 'db://signing_keys',
+      SIGNING_KEY_WRAP_KEY: Buffer.alloc(32, 5).toString('base64'),
+    });
+    expect(ok.SIGNING_KEY_WRAP_KEY_ID).toBe(1);
   });
 });

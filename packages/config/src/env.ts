@@ -160,6 +160,19 @@ const serverEnvBase = z.object({
   ARGON2_PARALLELISM: z.coerce.number().int().min(1).max(8).default(1),
   SIGNING_KEY_REF: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
   /**
+   * Key that wraps signing-key private material in the `db://` store (base64 of 32 bytes).
+   * Inject it from KMS/Vault; required when `SIGNING_KEY_REF` is `db://...`.
+   */
+  SIGNING_KEY_WRAP_KEY: z.preprocess(
+    emptyToUndefined,
+    z.string().refine(isSecretKey, 'must be the base64 encoding of exactly 32 bytes').optional(),
+  ),
+  SIGNING_KEY_WRAP_KEY_ID: z.preprocess(
+    emptyToUndefined,
+    z.coerce.number().int().min(1).max(255).default(1),
+  ),
+  SIGNING_KEY_WRAP_PREVIOUS_KEYS: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
+  /**
    * Days between automatic signing-key rotations. `0` disables the scheduler; rotation then
    * happens through `POST /api/v1/keys/rotate` only.
    */
@@ -271,6 +284,16 @@ export const serverEnvSchema = serverEnvBase.superRefine((value, ctx) => {
       code: 'custom',
       path: ['RECOVERY_LOOKUP_KEY'],
       message: 'is required in production (supply it from KMS/Vault)',
+    });
+  }
+  if (
+    value.SIGNING_KEY_REF?.startsWith('db://') === true &&
+    value.SIGNING_KEY_WRAP_KEY === undefined
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['SIGNING_KEY_WRAP_KEY'],
+      message: 'is required when SIGNING_KEY_REF is db:// (inject it from KMS/Vault)',
     });
   }
   if (value.NODE_ENV === 'production' && value.SIGNING_KEY_REF === undefined) {
