@@ -182,6 +182,54 @@ describe('audit privilege split', () => {
     }
   });
 
+  it('keeps reporting what the split cannot fix: CREATEROLE, a disabled trigger, a TRIGGER grant', async () => {
+    const admin = await connect(adminUrl);
+    const app = await connect(asRole('idpn_app_test'));
+    const check = async () =>
+      (await checkAuditPrivileges(async (sql) => (await app.query(sql)).rows)).findings.join(' | ');
+    try {
+      await admin.query(`ALTER ROLE "idpn_app_test" CREATEROLE`);
+      expect(await check()).toContain('has CREATEROLE');
+      await admin.query(`ALTER ROLE "idpn_app_test" NOCREATEROLE`);
+
+      await admin.query(`GRANT TRIGGER ON TABLE "audit_events" TO "idpn_app_test"`);
+      expect(await check()).toContain('holds TRIGGER');
+      await admin.query(`REVOKE TRIGGER ON TABLE "audit_events" FROM "idpn_app_test"`);
+
+      await admin.query(`ALTER TABLE "audit_events" DISABLE TRIGGER "audit_events_no_truncate"`);
+      expect(await check()).toContain('missing or disabled');
+      await admin.query(`ALTER TABLE "audit_events" ENABLE TRIGGER "audit_events_no_truncate"`);
+
+      expect(await check()).toBe('');
+    } finally {
+      await app.end();
+      await admin.end();
+    }
+  });
+
+  it('flags an application role that owns the trigger function or the public schema', async () => {
+    const admin = await connect(adminUrl);
+    const app = await connect(asRole('idpn_app_test'));
+    const check = async () =>
+      (await checkAuditPrivileges(async (sql) => (await app.query(sql)).rows)).findings.join(' | ');
+    try {
+      await admin.query(`ALTER FUNCTION "audit_events_append_only"() OWNER TO "idpn_app_test"`);
+      expect(await check()).toContain('audit_events_append_only()');
+      await admin.query(
+        `ALTER FUNCTION "audit_events_append_only"() OWNER TO "idpn_audit_owner_test"`,
+      );
+
+      await admin.query(`ALTER SCHEMA public OWNER TO "idpn_app_test"`);
+      expect(await check()).toContain('owns the public schema');
+      await admin.query(`ALTER SCHEMA public OWNER TO pg_database_owner`);
+
+      expect(await check()).toBe('');
+    } finally {
+      await app.end();
+      await admin.end();
+    }
+  });
+
   it('rejects unsafe role names instead of interpolating them', () => {
     expect(() =>
       buildAuditSplitStatements({ appRole: 'app"; DROP TABLE users; --', ownerRole: 'owner' }),

@@ -58,6 +58,8 @@ export function buildAuditSplitStatements(roles: AuditSplitRoles): string[] {
     `REVOKE ALL ON TABLE "audit_events" FROM PUBLIC`,
     `REVOKE ALL ON TABLE "audit_events" FROM ${app}`,
     `GRANT INSERT, SELECT ON TABLE "audit_events" TO ${app}`,
+    // A role that can create roles could grant itself membership of the owner.
+    `ALTER ROLE ${app} NOCREATEROLE`,
   ];
   if (roles.maintenanceRole !== undefined) {
     statements.push(`GRANT ${owner} TO ${identifier(roles.maintenanceRole, 'maintenance role')}`);
@@ -82,14 +84,29 @@ export interface AuditPrivilegeReport {
  */
 export async function checkAuditPrivileges(query: PrivilegeQuery): Promise<AuditPrivilegeReport> {
   const [info] = await query(
-    `SELECT current_user AS current_user, pg_get_userbyid(c.relowner) AS owner,
-            (SELECT rolsuper FROM pg_roles WHERE rolname = current_user) AS superuser,
-            pg_has_role(current_user, c.relowner, 'USAGE') AS owner_member,
+    `SELECT current_user AS current_user,
+            pg_get_userbyid(c.relowner) AS owner,
+            r.rolsuper AS superuser,
+            r.rolcreaterole AS createrole,
+            pg_has_role(current_user, c.relowner, 'MEMBER') AS owner_member,
             has_table_privilege(current_user, c.oid, 'UPDATE') AS can_update,
             has_table_privilege(current_user, c.oid, 'DELETE') AS can_delete,
             has_table_privilege(current_user, c.oid, 'TRUNCATE') AS can_truncate,
-            has_table_privilege(current_user, c.oid, 'INSERT') AS can_insert
+            has_table_privilege(current_user, c.oid, 'TRIGGER') AS can_trigger,
+            has_table_privilege(current_user, c.oid, 'REFERENCES') AS can_references,
+            has_table_privilege(current_user, c.oid, 'INSERT') AS can_insert,
+            (SELECT pg_get_userbyid(p.proowner) FROM pg_proc p
+               WHERE p.proname = 'audit_events_append_only' AND p.pronamespace = c.relnamespace) AS function_owner,
+            (SELECT pg_has_role(current_user, p.proowner, 'MEMBER') FROM pg_proc p
+               WHERE p.proname = 'audit_events_append_only' AND p.pronamespace = c.relnamespace) AS function_owner_member,
+            pg_get_userbyid(n.nspowner) AS schema_owner,
+            pg_has_role(current_user, n.nspowner, 'MEMBER') AS schema_owner_member,
+            (SELECT count(*) FROM pg_trigger tg
+               WHERE tg.tgrelid = c.oid AND tg.tgname IN ('audit_events_append_only', 'audit_events_no_truncate')
+                 AND tg.tgenabled = 'O') AS enabled_triggers
        FROM pg_class c
+       JOIN pg_namespace n ON n.oid = c.relnamespace
+       JOIN pg_roles r ON r.rolname = current_user
       WHERE c.relname = 'audit_events' AND c.relnamespace = 'public'::regnamespace`,
   );
   if (info === undefined) {
@@ -106,15 +123,38 @@ export async function checkAuditPrivileges(query: PrivilegeQuery): Promise<Audit
   if (info['superuser'] === true) {
     findings.push(`${user} is a superuser: it bypasses every privilege on audit_events`);
   }
+  if (info['createrole'] === true) {
+    findings.push(`${user} has CREATEROLE and could grant itself membership of the owner role`);
+  }
   if (owner === user) {
     findings.push(`${user} owns audit_events and can disable or drop its append-only trigger`);
   } else if (info['owner_member'] === true) {
     findings.push(`${user} is a member of ${owner}, the owner of audit_events`);
   }
+  const functionOwner = info['function_owner'];
+  if (functionOwner === null || functionOwner === undefined) {
+    findings.push('the audit_events_append_only() trigger function is missing');
+  } else if (functionOwner === user || info['function_owner_member'] === true) {
+    findings.push(
+      `${user} owns (or is a member of the owner of) audit_events_append_only() and could replace the trigger logic`,
+    );
+  }
+  const schemaOwner = String(info['schema_owner']);
+  if (schemaOwner === user || info['schema_owner_member'] === true) {
+    findings.push(
+      `${user} owns the public schema (${schemaOwner}) and could drop or recreate audit_events; ` +
+        'run migrations and the API as different roles and do not make the API role the database owner',
+    );
+  }
+  if (Number(info['enabled_triggers']) !== 2) {
+    findings.push('the append-only triggers on audit_events are missing or disabled');
+  }
   for (const [privilege, key] of [
     ['UPDATE', 'can_update'],
     ['DELETE', 'can_delete'],
     ['TRUNCATE', 'can_truncate'],
+    ['TRIGGER', 'can_trigger'],
+    ['REFERENCES', 'can_references'],
   ] as const) {
     if (info[key] === true) {
       findings.push(`${user} holds ${privilege} on audit_events`);
