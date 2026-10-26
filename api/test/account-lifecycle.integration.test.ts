@@ -8,7 +8,7 @@ import { promisify } from 'node:util';
 import { Redis } from 'ioredis';
 import { Client } from 'pg';
 import request from 'supertest';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { createAccountLifecycle } from '../src/account/lifecycle.js';
 import { createPrismaLifecycleUserStore } from '../src/account/prisma-lifecycle-repository.js';
@@ -380,6 +380,8 @@ describe('invitation flow', () => {
       .set('Authorization', await adminAuth())
       .send({ email });
     const userId = invited.body.member.userId as string;
+    // The endpoint answers before the mail is dispatched (no timing oracle), so wait for it.
+    await vi.waitFor(() => expect(mailer.lastTo(email)).toBeDefined());
     const firstToken = tokenFromMail(mailer.lastTo(email)?.text ?? '');
 
     const first = await request(app.server)
@@ -388,6 +390,9 @@ describe('invitation flow', () => {
     expect(first.status).toBe(202);
     expect(first.body).toEqual({ status: 'accepted', delivery: 'invitation' });
 
+    await vi.waitFor(() =>
+      expect(tokenFromMail(mailer.lastTo(email)?.text ?? '')).not.toBe(firstToken),
+    );
     const secondToken = tokenFromMail(mailer.lastTo(email)?.text ?? '');
     expect(secondToken).not.toBe(firstToken);
 
