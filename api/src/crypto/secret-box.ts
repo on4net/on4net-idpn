@@ -160,3 +160,194 @@ export function loadMfaSecretKey(env: MfaSecretKeyEnv): Buffer | null {
   }
   return null;
 }
+
+// ---------------------------------------------------------------------------------------------
+// Key ring (card #78 section 3): envelope version 2 names the key that wrote it.
+//
+// Layout: [version=2: 1 byte][key id: 1 byte][iv: 12][auth tag: 16][ciphertext]. Both header
+// bytes are authenticated as additional data. Envelopes written before the ring (version 1)
+// carry no key id and are tried against every configured key, so the first deployment of the
+// ring needs no data migration; `needsRewrap` reports what `ops:rewrap-secrets` should move to
+// the current key before a superseded key is removed from the configuration.
+// ---------------------------------------------------------------------------------------------
+
+const KEYRING_VERSION = 2;
+const KEYRING_HEADER_BYTES = 1 + 1 + IV_BYTES + TAG_BYTES;
+
+export interface SecretKeyEntry {
+  /** 1-255; stored in every v2 envelope. */
+  id: number;
+  key: Buffer;
+}
+
+export interface SecretKeyring {
+  current: SecretKeyEntry;
+  /** Superseded keys, used to decrypt only. */
+  previous: SecretKeyEntry[];
+}
+
+export interface KeyringSecretBox extends SecretBox {
+  /** True for a v1 envelope or one written under a key other than the current one. */
+  needsRewrap(envelope: Uint8Array): boolean;
+}
+
+function assertKeyEntry(entry: SecretKeyEntry, label: string): void {
+  if (!Number.isInteger(entry.id) || entry.id < 1 || entry.id > 255) {
+    throw new SecretBoxError(`${label} key id must be an integer between 1 and 255`);
+  }
+  if (entry.key.length !== KEY_BYTES) {
+    throw new SecretBoxError(`${label} key must decode to exactly 32 bytes`);
+  }
+}
+
+function decryptWith(key: Buffer, aad: Buffer, iv: Buffer, tag: Buffer, data: Buffer): string {
+  const decipher = createDecipheriv('aes-256-gcm', key, iv);
+  decipher.setAAD(aad);
+  decipher.setAuthTag(tag);
+  return Buffer.concat([decipher.update(data), decipher.final()]).toString('utf8');
+}
+
+/** Builds a box that writes v2 envelopes under `current` and reads v1/v2 with the whole ring. */
+export function createKeyringSecretBox(ring: SecretKeyring): KeyringSecretBox {
+  assertKeyEntry(ring.current, 'current');
+  for (const entry of ring.previous) {
+    assertKeyEntry(entry, 'previous');
+  }
+  const ids = [ring.current.id, ...ring.previous.map((entry) => entry.id)];
+  if (new Set(ids).size !== ids.length) {
+    throw new SecretBoxError('secret key ids must be unique');
+  }
+  const all = [ring.current, ...ring.previous];
+
+  return {
+    encrypt(plaintext) {
+      const iv = randomBytes(IV_BYTES);
+      const header = Buffer.from([KEYRING_VERSION, ring.current.id]);
+      const cipher = createCipheriv('aes-256-gcm', ring.current.key, iv);
+      cipher.setAAD(header);
+      const ciphertext = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+      return Buffer.concat([header, iv, cipher.getAuthTag(), ciphertext]);
+    },
+
+    decrypt(envelope) {
+      const data = Buffer.from(envelope);
+      if (data[0] === KEYRING_VERSION) {
+        if (data.length < KEYRING_HEADER_BYTES) {
+          throw new SecretBoxError('secret envelope is malformed');
+        }
+        const entry = all.find((candidate) => candidate.id === data[1]);
+        if (entry === undefined) {
+          throw new SecretBoxError('secret envelope names a key that is not configured');
+        }
+        const iv = data.subarray(2, 2 + IV_BYTES);
+        const tag = data.subarray(2 + IV_BYTES, 2 + IV_BYTES + TAG_BYTES);
+        try {
+          return decryptWith(
+            entry.key,
+            data.subarray(0, 2),
+            iv,
+            tag,
+            data.subarray(KEYRING_HEADER_BYTES),
+          );
+        } catch {
+          throw new SecretBoxError('secret envelope could not be decrypted');
+        }
+      }
+      if (data[0] !== ENVELOPE_VERSION) {
+        throw new SecretBoxError('secret envelope version is not supported');
+      }
+      if (data.length < HEADER_BYTES) {
+        throw new SecretBoxError('secret envelope is malformed');
+      }
+      const iv = data.subarray(VERSION_BYTES, VERSION_BYTES + IV_BYTES);
+      const tag = data.subarray(VERSION_BYTES + IV_BYTES, HEADER_BYTES);
+      for (const entry of all) {
+        try {
+          return decryptWith(
+            entry.key,
+            Buffer.from([ENVELOPE_VERSION]),
+            iv,
+            tag,
+            data.subarray(HEADER_BYTES),
+          );
+        } catch {
+          // Try the next key: a v1 envelope does not say which one wrote it.
+        }
+      }
+      throw new SecretBoxError('secret envelope could not be decrypted');
+    },
+
+    needsRewrap(envelope) {
+      return envelope[0] !== KEYRING_VERSION || envelope[1] !== ring.current.id;
+    },
+  };
+}
+
+export interface SecretKeyringEnv {
+  NODE_ENV?: string | undefined;
+  SOCIAL_SECRET_KEY?: string | undefined;
+  SOCIAL_SECRET_KEY_ID?: string | number | undefined;
+  SOCIAL_SECRET_PREVIOUS_KEYS?: string | undefined;
+  MFA_SECRET_KEY?: string | undefined;
+  MFA_SECRET_KEY_ID?: string | number | undefined;
+  MFA_SECRET_PREVIOUS_KEYS?: string | undefined;
+}
+
+function parseKeyId(value: string | number | undefined, label: string): number {
+  if (value === undefined || String(value).trim() === '') {
+    return 1;
+  }
+  const id = Number(String(value).trim());
+  if (!Number.isInteger(id) || id < 1 || id > 255) {
+    throw new SecretBoxError(`${label} must be an integer between 1 and 255`);
+  }
+  return id;
+}
+
+function parsePreviousKeys(value: string | undefined, label: string): SecretKeyEntry[] {
+  const raw = value?.trim();
+  if (raw === undefined || raw === '') {
+    return [];
+  }
+  return raw.split(',').map((pair) => {
+    const separator = pair.indexOf(':');
+    if (separator === -1) {
+      throw new SecretBoxError(`${label} must be a comma separated list of id:base64key pairs`);
+    }
+    return {
+      id: parseKeyId(pair.slice(0, separator), `${label} id`),
+      key: parseSecretKey(pair.slice(separator + 1)),
+    };
+  });
+}
+
+/** Key ring for social provider secrets; `null` only outside production without a key. */
+export function loadSocialSecretKeyring(env: SecretKeyringEnv): SecretKeyring | null {
+  const key = loadSocialSecretKey(env);
+  if (key === null) {
+    return null;
+  }
+  return {
+    current: { id: parseKeyId(env.SOCIAL_SECRET_KEY_ID, 'SOCIAL_SECRET_KEY_ID'), key },
+    previous: parsePreviousKeys(env.SOCIAL_SECRET_PREVIOUS_KEYS, 'SOCIAL_SECRET_PREVIOUS_KEYS'),
+  };
+}
+
+/**
+ * Key ring for TOTP secrets. A dedicated `MFA_SECRET_KEY` has its own id and previous keys;
+ * without one the social ring is reused (single-key deployments).
+ */
+export function loadMfaSecretKeyring(env: SecretKeyringEnv): SecretKeyring | null {
+  const dedicated = env.MFA_SECRET_KEY?.trim();
+  if (dedicated !== undefined && dedicated !== '') {
+    return {
+      current: {
+        id: parseKeyId(env.MFA_SECRET_KEY_ID, 'MFA_SECRET_KEY_ID'),
+        key: parseSecretKey(dedicated),
+      },
+      previous: parsePreviousKeys(env.MFA_SECRET_PREVIOUS_KEYS, 'MFA_SECRET_PREVIOUS_KEYS'),
+    };
+  }
+  const key = loadMfaSecretKey(env);
+  return key === null ? null : loadSocialSecretKeyring({ ...env, NODE_ENV: env.NODE_ENV });
+}

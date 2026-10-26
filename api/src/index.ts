@@ -21,7 +21,11 @@ import { createPrismaLoginContextRepository } from './admin/login-contexts/prism
 import { createPrismaAuditEventRepository } from './admin/audit/prisma-audit-repository.js';
 import { createPrismaAdminSessionRepository } from './admin/sessions/prisma-session-repository.js';
 import { createPrismaSocialProviderRepository } from './admin/social-providers/prisma-social-provider-repository.js';
-import { createSecretBox, loadMfaSecretKey, loadSocialSecretKey } from './crypto/secret-box.js';
+import {
+  createKeyringSecretBox,
+  loadMfaSecretKeyring,
+  loadSocialSecretKeyring,
+} from './crypto/secret-box.js';
 import { createPrismaSocialLoginRepository } from './social/prisma-social-login-repository.js';
 import { RedisSocialTransactionStore } from './social/transaction-store.js';
 import { FacebookSocialAdapter } from './social/facebook.js';
@@ -214,16 +218,17 @@ const accountRateLimiter = createRedisRateLimiter(redis);
 // Per-app social provider secrets are encrypted with AES-256-GCM. Production refuses to
 // start without a valid SOCIAL_SECRET_KEY; development may run without one, in which case
 // writes fail closed with 503 instead of persisting an unencrypted credential.
-const socialSecretKey = loadSocialSecretKey(env);
-const socialSecretBox = socialSecretKey === null ? null : createSecretBox(socialSecretKey);
+const socialSecretKeyring = loadSocialSecretKeyring(env);
+const socialSecretBox =
+  socialSecretKeyring === null ? null : createKeyringSecretBox(socialSecretKeyring);
 
 /**
  * TOTP secrets are encrypted at rest with a dedicated AES-256-GCM key (`MFA_SECRET_KEY`,
  * falling back to the social key for single-key deployments). Without a key MFA enrollment
  * and verification answer `503` instead of persisting or accepting a plaintext secret.
  */
-const mfaSecretKey = loadMfaSecretKey(env);
-const mfaSecretBox = mfaSecretKey === null ? null : createSecretBox(mfaSecretKey);
+const mfaSecretKeyring = loadMfaSecretKeyring(env);
+const mfaSecretBox = mfaSecretKeyring === null ? null : createKeyringSecretBox(mfaSecretKeyring);
 const mfaRepository = createPrismaMfaRepository(prisma, { permissions: permissionReader });
 /**
  * Keyed lookup that lets recovery-code verification find its one candidate row instead of

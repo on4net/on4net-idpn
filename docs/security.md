@@ -378,3 +378,9 @@
 - سیاست `report-to csp` و هدر `Reporting-Endpoints` از `buildSecurityHeaders({ reportEndpoint })` می‌آیند؛ فاز report-only برای Trusted Types هم به همین مقصد گزارش می‌دهد. `web/src/security/trusted-types.ts` سیاست `idpn` را که هر sink را رد می‌کند پیش از رندر ثبت می‌کند.
 - نمونه‌های `deploy/security/` با `web/src/security/deploy-parity.test.ts` به `headers.ts` گره خورده‌اند: مقدار هر هدر باید یکسان باشد. Nginx بدون `Origin` را مجاز و Origin بیگانه را `403` می‌کند (مثل `decideCors`)، Caddy هم Origin بیگانه را رد می‌کند و هر دو preflight واقعی دارند.
 
+## حلقهٔ کلید برای Secretهای رمزنگاری‌شده (#78 §3)
+
+- پاکت نسخهٔ ۲: `[2][keyId][iv][tag][ciphertext]`؛ شناسهٔ کلید (۱ تا ۲۵۵) هم‌راه نسخه به‌عنوان AAD احراز می‌شود. پاکت‌های نسخهٔ ۱ (پیش از حلقه) با همهٔ کلیدهای پیکربندی‌شده امتحان می‌شوند، پس استقرار اول به migration داده نیاز ندارد.
+- پیکربندی: `SOCIAL_SECRET_KEY` + `SOCIAL_SECRET_KEY_ID` + `SOCIAL_SECRET_PREVIOUS_KEYS=id:base64,...` و برای TOTP معادل `MFA_SECRET_*` (بدون کلید اختصاصی، حلقهٔ social استفاده می‌شود).
+- **چرخش:** کلید جدید با شناسهٔ جدید را فعال کنید، کلید قبلی را در `*_PREVIOUS_KEYS` نگه دارید، `pnpm --filter @idpn/api ops:rewrap-secrets` (با `--dry-run` برای شمارش) همهٔ ردیف‌ها را زیر کلید فعلی دوباره رمز می‌کند، سپس کلید قبلی را حذف کنید. اگر پاکتی را هیچ کلیدی باز نکند اسکریپت با خروجی ۱ آن را گزارش می‌دهد و چیزی را رد نمی‌کند.
+

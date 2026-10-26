@@ -209,6 +209,18 @@ const serverEnvBase = z.object({
     emptyToUndefined,
     z.string().refine(isSecretKey, 'must be the base64 encoding of exactly 32 bytes').optional(),
   ),
+  /** Id (1-255) written into every new social-secret envelope; change it on rotation. */
+  SOCIAL_SECRET_KEY_ID: z.preprocess(
+    emptyToUndefined,
+    z.coerce.number().int().min(1).max(255).default(1),
+  ),
+  /** Superseded social keys, `id:base64key` pairs, used to decrypt only. */
+  SOCIAL_SECRET_PREVIOUS_KEYS: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
+  MFA_SECRET_KEY_ID: z.preprocess(
+    emptyToUndefined,
+    z.coerce.number().int().min(1).max(255).default(1),
+  ),
+  MFA_SECRET_PREVIOUS_KEYS: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
   SMTP_URL: z.preprocess(
     emptyToUndefined,
     z

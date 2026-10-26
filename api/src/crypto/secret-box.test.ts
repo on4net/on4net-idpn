@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  createKeyringSecretBox,
   createSecretBox,
+  loadMfaSecretKeyring,
+  loadSocialSecretKeyring,
   loadMfaSecretKey,
   loadSocialSecretKey,
   parseSecretKey,
@@ -164,5 +167,83 @@ describe('loadMfaSecretKey', () => {
     expect(box.decrypt(envelope)).toBe(secret);
     expect(envelope.toString('ascii')).not.toContain(secret);
     expect(envelope.toString('base64')).not.toContain(Buffer.from(secret).toString('base64'));
+  });
+});
+
+describe('key ring envelopes', () => {
+  const oldKey = Buffer.alloc(32, 7);
+  const newKey = Buffer.alloc(32, 9);
+  const ring = {
+    current: { id: 2, key: newKey },
+    previous: [{ id: 1, key: oldKey }],
+  };
+
+  it('writes v2 envelopes that name the key and round-trips them', () => {
+    const box = createKeyringSecretBox(ring);
+    const envelope = box.encrypt('GOCSPX-secret');
+    expect(envelope[0]).toBe(2);
+    expect(envelope[1]).toBe(2);
+    expect(box.decrypt(envelope)).toBe('GOCSPX-secret');
+    expect(box.needsRewrap(envelope)).toBe(false);
+  });
+
+  it('still opens v1 envelopes and envelopes of a previous key, and flags them for re-wrap', () => {
+    const box = createKeyringSecretBox(ring);
+    const v1 = createSecretBox(oldKey).encrypt('legacy');
+    expect(box.decrypt(v1)).toBe('legacy');
+    expect(box.needsRewrap(v1)).toBe(true);
+
+    const previous = createKeyringSecretBox({
+      current: { id: 1, key: oldKey },
+      previous: [],
+    }).encrypt('old');
+    expect(box.decrypt(previous)).toBe('old');
+    expect(box.needsRewrap(previous)).toBe(true);
+  });
+
+  it('refuses an envelope whose key is gone, and detects header tampering', () => {
+    const box = createKeyringSecretBox(ring);
+    const onlyNew = createKeyringSecretBox({ current: { id: 2, key: newKey }, previous: [] });
+    const legacy = createKeyringSecretBox({
+      current: { id: 1, key: oldKey },
+      previous: [],
+    }).encrypt('x');
+    expect(() => onlyNew.decrypt(legacy)).toThrow(/not configured/);
+
+    const envelope = box.encrypt('secret');
+    envelope[1] = 1; // claim the old key wrote it
+    expect(() => box.decrypt(envelope)).toThrow(SecretBoxError);
+  });
+
+  it('rejects duplicate or out-of-range key ids', () => {
+    expect(() =>
+      createKeyringSecretBox({
+        current: { id: 1, key: newKey },
+        previous: [{ id: 1, key: oldKey }],
+      }),
+    ).toThrow(/unique/);
+    expect(() => createKeyringSecretBox({ current: { id: 0, key: newKey }, previous: [] })).toThrow(
+      /between 1 and 255/,
+    );
+  });
+
+  it('loads rings from configuration, with the MFA ring falling back to the social one', () => {
+    const social = oldKey.toString('base64');
+    const previous = newKey.toString('base64');
+    const ringFromEnv = loadSocialSecretKeyring({
+      SOCIAL_SECRET_KEY: social,
+      SOCIAL_SECRET_KEY_ID: '3',
+      SOCIAL_SECRET_PREVIOUS_KEYS: `2:${previous}`,
+    });
+    expect(ringFromEnv?.current.id).toBe(3);
+    expect(ringFromEnv?.previous.map((entry) => entry.id)).toEqual([2]);
+    expect(loadMfaSecretKeyring({ SOCIAL_SECRET_KEY: social })?.current.id).toBe(1);
+    expect(loadMfaSecretKeyring({})).toBeNull();
+    expect(() =>
+      loadSocialSecretKeyring({ SOCIAL_SECRET_KEY: social, SOCIAL_SECRET_PREVIOUS_KEYS: 'nokey' }),
+    ).toThrow(/id:base64key/);
+    expect(() =>
+      loadSocialSecretKeyring({ SOCIAL_SECRET_KEY: social, SOCIAL_SECRET_KEY_ID: '300' }),
+    ).toThrow(/between 1 and 255/);
   });
 });
