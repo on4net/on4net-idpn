@@ -1,6 +1,13 @@
 /** Client fields the authorization endpoint needs. */
 export interface OAuthClient {
   clientId: string;
+  /** Display name shown on the consent screen. */
+  name?: string;
+  /**
+   * True only for a client the tenant marked first-party. `undefined` is treated as third-party
+   * by `/oauth2/authorize`, so a repository that forgets the field fails closed.
+   */
+  firstParty?: boolean;
   status: 'active' | 'disabled';
   type: 'web' | 'spa' | 'mobile' | 'm2m';
   redirectUris: string[];

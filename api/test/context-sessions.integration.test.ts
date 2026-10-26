@@ -1,3 +1,4 @@
+import { createPrismaConsentRepository } from '../src/oidc/consent.js';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -332,6 +333,8 @@ beforeAll(async () => {
     authorize: {
       clients,
       membershipStatus: createAuthorizeMembershipStatus(prisma),
+      isConsentGranted: (userId, clientId, scopes) =>
+        createPrismaConsentRepository(prisma).isGranted(userId, clientId, scopes),
       authenticationRequirement: createAuthorizeAuthenticationRequirement(mfaRepository),
       audit,
       persistContextSwitch: async (sid, loginContext) => {

@@ -15,6 +15,7 @@ import {
   type ValidatedAuthorizeRequest,
 } from './authorize-request.js';
 import type { ClientRepository } from './client-repository.js';
+import type { ConsentRequestStore } from './consent.js';
 import { buildCodeRedirect, buildErrorRedirect, oauthError } from './oauth-error.js';
 
 export interface SessionReader {
@@ -64,8 +65,17 @@ export interface AuthorizeRouteOptions {
   clients: ClientRepository;
   codes: AuthorizationCodeRepository;
   sessions: SessionReader;
-  /** Consent gate; trusted first-party clients can always return `true`. */
+  /**
+   * Consent gate for clients that are not first-party (`Client.firstParty = false`). A first-party
+   * client never reaches it. Required: registration refuses to start without it, because a
+   * missing gate used to approve every scope for every client (card #81).
+   */
   isConsentGranted?: (userId: string, clientId: string, scopes: string[]) => Promise<boolean>;
+  /**
+   * Stores the pending request for the Hosted UI consent screen and returns its opaque handle.
+   * Without it a missing consent redirects to the bare `consentUrl` (test harnesses only).
+   */
+  consentRequests?: ConsentRequestStore;
   /**
    * Whether the user may receive the `idp.client-admin` scope for this client. The scope is
    * only issued to users that hold at least one `idp:client-*` permission for the app
@@ -152,6 +162,25 @@ function redirect(reply: FastifyReply, location: string): FastifyReply {
  * The login page needs the client and the original authorize request back so that it can
  * return the user agent to this endpoint after a successful authentication (`return_to`).
  */
+/**
+ * Hosted UI consent screen URL: the login page base with `action=consent` and the opaque
+ * handle. The client id and locale only select branding; the handle is what carries the request.
+ */
+export function buildConsentRedirect(
+  loginUrl: string,
+  request: ValidatedAuthorizeRequest,
+  consentRequest: string,
+): string {
+  const url = new URL(loginUrl);
+  url.searchParams.set('action', 'consent');
+  url.searchParams.set('consent_request', consentRequest);
+  url.searchParams.set('client_id', request.client.clientId);
+  if (request.uiLocales !== undefined && request.uiLocales !== '') {
+    url.searchParams.set('ui_locales', request.uiLocales);
+  }
+  return url.toString();
+}
+
 export function buildLoginRedirect(
   loginUrl: string,
   authorize: ValidatedAuthorizeRequest,
@@ -192,17 +221,23 @@ function isAbsoluteUrl(value: string): boolean {
 export function registerAuthorizeRoute(app: FastifyInstance, options: AuthorizeRouteOptions): void {
   if (
     options.allowUnenforced !== true &&
-    (options.membershipStatus === undefined || options.authenticationRequirement === undefined)
+    (options.membershipStatus === undefined ||
+      options.authenticationRequirement === undefined ||
+      options.isConsentGranted === undefined)
   ) {
     throw new Error(
-      '/oauth2/authorize requires membershipStatus and authenticationRequirement; ' +
+      '/oauth2/authorize requires membershipStatus, authenticationRequirement and isConsentGranted; ' +
         'refusing to start without the enforcement callbacks',
     );
   }
   const now = options.now ?? (() => new Date());
   const loginUrl = options.loginUrl ?? `${options.issuer.replace(/\/+$/, '')}/login`;
   const consentUrl = options.consentUrl ?? `${options.issuer.replace(/\/+$/, '')}/consent`;
-  const isConsentGranted = options.isConsentGranted ?? (async () => true);
+  // Fail closed: no gate means no consent, never "everything is approved". Only the explicit
+  // test-harness switch restores the old permissive behaviour.
+  const isConsentGranted =
+    options.isConsentGranted ??
+    (options.allowUnenforced === true ? async () => true : async () => false);
 
   app.get('/oauth2/authorize', async (request, reply) => {
     const query = asQuery(request.query as Query);
@@ -390,11 +425,11 @@ export function registerAuthorizeRoute(app: FastifyInstance, options: AuthorizeR
       );
     }
 
-    const consentNeeded = !(await isConsentGranted(
-      session.userId,
-      authorize.client.clientId,
-      authorize.scopes,
-    ));
+    // A first-party client never prompts. Everything else (including a client record that does
+    // not say, `firstParty === undefined`) needs an approval covering every requested scope.
+    const consentNeeded =
+      authorize.client.firstParty !== true &&
+      !(await isConsentGranted(session.userId, authorize.client.clientId, authorize.scopes));
     if (consentNeeded) {
       if (wantsSilent) {
         return redirect(
@@ -406,7 +441,16 @@ export function registerAuthorizeRoute(app: FastifyInstance, options: AuthorizeR
           ),
         );
       }
-      return redirect(reply, consentUrl);
+      if (options.consentRequests === undefined) {
+        return redirect(reply, consentUrl);
+      }
+      const consentRequest = await options.consentRequests.create({
+        userId: session.userId,
+        clientId: authorize.client.clientId,
+        scopes: authorize.scopes,
+        authorizeUrl: new URL(returnTo, options.issuer).toString(),
+      });
+      return redirect(reply, buildConsentRedirect(loginUrl, authorize, consentRequest));
     }
 
     const { code } = await issueAuthorizationCode(options.codes, {

@@ -405,6 +405,14 @@ describe('initial schema', () => {
   });
 
   it('rolls back and re-applies the migrations', async () => {
+    const firstParty = await rollbackLatestMigration({ connectionString, confirm: true });
+    expect(firstParty).toBe('0019_client_first_party');
+    const firstPartyColumn = await client.query<{ present: boolean }>(
+      `SELECT EXISTS (SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'clients' AND column_name = 'first_party') AS present`,
+    );
+    expect(firstPartyColumn.rows[0]?.present).toBe(false);
+
     const lookup = await rollbackLatestMigration({ connectionString, confirm: true });
     expect(lookup).toBe('0018_recovery_code_lookup');
     const lookupColumn = await client.query<{ present: boolean }>(
@@ -503,7 +511,7 @@ describe('initial schema', () => {
     const history = await client.query<{ migration_name: string; rolled_back_at: Date | null }>(
       `SELECT "migration_name", "rolled_back_at" FROM "_prisma_migrations"`,
     );
-    expect(history.rows).toHaveLength(18);
+    expect(history.rows).toHaveLength(19);
     expect(history.rows.every((row) => row.rolled_back_at !== null)).toBe(true);
 
     const afterRollback = await client.query<{ users: string | null }>(

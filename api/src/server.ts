@@ -5,6 +5,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 
 import type { AccountRoutesOptions } from './account/routes.js';
 import { registerAccountRoutes } from './account/routes.js';
+import { registerConsentRoutes, type ConsentRoutesOptions } from './oidc/consent-routes.js';
 import type { AccountLifecycleRoutesOptions } from './account/lifecycle-routes.js';
 import { registerAccountLifecycleRoutes } from './account/lifecycle-routes.js';
 import { registerFormBodyParser } from './http/form-body.js';
@@ -93,6 +94,8 @@ export interface BuildServerOptions {
     isClientAdminEligible?: (userId: string, clientId: string) => Promise<boolean>;
     /** Consent gate; defaults to granted for first-party clients. */
     isConsentGranted?: Parameters<typeof registerAuthorizeRoute>[1]['isConsentGranted'];
+    /** Pending-request store behind the Hosted UI consent screen. */
+    consentRequests?: Parameters<typeof registerAuthorizeRoute>[1]['consentRequests'];
     /** Server-side MFA/step-up policy check before a code is issued. */
     authenticationRequirement?: Parameters<
       typeof registerAuthorizeRoute
@@ -130,6 +133,8 @@ export interface BuildServerOptions {
   adminSessions?: Omit<SessionRoutesOptions, 'issuer' | 'verifier'>;
   /** Mounts the signing-key endpoints (docs/api.md 3.9). */
   adminKeys?: Omit<KeyRoutesOptions, 'issuer' | 'verifier' | 'keys'>;
+  /** Mounts the consent screen API (`/api/v1/consent/*`, card #81). */
+  consent?: Omit<ConsentRoutesOptions, 'appUrl'>;
   /** Mounts the same-origin account surface used by the embedded MFE (docs/account-api.md). */
   account?: Omit<AccountRoutesOptions, 'appUrl'>;
   /** Mounts invite acceptance, email verification and password reset (docs/auth-flows.md 8). */
@@ -230,6 +235,9 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
         ...(options.authorize.isConsentGranted === undefined
           ? {}
           : { isConsentGranted: options.authorize.isConsentGranted }),
+        ...(options.authorize.consentRequests === undefined
+          ? {}
+          : { consentRequests: options.authorize.consentRequests }),
         // Without these two the server would validate a context key but never enforce the
         // MFA/step-up policy or the context membership at code issuance.
         ...(options.authorize.authenticationRequirement === undefined
@@ -379,6 +387,10 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
 
   if (options.account !== undefined) {
     registerAccountRoutes(app, { ...options.account, appUrl: issuer });
+  }
+
+  if (options.consent !== undefined) {
+    registerConsentRoutes(app, { ...options.consent, appUrl: issuer });
   }
 
   if (options.accountLifecycle !== undefined) {

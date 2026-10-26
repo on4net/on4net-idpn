@@ -275,6 +275,36 @@ describe('client CRUD and redirect validation', () => {
     expect(reserved.body.detail).toContain('idp.admin is reserved');
   });
 
+  it('is first-party by default and can be marked third-party, which turns consent on', async () => {
+    const before = await request(app.server)
+      .get('/api/v1/clients/app-a')
+      .set('Authorization', await token(adminUserId))
+      .expect(200);
+    expect(before.body.firstParty).toBe(true);
+
+    const updated = await request(app.server)
+      .patch('/api/v1/clients/app-a')
+      .set('Authorization', await token(adminUserId))
+      .send({ firstParty: false })
+      .expect(200);
+    expect(updated.body.firstParty).toBe(false);
+    expect(
+      (await prisma.client.findUniqueOrThrow({ where: { clientId: 'app-a' } })).firstParty,
+    ).toBe(false);
+
+    const audit = await prisma.auditEvent.findFirst({
+      where: { action: 'client.update' },
+      orderBy: { occurredAt: 'desc' },
+    });
+    expect(audit?.metadata).toMatchObject({ fields: ['firstParty'] });
+
+    await request(app.server)
+      .patch('/api/v1/clients/app-a')
+      .set('Authorization', await token(adminUserId))
+      .send({ firstParty: true })
+      .expect(200);
+  });
+
   it('updates branding, MFE features and membership schema', async () => {
     const response = await request(app.server)
       .patch('/api/v1/clients/app-a')
@@ -296,6 +326,7 @@ describe('client CRUD and redirect validation', () => {
 
     const audit = await prisma.auditEvent.findFirst({
       where: { action: 'client.update' },
+      orderBy: { occurredAt: 'desc' },
     });
     expect(audit?.metadata).toMatchObject({
       fields: ['accessTokenTtl', 'branding', 'membershipSchema', 'mfeFeatures'],

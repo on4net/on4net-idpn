@@ -22,6 +22,7 @@ interface ClientRow {
   refreshTokenTtl: number;
   requirePkce: boolean;
   registrationPolicy: AdminClientSummary['registrationPolicy'];
+  firstParty: boolean;
   mfaPolicy: AdminClientSummary['mfaPolicy'];
   backchannelLogoutUri: string | null;
   frontchannelLogoutUri: string | null;
@@ -48,6 +49,7 @@ const SELECT = {
   refreshTokenTtl: true,
   requirePkce: true,
   registrationPolicy: true,
+  firstParty: true,
   mfaPolicy: true,
   backchannelLogoutUri: true,
   frontchannelLogoutUri: true,
@@ -79,6 +81,7 @@ const toSummary = (row: ClientRow): AdminClientSummary => ({
   refreshTokenTtl: row.refreshTokenTtl,
   requirePkce: row.requirePkce,
   registrationPolicy: row.registrationPolicy,
+  firstParty: row.firstParty,
   mfaPolicy: row.mfaPolicy,
   backchannelLogoutUri: row.backchannelLogoutUri,
   frontchannelLogoutUri: row.frontchannelLogoutUri,
@@ -190,6 +193,7 @@ export function createPrismaAdminClientRepository(
           refreshTokenTtl: input.refreshTokenTtl,
           requirePkce: input.requirePkce,
           registrationPolicy: input.registrationPolicy,
+          firstParty: input.firstParty,
           mfaPolicy: input.mfaPolicy,
           backchannelLogoutUri: input.backchannelLogoutUri,
           frontchannelLogoutUri: input.frontchannelLogoutUri,
@@ -231,6 +235,7 @@ export function createPrismaAdminClientRepository(
           ...(input.registrationPolicy === undefined
             ? {}
             : { registrationPolicy: input.registrationPolicy }),
+          ...(input.firstParty === undefined ? {} : { firstParty: input.firstParty }),
           ...(input.mfaPolicy === undefined ? {} : { mfaPolicy: input.mfaPolicy }),
           ...(input.backchannelLogoutUri === undefined
             ? {}

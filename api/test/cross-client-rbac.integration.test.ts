@@ -1,3 +1,4 @@
+import { createPrismaConsentRepository } from '../src/oidc/consent.js';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { execFile } from 'node:child_process';
@@ -345,6 +346,8 @@ beforeAll(async () => {
       clients: clientsRepository,
       isClientAdminEligible,
       membershipStatus: createAuthorizeMembershipStatus(prisma),
+      isConsentGranted: (userId, clientId, scopes) =>
+        createPrismaConsentRepository(prisma).isGranted(userId, clientId, scopes),
       authenticationRequirement: createAuthorizeAuthenticationRequirement(
         createPrismaMfaRepository(prisma, { permissions: permissionReader }),
       ),

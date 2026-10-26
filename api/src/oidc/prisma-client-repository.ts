@@ -24,6 +24,8 @@ export function createPrismaClientRepository(
     const contextKeys = row.loginContexts.map((context) => context.key);
     return {
       clientId: row.clientId,
+      name: row.name,
+      firstParty: row.firstParty,
       status: row.status,
       type: row.type,
       redirectUris: row.redirectUris,

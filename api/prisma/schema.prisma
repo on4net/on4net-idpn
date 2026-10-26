@@ -205,6 +205,8 @@ model Client {
   accessTokenTtl         Int                @default(600) @map("access_token_ttl")
   refreshTokenTtl        Int                @default(2592000) @map("refresh_token_ttl")
   requirePkce            Boolean            @default(true) @map("require_pkce")
+  /// First-party clients never prompt for consent; any other client needs an approval per scope.
+  firstParty             Boolean            @default(true) @map("first_party")
   backchannelLogoutUri   String?            @map("backchannel_logout_uri")
   frontchannelLogoutUri  String?            @map("frontchannel_logout_uri")
   registrationPolicy     RegistrationPolicy @default(invite_only) @map("registration_policy")

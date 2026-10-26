@@ -44,6 +44,7 @@ import { createPrismaLogoutRepository } from './oidc/prisma-logout-repository.js
 import { createPrismaAdminUserRepository } from './admin/prisma-user-repository.js';
 import { PrismaClient } from './generated/prisma/client.js';
 import { createSigningKeyRepository } from './oidc/signing-key-source.js';
+import { createPrismaConsentRepository, RedisConsentRequestStore } from './oidc/consent.js';
 import { KeyRotationScheduler } from './oidc/key-rotation-scheduler.js';
 import { DEFAULT_ROTATION_DUE_DAYS, SigningKeyManager } from './oidc/keys.js';
 import { createPrismaClientRepository } from './oidc/prisma-client-repository.js';
@@ -284,6 +285,12 @@ const socialAdapters = {
   google: new GoogleSocialAdapter(),
   facebook: new FacebookSocialAdapter(),
 };
+/**
+ * User consent for clients that are not first-party (card #81). First-party clients (the
+ * default) never prompt; the gate fails closed for everything else.
+ */
+const consentRepository = createPrismaConsentRepository(prisma);
+const consentRequests = new RedisConsentRequestStore(redis);
 const authorizeLoginRequests = {
   create: (input: { clientId: string; authorizeUrl: string }) =>
     socialTransactions.createAuthorizeLoginRequest(input),
@@ -390,6 +397,9 @@ const app = buildServer({
     clients: clientsRepository,
     loginUrl: `${(env.HOSTED_UI_URL ?? env.APP_URL).replace(/\/+$/, '')}/`,
     isClientAdminEligible,
+    isConsentGranted: (userId, clientId, scopes) =>
+      consentRepository.isGranted(userId, clientId, scopes),
+    consentRequests,
     authenticationRequirement: authorizeAuthenticationRequirement,
     membershipStatus: authorizeMembershipStatus,
     loginRequests: authorizeLoginRequests,
@@ -397,6 +407,13 @@ const app = buildServer({
     persistContextSwitch: async (sid, loginContext) => {
       await adminSessionsRepository.updateLoginContext?.(sid, loginContext);
     },
+  },
+  consent: {
+    sessions,
+    requests: consentRequests,
+    consents: consentRepository,
+    clients: clientsRepository,
+    audit: createPrismaAdminAudit(prisma),
   },
   social: {
     ...(env.SOCIAL_CALLBACK_BASE_URL === undefined

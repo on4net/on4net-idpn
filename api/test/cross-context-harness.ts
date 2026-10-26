@@ -1,3 +1,4 @@
+import { createPrismaConsentRepository } from '../src/oidc/consent.js';
 import request from 'supertest';
 
 import { createPrismaLoginContextRepository } from '../src/admin/login-contexts/prisma-login-context-repository.js';
@@ -470,6 +471,8 @@ export async function createCrossContextWorld(prefix: string): Promise<CrossCont
     authorize: {
       clients,
       membershipStatus: createAuthorizeMembershipStatus(prisma),
+      isConsentGranted: (userId, clientId, scopes) =>
+        createPrismaConsentRepository(prisma).isGranted(userId, clientId, scopes),
       authenticationRequirement: createAuthorizeAuthenticationRequirement(mfaRepository),
     },
     userInfo: { users: usersRepository, access: effectiveAccess },

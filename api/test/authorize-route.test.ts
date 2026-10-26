@@ -9,6 +9,7 @@ import {
 } from '../src/oidc/authorization-code.js';
 import { registerAuthorizeRoute } from '../src/oidc/authorize-route.js';
 import type { OAuthClient } from '../src/oidc/client-repository.js';
+import { MemoryConsentRequestStore } from '../src/oidc/consent.js';
 import type { IdpSession } from '../src/session/types.js';
 
 const verifier = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~';
@@ -78,6 +79,8 @@ const baseQuery = {
 function buildApp(options: {
   currentSession: IdpSession | null;
   consentGranted?: boolean;
+  consentCalls?: { userId: string; clientId: string; scopes: string[] }[];
+  consentRequests?: MemoryConsentRequestStore;
   clientAdminEligible?: boolean;
   now?: Date;
   clientOverrides?: Partial<OAuthClient>;
@@ -112,7 +115,11 @@ function buildApp(options: {
           : null;
       },
     },
-    isConsentGranted: async () => options.consentGranted ?? true,
+    isConsentGranted: async (userId, clientId, scopes) => {
+      options.consentCalls?.push({ userId, clientId, scopes });
+      return options.consentGranted ?? true;
+    },
+    ...(options.consentRequests === undefined ? {} : { consentRequests: options.consentRequests }),
     isClientAdminEligible: async () => options.clientAdminEligible ?? true,
     ...(options.loginUrl === undefined ? {} : { loginUrl: options.loginUrl }),
     ...(options.authenticationRequirement === undefined
@@ -360,6 +367,132 @@ describe('GET /oauth2/authorize', () => {
     await app.close();
   });
 
+  describe('consent (card #81)', () => {
+    const thirdParty = { clientOverrides: { firstParty: false } } as const;
+
+    it('never consults the consent gate for a first-party client', async () => {
+      const consentCalls: { userId: string; clientId: string; scopes: string[] }[] = [];
+      const { app, codes } = buildApp({
+        currentSession: session(),
+        clientOverrides: { firstParty: true },
+        consentGranted: false,
+        consentCalls,
+      });
+      await app.ready();
+
+      const response = await request(app.server)
+        .get('/oauth2/authorize')
+        .query(baseQuery)
+        .set('Cookie', 'idpn_session=session-abc')
+        .expect(302);
+
+      expect(new URL(response.headers.location ?? '').searchParams.get('code')).toBeTruthy();
+      expect(consentCalls).toEqual([]);
+      expect(codes.records.size).toBe(1);
+      await app.close();
+    });
+
+    it('sends a third-party client without a grant to the consent screen and issues no code', async () => {
+      const consentRequests = new MemoryConsentRequestStore();
+      const { app, codes } = buildApp({
+        currentSession: session(),
+        ...thirdParty,
+        consentGranted: false,
+        consentRequests,
+      });
+      await app.ready();
+
+      const response = await request(app.server)
+        .get('/oauth2/authorize')
+        .query(baseQuery)
+        .set('Cookie', 'idpn_session=session-abc')
+        .expect(302);
+
+      const location = new URL(response.headers.location ?? '');
+      expect(location.origin + location.pathname).toBe('https://auth.example.com/login');
+      expect(location.searchParams.get('action')).toBe('consent');
+      expect(location.searchParams.get('client_id')).toBe('app-a');
+      const handle = location.searchParams.get('consent_request') ?? '';
+      expect(handle).toHaveLength(43);
+      expect(codes.records.size).toBe(0);
+
+      // The server keeps the validated request; the browser only carries the handle.
+      const pending = await consentRequests.peek(handle);
+      expect(pending).toMatchObject({ userId: 'user-1', clientId: 'app-a' });
+      expect(pending?.scopes).toEqual(['openid', 'profile']);
+      expect(pending?.authorizeUrl).toContain('/oauth2/authorize?');
+      await app.close();
+    });
+
+    it('treats a client that does not say it is first-party as third-party (fails closed)', async () => {
+      const { app, codes } = buildApp({
+        currentSession: session(),
+        consentGranted: false,
+        consentRequests: new MemoryConsentRequestStore(),
+      });
+      await app.ready();
+
+      const response = await request(app.server)
+        .get('/oauth2/authorize')
+        .query(baseQuery)
+        .set('Cookie', 'idpn_session=session-abc')
+        .expect(302);
+
+      expect(new URL(response.headers.location ?? '').searchParams.get('action')).toBe('consent');
+      expect(codes.records.size).toBe(0);
+      await app.close();
+    });
+
+    it('issues the code once the requested scopes are granted, without prompting', async () => {
+      const consentCalls: { userId: string; clientId: string; scopes: string[] }[] = [];
+      const { app, codes } = buildApp({
+        currentSession: session(),
+        ...thirdParty,
+        consentGranted: true,
+        consentCalls,
+        consentRequests: new MemoryConsentRequestStore(),
+      });
+      await app.ready();
+
+      const response = await request(app.server)
+        .get('/oauth2/authorize')
+        .query(baseQuery)
+        .set('Cookie', 'idpn_session=session-abc')
+        .expect(302);
+
+      expect(new URL(response.headers.location ?? '').searchParams.get('code')).toBeTruthy();
+      expect(consentCalls).toEqual([
+        { userId: 'user-1', clientId: 'app-a', scopes: ['openid', 'profile'] },
+      ]);
+      expect(codes.records.size).toBe(1);
+      await app.close();
+    });
+
+    it('answers consent_required for prompt=none instead of showing a screen', async () => {
+      const consentRequests = new MemoryConsentRequestStore();
+      const { app, codes } = buildApp({
+        currentSession: session(),
+        ...thirdParty,
+        consentGranted: false,
+        consentRequests,
+      });
+      await app.ready();
+
+      const response = await request(app.server)
+        .get('/oauth2/authorize')
+        .query({ ...baseQuery, prompt: 'none' })
+        .set('Cookie', 'idpn_session=session-abc')
+        .expect(302);
+
+      const location = new URL(response.headers.location ?? '');
+      expect(location.origin + location.pathname).toBe('https://app-a.example.com/callback');
+      expect(location.searchParams.get('error')).toBe('consent_required');
+      expect(location.searchParams.get('state')).toBe('state-123');
+      expect(codes.records.size).toBe(0);
+      await app.close();
+    });
+  });
+
   it('returns consent_required for prompt=none when consent is missing', async () => {
     const { app } = buildApp({ currentSession: session(), consentGranted: false });
     await app.ready();
@@ -582,7 +715,7 @@ describe('GET /oauth2/authorize — MFA and membership enforcement', () => {
         codes: memoryCodes(),
         sessions: { read: async () => null },
       }),
-    ).toThrow(/requires membershipStatus and authenticationRequirement/);
+    ).toThrow(/requires membershipStatus, authenticationRequirement and isConsentGranted/);
   });
 
   it('denies a requested login context without an active membership', async () => {

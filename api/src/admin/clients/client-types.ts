@@ -13,6 +13,8 @@ export interface AdminClientSummary {
   refreshTokenTtl: number;
   requirePkce: boolean;
   registrationPolicy: RegistrationPolicy;
+  /** False requires a recorded user consent per scope (`docs/api.md` 3.3). */
+  firstParty: boolean;
   mfaPolicy: MfaPolicy;
   backchannelLogoutUri: string | null;
   frontchannelLogoutUri: string | null;
@@ -52,6 +54,8 @@ export interface CreateClientInput {
   refreshTokenTtl: number;
   requirePkce: boolean;
   registrationPolicy: RegistrationPolicy;
+  /** False requires a recorded user consent per scope (`docs/api.md` 3.3). */
+  firstParty: boolean;
   mfaPolicy: MfaPolicy;
   backchannelLogoutUri: string | null;
   frontchannelLogoutUri: string | null;
