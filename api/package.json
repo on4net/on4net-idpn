@@ -23,7 +23,8 @@
     "ops:backup": "tsx scripts/ops/backup.ts",
     "ops:restore": "tsx scripts/ops/restore.ts",
     "ops:audit-retention": "tsx scripts/ops/audit-retention.ts",
-    "ops:rewrap-secrets": "tsx scripts/ops/rewrap-secrets.ts"
+    "ops:rewrap-secrets": "tsx scripts/ops/rewrap-secrets.ts",
+    "ops:audit-privileges": "tsx scripts/ops/audit-privileges.ts"
   },
   "dependencies": {
     "@idpn/config": "workspace:*",

@@ -390,3 +390,21 @@
 - **کلید retired** به اندازهٔ `KEY_RETIRED_RETENTION_SECONDS` (حداقل ۳۶۰۰، بلندترین عمر access token) در JWKS می‌ماند.
 - **Cool-down:** چرخش عادی تا `KEY_ROTATION_COOLDOWN_SECONDS` (پیش‌فرض ۳۰۰، `0` = خاموش) پس از ساخت کلید فعال پذیرفته نمی‌شود و `409` با `Retry-After` می‌دهد؛ چرخش اضطراری (`revokePrevious: true`) از آن مستثناست. هدف جلوگیری از چرخاندن پشت‌سرهمِ کلیدها با یک توکن ادمین دزدیده‌شده است که کلیدهای مشروع را از پنجرهٔ retention بیرون می‌اندازد.
 
+## جداسازی دسترسی لاگ Audit (#77 §4)
+
+تا وقتی نقش اپلیکیشن مالک جدول `audit_events` است، می‌تواند trigger «فقط-افزودن» را `DISABLE`/`DROP` کند یا سوئیچ نگه‌داری را خودش روشن کند. جداسازی، مالکیت را به یک نقش `NOLOGIN` می‌دهد و به اپلیکیشن فقط `INSERT, SELECT` می‌ماند.
+
+```bash
+# 1) SQL را ببینید یا به DBA بدهید (نام نقش‌ها اعتبارسنجی و quote می‌شوند)
+pnpm --filter @idpn/api ops:audit-privileges -- print --app-role idpn_app --owner-role idpn_audit_owner --maintenance-role idpn_maint
+# 2) با اتصال ادمین اعمال کنید (تراکنشی و idempotent)
+pnpm --filter @idpn/api ops:audit-privileges -- apply --admin-url "$ADMIN_DATABASE_URL" --confirm --app-role idpn_app --owner-role idpn_audit_owner --maintenance-role idpn_maint
+# 3) با DATABASE_URL خودِ اپلیکیشن بررسی کنید؛ هر شکاف exit 1 می‌دهد
+pnpm --filter @idpn/api ops:audit-privileges -- check
+```
+
+- نقش نگه‌داری (`--maintenance-role`) عضو نقش مالک است و فقط برای `ops:audit-retention` استفاده می‌شود؛ آن اسکریپت اگر `AUDIT_MAINTENANCE_DATABASE_URL` تنظیم شده باشد از آن استفاده می‌کند، وگرنه `DATABASE_URL`.
+- پس از جداسازی، حتی با `set_config('idpn.audit_maintenance','on')` نقش اپلیکیشن نمی‌تواند حذف کند (`permission denied`) و `ALTER TABLE ... DISABLE TRIGGER` / `DROP TRIGGER` با «must be owner» رد می‌شود؛ این رفتارها در `api/test/audit-privilege-split.integration.test.ts` روی PostgreSQL واقعی تست شده‌اند.
+- `check` ابرکاربر بودن، مالکیت یا عضویت در نقش مالک، و هر یک از `UPDATE/DELETE/TRUNCATE` را گزارش می‌کند و نبودنِ `INSERT` را هم (چون API دیگر نمی‌تواند Audit بنویسد).
+- این کار به یک اتصال ادمین نیاز دارد که این repository ندارد؛ اجرای `apply` روی محیط‌های واقعی با شماست.
+

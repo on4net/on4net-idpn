@@ -36,9 +36,13 @@ if (!Number.isInteger(months) || months < 1) {
   process.exit(1);
 }
 
-const connectionString = process.env.DATABASE_URL;
+// After the privilege split (docs/security.md 10) the API role can no longer delete audit rows;
+// pruning runs as the maintenance role named by AUDIT_MAINTENANCE_DATABASE_URL.
+const connectionString = process.env.AUDIT_MAINTENANCE_DATABASE_URL ?? process.env.DATABASE_URL;
 if (connectionString === undefined || connectionString === '') {
-  console.error('DATABASE_URL is not set. Copy .env.example to .env first.');
+  console.error(
+    'AUDIT_MAINTENANCE_DATABASE_URL or DATABASE_URL is not set. Copy .env.example to .env first.',
+  );
   process.exit(1);
 }
 
