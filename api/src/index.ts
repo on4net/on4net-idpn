@@ -143,6 +143,7 @@ redis.on('error', (error: unknown) => {
 // documented 90-day threshold, so operators keep getting an alert.
 const keys = new SigningKeyManager(createSigningKeyRepository(env), () => new Date(), {
   retiredRetentionSeconds: env.KEY_RETIRED_RETENTION_SECONDS,
+  rotationCooldownSeconds: env.KEY_ROTATION_COOLDOWN_SECONDS,
   rotationDueAfterDays:
     env.KEY_ROTATION_INTERVAL_DAYS > 0 ? env.KEY_ROTATION_INTERVAL_DAYS : DEFAULT_ROTATION_DUE_DAYS,
   keyCacheTtlSeconds: env.KEY_CACHE_TTL_SECONDS,

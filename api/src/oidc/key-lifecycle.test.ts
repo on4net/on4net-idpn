@@ -1,7 +1,12 @@
 import { decodeProtectedHeader } from 'jose';
 import { describe, expect, it } from 'vitest';
 
-import { generateSigningKey, MemorySigningKeyRepository, SigningKeyManager } from './keys.js';
+import {
+  generateSigningKey,
+  KeyRotationCooldownError,
+  MemorySigningKeyRepository,
+  SigningKeyManager,
+} from './keys.js';
 
 const issuer = 'https://auth.example.com';
 const audience = 'app-a';
@@ -216,5 +221,49 @@ describe('signing key lifecycle', () => {
 
     await manager.revoke(first.kid);
     expect((await manager.jwks()).keys.map((key) => key.kid)).toEqual([rotated.active.kid]);
+  });
+});
+
+describe('rotation cool-down', () => {
+  const build = (now: () => Date) =>
+    new SigningKeyManager(new MemorySigningKeyRepository(), now, {
+      retiredRetentionSeconds: 3600,
+      rotationCooldownSeconds: 300,
+    });
+
+  it('refuses an ordinary rotation right after the previous one and says when to retry', async () => {
+    let now = new Date('2026-10-26T10:00:00Z');
+    const manager = build(() => now);
+    await manager.ensureKey();
+
+    now = new Date('2026-10-26T10:01:00Z');
+    await expect(manager.rotate()).rejects.toMatchObject({
+      name: 'KeyRotationCooldownError',
+      retryAfterSeconds: 240,
+    });
+    expect((await manager.jwks()).keys).toHaveLength(1);
+
+    now = new Date('2026-10-26T10:05:00Z');
+    await expect(manager.rotate()).resolves.toMatchObject({ previousRevoked: false });
+  });
+
+  it('lets an emergency rotation through, because a compromised key cannot wait', async () => {
+    let now = new Date('2026-10-26T10:00:00Z');
+    const manager = build(() => now);
+    const first = await manager.ensureKey();
+
+    now = new Date('2026-10-26T10:00:10Z');
+    const result = await manager.rotate({ revokePrevious: true });
+
+    expect(result.previousRevoked).toBe(true);
+    expect((await manager.jwks()).keys.map((key) => key.kid)).not.toContain(first.kid);
+  });
+
+  it('is off by default so scheduled and test rotations are unaffected', async () => {
+    const now = new Date('2026-10-26T10:00:00Z');
+    const manager = new SigningKeyManager(new MemorySigningKeyRepository(), () => now);
+    await manager.ensureKey();
+    await expect(manager.rotate()).resolves.toBeDefined();
+    expect(KeyRotationCooldownError.name).toBe('KeyRotationCooldownError');
   });
 });

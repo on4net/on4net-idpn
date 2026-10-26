@@ -168,6 +168,8 @@ const serverEnvBase = z.object({
    * How long a retired signing key stays in JWKS. Must cover the longest access-token
    * lifetime (max 3600 s) so tokens issued before a rotation stay verifiable until expiry.
    */
+  /** Minimum age of the active signing key before an ordinary rotation (0 disables). */
+  KEY_ROTATION_COOLDOWN_SECONDS: z.coerce.number().int().min(0).max(86_400).default(300),
   KEY_RETIRED_RETENTION_SECONDS: z.coerce.number().int().min(3600).max(86_400).default(3600),
   /**
    * In-process cache TTL for the signing-key store and the published JWKS (seconds). The

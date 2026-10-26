@@ -72,6 +72,13 @@ export interface SigningKeyManagerOptions {
    * rotation is visible after at most this TTL. 0 disables caching.
    */
   keyCacheTtlSeconds?: number;
+  /**
+   * Minimum age of the active key before an ordinary rotation is accepted (default 0 = off;
+   * production sets `KEY_ROTATION_COOLDOWN_SECONDS`). An emergency rotation
+   * (`revokePrevious`) ignores it. It stops a stolen admin token from cycling keys in a loop,
+   * which would push every legitimate key out of the retention window.
+   */
+  rotationCooldownSeconds?: number;
   /** Optional sink for lifecycle warnings (never receives key material). */
   onWarning?: (message: string) => void;
 }

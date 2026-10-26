@@ -385,3 +385,48 @@ describe('signing key rotation', () => {
     expect(after.body.keys).toHaveLength(3);
   });
 });
+
+describe('rotation cool-down', () => {
+  it('answers 409 with Retry-After for an ordinary rotation but lets an emergency one through', async () => {
+    const cooled = new SigningKeyManager(new MemorySigningKeyRepository(), () => new Date(), {
+      retiredRetentionSeconds: 3600,
+      rotationCooldownSeconds: 300,
+    });
+    await cooled.ensureKey();
+    const server = buildServer({
+      issuer,
+      keys: cooled,
+      adminKeys: {
+        adminClientId,
+        permissions: createPrismaPermissionReader(prisma),
+        audit: createPrismaAdminAudit(prisma),
+      },
+    });
+    await server.ready();
+    const bearer = `Bearer ${await cooled.signAccessToken(
+      {
+        scope: 'openid idp.admin',
+        client_id: adminClientId,
+        auth_time: Math.floor(Date.now() / 1000),
+      },
+      { issuer, audience: adminClientId, subject: adminUserId, expiresInSeconds: 300 },
+    )}`;
+
+    const refused = await request(server.server)
+      .post('/api/v1/keys/rotate')
+      .set('Authorization', bearer)
+      .send({});
+    expect(refused.status).toBe(409);
+    expect(Number(refused.headers['retry-after'])).toBeGreaterThan(0);
+    expect(refused.body.detail).toContain('revokePrevious');
+    expect((await cooled.jwks()).keys).toHaveLength(1);
+
+    const emergency = await request(server.server)
+      .post('/api/v1/keys/rotate')
+      .set('Authorization', bearer)
+      .send({ revokePrevious: true });
+    expect(emergency.status).toBe(200);
+    expect(emergency.body.previousRevoked).toBe(true);
+    await server.close();
+  });
+});

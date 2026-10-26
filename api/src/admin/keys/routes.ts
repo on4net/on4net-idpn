@@ -1,3 +1,4 @@
+import { KeyRotationCooldownError } from '../../oidc/keys.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 
@@ -146,7 +147,24 @@ export function registerKeyAdminRoutes(app: FastifyInstance, options: KeyRoutesO
     }
 
     const revokePrevious = parsed.data.revokePrevious === true;
-    const result = await options.keys.rotate({ revokePrevious });
+    let result: Awaited<ReturnType<typeof options.keys.rotate>>;
+    try {
+      result = await options.keys.rotate({ revokePrevious });
+    } catch (error) {
+      if (error instanceof KeyRotationCooldownError) {
+        return reply
+          .header('Retry-After', String(error.retryAfterSeconds))
+          .code(409)
+          .type('application/problem+json')
+          .send({
+            type: 'https://on4net.dev/problems/conflict',
+            title: 'Conflict',
+            status: 409,
+            detail: `${error.message}. Use revokePrevious for an emergency rotation.`,
+          });
+      }
+      throw error;
+    }
     await audit(request, principal, result, revokePrevious ? 'emergency' : 'manual');
 
     return reply.header('Cache-Control', 'no-store').send({

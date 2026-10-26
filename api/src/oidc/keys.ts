@@ -70,9 +70,18 @@ export async function generateSigningKey(
  * Manages ES256 signing keys: active key selection, JWKS publication (active + retired,
  * never revoked), rotation and local token verification.
  */
+/** Raised when an ordinary rotation is requested before the cool-down has elapsed. */
+export class KeyRotationCooldownError extends Error {
+  override readonly name = 'KeyRotationCooldownError';
+  constructor(readonly retryAfterSeconds: number) {
+    super(`the signing key was rotated recently; retry in ${String(retryAfterSeconds)}s`);
+  }
+}
+
 export class SigningKeyManager {
   private readonly retiredRetentionMs: number;
   private readonly rotationDueAfterDays: number;
+  private readonly rotationCooldownMs: number;
   private readonly onWarning: ((message: string) => void) | undefined;
   private readonly cacheTtlMs: number;
   /** Bumped on every lifecycle write so an in-flight list cannot repopulate stale state. */
@@ -96,6 +105,7 @@ export class SigningKeyManager {
     }
     this.retiredRetentionMs = retentionSeconds * 1000;
     this.rotationDueAfterDays = options.rotationDueAfterDays ?? DEFAULT_ROTATION_DUE_DAYS;
+    this.rotationCooldownMs = Math.max(0, options.rotationCooldownSeconds ?? 0) * 1000;
     this.cacheTtlMs = (options.keyCacheTtlSeconds ?? DEFAULT_KEY_CACHE_TTL_SECONDS) * 1000;
     this.onWarning = options.onWarning;
   }
@@ -251,6 +261,18 @@ export class SigningKeyManager {
     const keys = await this.loadKeys();
     const previous = keys.filter((key) => key.status === 'active');
     const revokePrevious = options.revokePrevious === true;
+    if (!revokePrevious && this.rotationCooldownMs > 0) {
+      const newest = previous.reduce<Date | null>(
+        (latest, key) => (latest === null || key.createdAt > latest ? key.createdAt : latest),
+        null,
+      );
+      if (newest !== null) {
+        const remainingMs = newest.getTime() + this.rotationCooldownMs - now.getTime();
+        if (remainingMs > 0) {
+          throw new KeyRotationCooldownError(Math.ceil(remainingMs / 1000));
+        }
+      }
+    }
     for (const key of previous) {
       await this.repository.updateStatus(key.kid, revokePrevious ? 'revoked' : 'retired', now);
     }
