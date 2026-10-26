@@ -1,4 +1,4 @@
-import type { JWK } from 'jose';
+import { calculateJwkThumbprint, type JWK } from 'jose';
 
 import type { KeyringSecretBox } from '../crypto/secret-box.js';
 import type { PrismaClient } from '../generated/prisma/client.js';
@@ -21,6 +21,32 @@ import type { SigningKeyRepository, SigningKeyStatus, StoredSigningKey } from '.
 
 const ENVELOPE_PREFIX = 'enc:';
 
+/**
+ * The public half is published in the JWKS and trusted by every relying party, but it sits in
+ * PostgreSQL in the clear. Whoever can write that column could substitute their own public key
+ * and have the IdP publish it, which lets them mint tokens the RPs accept. So the stored value
+ * is never trusted: the public JWK is derived from the (authenticated) private JWK, must match
+ * the stored copy member for member, and its RFC 7638 thumbprint must equal the row's `kid`.
+ */
+async function verifiedPublicJwk(
+  row: { kid: string; publicKey: string },
+  privateJwk: JWK,
+): Promise<JWK> {
+  const { kty, crv, x, y } = privateJwk;
+  if (kty !== 'EC' || crv !== 'P-256' || x === undefined || y === undefined) {
+    throw new Error(`signing key ${row.kid} is not an ES256 key`);
+  }
+  const derived: JWK = { kty, crv, x, y };
+  const stored = JSON.parse(row.publicKey) as JWK;
+  if (stored.kty !== kty || stored.crv !== crv || stored.x !== x || stored.y !== y) {
+    throw new Error(`signing key ${row.kid}: stored public key does not match the private key`);
+  }
+  if ((await calculateJwkThumbprint(derived, 'sha256')) !== row.kid) {
+    throw new Error(`signing key ${row.kid}: kid is not the thumbprint of the key`);
+  }
+  return derived;
+}
+
 export function createPrismaSigningKeyRepository(
   prisma: PrismaClient,
   box: KeyringSecretBox,
@@ -40,15 +66,20 @@ export function createPrismaSigningKeyRepository(
   return {
     async list() {
       const rows = await prisma.signingKey.findMany({ orderBy: { createdAt: 'asc' } });
-      return rows.map((row): StoredSigningKey => ({
-        kid: row.kid,
-        alg: 'ES256',
-        publicJwk: JSON.parse(row.publicKey) as JWK,
-        privateJwk: unwrap(row.privateKeyRef, row.kid),
-        status: row.status,
-        createdAt: row.createdAt,
-        retiredAt: row.retiredAt,
-      }));
+      return Promise.all(
+        rows.map(async (row): Promise<StoredSigningKey> => {
+          const privateJwk = unwrap(row.privateKeyRef, row.kid);
+          return {
+            kid: row.kid,
+            alg: 'ES256',
+            publicJwk: await verifiedPublicJwk(row, privateJwk),
+            privateJwk,
+            status: row.status,
+            createdAt: row.createdAt,
+            retiredAt: row.retiredAt,
+          };
+        }),
+      );
     },
 
     async save(key) {

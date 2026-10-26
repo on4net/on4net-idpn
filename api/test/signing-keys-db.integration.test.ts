@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { createKeyringSecretBox } from '../src/crypto/secret-box.js';
 import { PrismaClient } from '../src/generated/prisma/client.js';
-import { SigningKeyManager } from '../src/oidc/keys.js';
+import { generateSigningKey, SigningKeyManager } from '../src/oidc/keys.js';
 import { createPrismaSigningKeyRepository } from '../src/oidc/prisma-key-repository.js';
 
 const execFileAsync = promisify(execFile);
@@ -79,9 +79,9 @@ describe('db:// signing key store', () => {
       { scope: 'openid' },
       { issuer, audience: 'app-a', subject: 'user-1', expiresInSeconds: 300 },
     );
-    await expect(
-      second.verify(token, { issuer, audience: 'app-a' }),
-    ).resolves.toMatchObject({ sub: 'user-1' });
+    await expect(second.verify(token, { issuer, audience: 'app-a' })).resolves.toMatchObject({
+      sub: 'user-1',
+    });
   });
 
   it('never stores the private key unencrypted', async () => {
@@ -94,6 +94,37 @@ describe('db:// signing key store', () => {
       const decoded = Buffer.from(row.privateKeyRef.slice(4), 'base64');
       expect(decoded[0]).toBe(2);
       expect(decoded[1]).toBe(wrapKey.id);
+    }
+  });
+
+  it('refuses a substituted public key or a kid that is not the key thumbprint', async () => {
+    await replica().ensureKey();
+    const repository = createPrismaSigningKeyRepository(prisma, box);
+    const target = (await prisma.signingKey.findFirstOrThrow({ where: { status: 'active' } })).kid;
+    const original = await prisma.signingKey.findUniqueOrThrow({ where: { kid: target } });
+    const attacker = await generateSigningKey('active');
+
+    try {
+      // Swap in the attacker's public key: the IdP would publish it and RPs would trust it.
+      await prisma.signingKey.update({
+        where: { kid: target },
+        data: { publicKey: JSON.stringify(attacker.publicJwk) },
+      });
+      await expect(repository.list()).rejects.toThrow(/does not match the private key/);
+    } finally {
+      await prisma.signingKey.update({
+        where: { kid: target },
+        data: { publicKey: original.publicKey },
+      });
+    }
+    expect((await repository.list()).length).toBeGreaterThan(0);
+
+    // Re-labelling the row under another kid is rejected too (kid must be the thumbprint).
+    await prisma.signingKey.update({ where: { kid: target }, data: { kid: 'a'.repeat(43) } });
+    try {
+      await expect(repository.list()).rejects.toThrow(/not the thumbprint/);
+    } finally {
+      await prisma.signingKey.update({ where: { kid: 'a'.repeat(43) }, data: { kid: target } });
     }
   });
 
