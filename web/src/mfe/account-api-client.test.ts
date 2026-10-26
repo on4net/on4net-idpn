@@ -34,14 +34,14 @@ describe('createAccountApiClient', () => {
   it('loads the profile with cookie credentials and no token header', async () => {
     const fetchImpl = fetchMock(jsonResponse(profile));
     const client = createAccountApiClient({
-      baseUrl: 'https://auth.example/',
+      baseUrl: `${location.origin}/`,
       fetchImpl,
     });
 
     await expect(client.getProfile()).resolves.toEqual(profile);
 
     expect(fetchImpl).toHaveBeenCalledWith(
-      'https://auth.example/api/v1/account/profile',
+      `${location.origin}/api/v1/account/profile`,
       expect.objectContaining({ method: 'GET', credentials: 'include' }),
     );
     const init = fetchImpl.mock.calls[0]?.[1] as RequestInit;
@@ -234,11 +234,11 @@ describe('account MFA client', () => {
   it('loads the MFA status without a token', async () => {
     const status = { factors: [], totp: null, recoveryCodesRemaining: 0, available: true };
     const fetchImpl = fetchMock(jsonResponse(status));
-    const client = createAccountApiClient({ baseUrl: 'https://auth.example/', fetchImpl });
+    const client = createAccountApiClient({ baseUrl: `${location.origin}/`, fetchImpl });
 
     await expect(client.getMfaStatus()).resolves.toEqual(status);
     expect(fetchImpl).toHaveBeenCalledWith(
-      'https://auth.example/api/v1/account/mfa',
+      `${location.origin}/api/v1/account/mfa`,
       expect.objectContaining({ method: 'GET', credentials: 'include' }),
     );
   });
@@ -302,5 +302,24 @@ describe('account MFA client', () => {
       status: 503,
       code: 'mfa_unavailable',
     });
+  });
+});
+
+describe('account client is same-origin only', () => {
+  it('accepts a relative path and the page origin', () => {
+    expect(() => createAccountApiClient({ baseUrl: '/auth' })).not.toThrow();
+    expect(() => createAccountApiClient({ baseUrl: location.origin })).not.toThrow();
+    expect(() => createAccountApiClient()).not.toThrow();
+  });
+
+  it('refuses another origin, including look-alike hosts and protocol-relative URLs', () => {
+    for (const baseUrl of [
+      'https://auth.example',
+      `${location.origin}.evil.example`,
+      '//evil.example',
+      'http://localhost:1',
+    ]) {
+      expect(() => createAccountApiClient({ baseUrl }), baseUrl).toThrow(/account module/);
+    }
   });
 });

@@ -134,7 +134,11 @@ describe('IdpnUserManagementElement', () => {
   });
 
   it('ignores a protocol-relative or backslash api-base', async () => {
-    for (const apiBase of ['//evil.example.com/api', '/\\evil.example.com/api', '\\\\evil.example.com']) {
+    for (const apiBase of [
+      '//evil.example.com/api',
+      '/\\evil.example.com/api',
+      '\\\\evil.example.com',
+    ]) {
       fetchMock.mockClear();
       const element = mount({ 'api-base': apiBase });
       await waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThan(0));

@@ -153,3 +153,11 @@ Audit: `user.mfa.enrolled`، `user.mfa.removed`، `user.mfa.failed`، `user.mfa.
 - پس از افزودن یا حذف موفق، یک ایمیل اطلاع‌رسانی (بدون لینک) به صاحب حساب می‌رود. ارسال بهترین‌تلاش است: خطای ایمیل تغییر را برنمی‌گرداند، ولی تغییر همیشه در Audit (`user.mfa.enrolled` / `user.mfa.removed`) ثبت می‌شود.
 - اگر `login_context` درخواست نشود، `stepUpRequired` از Context پیش‌فرض (اشارهگر `defaultLoginContextKey` یا Context علامت‌خورده `is_default`) خوانده می‌شود.
 
+## مدل استقرار ماژول `account` (تصمیم #78 §2)
+
+ماژول `account` **فقط هم‌مبدأ** است. نشست با کوکی IdP احراز می‌شود، CSRF با بررسی دقیق `Origin` (یا `Sec-Fetch-Site`) سمت سرور بسته می‌شود و هیچ CORS ای وجود ندارد؛ پس یک صفحهٔ روی مبدأ دیگر نه کوکی می‌فرستد و نه این بررسی را می‌گذراند. برای همین:
+
+- `createAccountApiClient` هر `baseUrl` غیرهم‌مبدأ را با خطای «same-origin only» رد می‌کند و Web Component مقدار `api-base` ناهم‌مبدأ را برای ماژول `account` نادیده می‌گیرد (هشدار در کنسول).
+- اگر روزی تعبیهٔ این ماژول در مبدأ دیگر لازم شد، باید طراحی جدا شود: allowlist مبدأ سمت سرور + توکن double-submit CSRF + `SameSite=None; Secure`. تا آن زمان، مبدأ میزبان باید پشت همان دامنهٔ IdP (reverse proxy) سرو شود.
+- ماژول `user-management` که به BFF میزبان می‌رود از این محدودیت مستثناست.
+

@@ -1,3 +1,4 @@
+import { assertSameOriginBase } from './account-api-client';
 import {
   IDPN_MFE_EVENT_NAME,
   type IdpnEvent,
@@ -168,7 +169,7 @@ export class IdpnMfeElement extends HTMLElement {
    * slash. `\\`, `/\\` and `//` are protocol-relative tricks and fall back to same-origin
    * instead of sending the session cookie elsewhere.
    */
-  private resolveApiBase(): string | undefined {
+  private resolveApiBase(moduleName?: string): string | undefined {
     const value = this.getAttribute('api-base');
     if (value === null || value.trim() === '') {
       return undefined;
@@ -177,6 +178,16 @@ export class IdpnMfeElement extends HTMLElement {
     if (!isSafeTarget(trimmed)) {
       console.warn('[idpn-mfe] ignoring an unsafe api-base attribute');
       return undefined;
+    }
+    if (moduleName === 'account') {
+      // Cookie-authenticated and CSRF-protected by an exact same-origin check: a foreign
+      // api-base cannot work and is dropped rather than passed on (docs/account-api.md).
+      try {
+        assertSameOriginBase(trimmed);
+      } catch {
+        console.warn('[idpn-mfe] the account module is same-origin only; ignoring api-base');
+        return undefined;
+      }
     }
     return trimmed;
   }
@@ -220,7 +231,7 @@ export class IdpnMfeElement extends HTMLElement {
       return;
     }
 
-    const apiBaseUrl = this.resolveApiBase();
+    const apiBaseUrl = this.resolveApiBase(moduleName);
     const theme = this.theme;
     const locales = this.localesConfig;
     const onEvent = this.deliverEvent;

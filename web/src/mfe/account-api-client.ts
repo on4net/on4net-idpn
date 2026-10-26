@@ -222,13 +222,39 @@ export interface AccountApiClient {
 }
 
 export interface AccountApiClientOptions {
-  /** Same-origin by default; hosts may pass the IdP base URL explicitly. */
+  /** Same-origin only (a path such as `/auth`, or this page's own origin); anything else throws. */
   baseUrl?: string;
   fetchImpl?: typeof fetch;
 }
 
+/**
+ * The account surface is authenticated by the IdP session cookie and protected against CSRF by
+ * an exact same-origin check on the server (`docs/account-api.md`), with no CORS. A client on
+ * another origin could neither send the cookie (SameSite) nor pass that check, so a foreign
+ * base URL is refused here instead of failing later with an opaque network error.
+ * Embedding the account module in another origin needs a deliberate server-side design
+ * (origin allowlist plus a double-submit CSRF token) and is out of scope.
+ */
+export function assertSameOriginBase(baseUrl: string | undefined): string {
+  const base = (baseUrl ?? '').replace(/\/+$/, '');
+  if (base === '') {
+    return base;
+  }
+  const here = typeof location === 'undefined' ? undefined : location.origin;
+  let target: URL;
+  try {
+    target = new URL(base, here ?? 'http://localhost');
+  } catch {
+    throw new Error('account module: baseUrl is not a valid URL');
+  }
+  if (here !== undefined && target.origin !== here) {
+    throw new Error('account module is same-origin only: baseUrl must not point to another origin');
+  }
+  return base;
+}
+
 export function createAccountApiClient(options: AccountApiClientOptions = {}): AccountApiClient {
-  const base = (options.baseUrl ?? '').replace(/\/+$/, '');
+  const base = assertSameOriginBase(options.baseUrl);
   const doFetch =
     options.fetchImpl ?? ((input: RequestInfo | URL, init?: RequestInit) => fetch(input, init));
 
