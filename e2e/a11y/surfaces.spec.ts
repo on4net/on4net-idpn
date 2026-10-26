@@ -98,6 +98,97 @@ async function submitPasswordStep(page: Page, locale: 'fa-IR' | 'en-US'): Promis
 }
 
 test.describe('hosted auth UI', () => {
+  test.describe('consent screen', () => {
+    const consentUrl = (locale: 'fa-IR' | 'en-US'): string =>
+      `/?action=consent&consent_request=handle-1&client_id=partner-app&ui_locales=${locale}`;
+
+    async function mockConsent(page: Page): Promise<{ decisions: string[] }> {
+      const decisions: string[] = [];
+      await page.route('**/api/v1/consent/requests/handle-1', (route) =>
+        route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            client: { clientId: 'partner-app', name: 'Partner Portal' },
+            scopes: ['openid', 'profile', 'email'],
+          }),
+        }),
+      );
+      await page.route('**/api/v1/consent/requests/handle-1/decision', (route) => {
+        decisions.push(String(route.request().postData()));
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          // Same-origin target: the test only needs the navigation to be attempted.
+          body: JSON.stringify({ redirectTo: 'http://127.0.0.1/consent-done' }),
+        });
+      });
+      return { decisions };
+    }
+
+    test('in Persian RTL has no blocking violations and focuses the question', async ({ page }) => {
+      await installUiFixtures(page);
+      await mockConsent(page);
+      await page.goto(consentUrl('fa-IR'));
+
+      await expect(page.getByTestId('idpn-root')).toHaveAttribute('dir', 'rtl');
+      const heading = page.getByRole('heading', { level: 1 });
+      await expect(heading).toContainText('Partner Portal');
+      await expect(heading).toBeFocused();
+      await expect(page.getByRole('button', { name: 'اجازه دادن' })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'انصراف' })).toBeVisible();
+      await expectNoHorizontalOverflow(page);
+      await expectNoBlockingViolations(page);
+    });
+
+    test('in English LTR has no blocking violations', async ({ page }) => {
+      await installUiFixtures(page, { locale: 'en-US' });
+      await mockConsent(page);
+      await page.goto(consentUrl('en-US'));
+
+      await expect(page.getByTestId('idpn-root')).toHaveAttribute('dir', 'ltr');
+      await expect(
+        page.getByRole('heading', { name: 'Partner Portal wants access to your account' }),
+      ).toBeVisible();
+      await expect(page.getByRole('listitem')).toHaveCount(3);
+      await expectNoBlockingViolations(page);
+    });
+
+    test('is fully operable by keyboard: Tab reaches Allow then Deny, Enter answers', async ({
+      page,
+    }) => {
+      await installUiFixtures(page, { locale: 'en-US' });
+      const { decisions } = await mockConsent(page);
+      await page.goto(consentUrl('en-US'));
+      await expect(page.getByRole('heading', { level: 1 })).toBeFocused();
+
+      await page.keyboard.press('Tab');
+      await expect(page.getByRole('button', { name: 'Allow' })).toBeFocused();
+      await page.keyboard.press('Tab');
+      await expect(page.getByRole('button', { name: 'Deny' })).toBeFocused();
+
+      await page.keyboard.press('Enter');
+      await expect.poll(() => decisions.length).toBe(1);
+      expect(JSON.parse(decisions[0] ?? '{}')).toEqual({ decision: 'deny' });
+    });
+
+    test('an expired request shows an accessible error instead of a dead page', async ({
+      page,
+    }) => {
+      await installUiFixtures(page, { locale: 'en-US' });
+      await page.route('**/api/v1/consent/requests/gone', (route) =>
+        route.fulfill({ status: 404, contentType: 'application/problem+json', body: '{}' }),
+      );
+      await page.goto(
+        '/?action=consent&consent_request=gone&client_id=partner-app&ui_locales=en-US',
+      );
+
+      await expect(page.getByTestId('consent-error')).toContainText('expired');
+      await expect(page.getByRole('button', { name: 'Allow' })).toHaveCount(0);
+      await expectNoBlockingViolations(page);
+    });
+  });
+
   test('login in Persian RTL has no blocking violations', async ({ page }) => {
     await installUiFixtures(page);
     await page.goto(hosted('fa-IR'));
@@ -136,7 +227,9 @@ test.describe('hosted auth UI', () => {
     await expectNoBlockingViolations(page);
   });
 
-  test('an inaccessible client theme falls back instead of rendering invisibly', async ({ page }) => {
+  test('an inaccessible client theme falls back instead of rendering invisibly', async ({
+    page,
+  }) => {
     // White on white cannot reach 4.5:1: `sanitizeIdpnTheme` drops the pair, so the built-in
     // palette is painted and the surface still passes the axe colour-contrast rule.
     await installUiFixtures(page, {

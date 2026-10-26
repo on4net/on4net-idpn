@@ -218,6 +218,65 @@ describe('consent repository', () => {
     await consents.revoke(otherUserId, 'partner-app', at);
   });
 
+  it('ends the grant on revoke: live refresh tokens and unexchanged codes die with the approval', async () => {
+    const consents = createPrismaConsentRepository(prisma);
+    const at = new Date('2026-10-26T11:00:00Z');
+    const partner = await prisma.client.findUniqueOrThrow({ where: { clientId: 'partner-app' } });
+    const house = await prisma.client.findUniqueOrThrow({ where: { clientId: 'house-app' } });
+    await consents.grant(otherUserId, 'partner-app', ['openid'], at);
+    const session = await prisma.session.create({
+      data: {
+        userId: otherUserId,
+        idleExpiresAt: new Date(Date.now() + 60_000),
+        absoluteExpiresAt: new Date(Date.now() + 120_000),
+        amr: ['pwd'],
+        acr: 'urn:on4net:acr:pwd',
+      },
+    });
+    const token = (client: string, hash: string) =>
+      prisma.refreshToken.create({
+        data: {
+          userId: otherUserId,
+          clientId: client,
+          sessionId: session.id,
+          tokenHash: hash,
+          familyId: crypto.randomUUID(),
+          scope: ['openid'],
+          expiresAt: new Date(Date.now() + 60_000),
+        },
+      });
+    const mine = await token(partner.id, 'consent-test-hash-partner');
+    const unrelated = await token(house.id, 'consent-test-hash-house');
+    const code = await prisma.authorizationCode.create({
+      data: {
+        codeHash: 'consent-test-code',
+        userId: otherUserId,
+        clientId: partner.id,
+        sessionId: session.id,
+        redirectUri,
+        scope: ['openid'],
+        codeChallenge: 'x'.repeat(43),
+        expiresAt: new Date(Date.now() + 60_000),
+        authTime: at,
+        acr: 'urn:on4net:acr:pwd',
+        amr: ['pwd'],
+      },
+    });
+
+    expect(await consents.revoke(otherUserId, 'partner-app', at)).toBe(true);
+
+    expect(
+      (await prisma.refreshToken.findUniqueOrThrow({ where: { id: mine.id } })).revokedAt,
+    ).not.toBeNull();
+    expect(
+      (await prisma.authorizationCode.findUniqueOrThrow({ where: { codeHash: code.codeHash } })).consumedAt,
+    ).not.toBeNull();
+    // Another client's tokens are not touched.
+    expect(
+      (await prisma.refreshToken.findUniqueOrThrow({ where: { id: unrelated.id } })).revokedAt,
+    ).toBeNull();
+  });
+
   it('keeps approvals per user and per client', async () => {
     const consents = createPrismaConsentRepository(prisma);
     await consents.grant(otherUserId, 'house-app', ['openid'], new Date());

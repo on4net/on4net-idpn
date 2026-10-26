@@ -579,3 +579,24 @@ scope=service-x:jobs:run
 | زبان درخواست‌شده فعال نیست | سقوط به زبان پروفایل سپس پیش‌فرض کلاینت |
 | متن اپ برای کلید جدید ندارد | مقدار پایه استفاده می‌شود؛ ورود متوقف نمی‌شود |
 | کاربر زبان را عوض می‌کند | فقط برای همان اپ ذخیره می‌شود و صفحه بدون Reload به‌روز می‌شود |
+
+## رضایت کاربر (Consent) — تصمیم #81
+
+**تصمیم‌ها (پیش‌فرض‌های فاز ۱، قابل تغییر):**
+
+1. **اپ first-party کدام است؟** همهٔ کلاینت‌های ثبت‌شده توسط ادمین Tenant به‌صورت پیش‌فرض first-party هستند (`Client.firstParty = true`، ستون `first_party`) تا رفتار فعلی نشکند. کلاینتی که `firstParty = false` علامت بخورد third-party است. رکوردی که این فیلد را نداشته باشد (`undefined`) هم third-party حساب می‌شود (fail closed).
+2. **سطح رضایت:** برای هر scope؛ یک رضایت ثبت‌شده فقط وقتی کافی است که **همهٔ** scopeهای درخواستی را پوشش دهد (زیرمجموعه کافی است). تأیید دوباره با scope بیشتر، رضایت را گسترش می‌دهد؛ پس از ابطال، رضایت تازه فقط scopeهای جدید را دارد.
+3. **محل صفحه:** مسیر Hosted UI با `?action=consent&consent_request=<handle>`. مرورگر فقط یک handle مات دارد؛ درخواست اعتبارسنجی‌شدهٔ `/oauth2/authorize` سمت سرور (Redis، ۱۰ دقیقه، تک‌مصرف) نگه‌داری می‌شود.
+
+**رفتار `/oauth2/authorize`:** کلاینت first-party هرگز گیت رضایت را صدا نمی‌زند. برای third-party بدون رضایت کافی: `prompt=none` → `consent_required` به redirect_uri کلاینت؛ در غیر این صورت ریدایرکت به صفحهٔ رضایت و **صدور نشدن کد**. ثبت مسیر بدون `isConsentGranted` (و بدون دو callback اجرای membership/MFA) هنگام startup خطا می‌دهد.
+
+**API (هم‌مبدأ، کوکی نشست، CSRF با بررسی دقیق Origin):**
+
+| متد | مسیر | کار |
+| --- | --- | --- |
+| GET | `/api/v1/consent/requests/{id}` | نام کلاینت و scopeهای درخواستی؛ فقط برای کاربری که handle برایش صادر شده (غیر از آن `404`) |
+| POST | `/api/v1/consent/requests/{id}/decision` | `{ "decision": "allow" \| "deny" }`؛ تک‌مصرف. `allow` رضایت را ثبت و `redirectTo` = ادامهٔ authorize را می‌دهد؛ `deny` ریدایرکت `access_denied` (با `state`) به redirect_uri **ثبت‌شدهٔ** کلاینت |
+| GET | `/api/v1/consent/grants` | رضایت‌های فعال کاربر |
+| DELETE | `/api/v1/consent/grants/{clientId}` | ابطال: رضایت، refresh tokenهای زندهٔ همان کاربر برای همان کلاینت و کدهای مبادله‌نشده باطل می‌شوند؛ access tokenهای صادرشده تا انقضای (کوتاه) خودشان معتبرند |
+
+Audit: `consent.granted`، `consent.denied` (failure)، `consent.revoked`.

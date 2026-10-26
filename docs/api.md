@@ -792,3 +792,7 @@ GET /api/v1/audit-events?from=2026-10-01T00:00:00Z&to=2026-10-18T23:59:59Z&actio
 - مستندات قابل اجرا (Redoc/Scalar) در محیط توسعه.
 - نمونه cURL برای هر Endpoint.
 - تغییرات قرارداد ابتدا در همین سند و سپس در OpenAPI ثبت شود.
+
+## فیلد `firstParty` کلاینت و رضایت (#81)
+
+`POST/PATCH /api/v1/clients` فیلد boolean `firstParty` را می‌پذیرد (پیش‌فرض `true`) و `GET` آن را برمی‌گرداند. `false` یعنی `/oauth2/authorize` برای این کلاینت رضایت کاربر را برای هر scope می‌خواهد (`docs/auth-flows.md`، بخش «رضایت کاربر»). مسیرهای `/api/v1/consent/*` سطح کاربر هستند و با کوکی نشست کار می‌کنند، نه با توکن ادمین.

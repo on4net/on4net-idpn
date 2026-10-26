@@ -14,6 +14,13 @@ import {
   type AccountFlowResult,
   type SetPasswordMode,
 } from '@/app/account-flows';
+import {
+  ConsentPage,
+  defaultDecideConsent,
+  defaultLoadConsent,
+  type ConsentDecisionResult,
+  type ConsentLoadResult,
+} from '@/app/consent-page';
 import { LoginForm, type LoginFormValues } from '@/app/login-form';
 import {
   contextAllowsPassword,
@@ -102,6 +109,12 @@ export interface HostedLoginPageProps {
     mode: SetPasswordMode;
   }) => Promise<AccountFlowResult>;
   confirmEmail?: (token: string) => Promise<AccountFlowResult>;
+  /** Consent screen calls (`?action=consent`), injectable for tests. */
+  loadConsent?: (consentRequest: string) => Promise<ConsentLoadResult>;
+  decideConsent?: (
+    consentRequest: string,
+    decision: 'allow' | 'deny',
+  ) => Promise<ConsentDecisionResult>;
   /** Called with a safe redirect target; defaults to `window.location.assign`. */
   navigate?: (target: string) => void;
   /** Bundle call, injectable for tests; returns the untrusted JSON body. */
@@ -472,6 +485,8 @@ export function HostedLoginPage({
   forgotPassword = defaultForgotPassword,
   setPassword = defaultSetPassword,
   confirmEmail = defaultConfirmEmail,
+  loadConsent = defaultLoadConsent,
+  decideConsent = defaultDecideConsent,
   navigate,
   fetchBundle = defaultFetchBundle,
 }: HostedLoginPageProps) {
@@ -492,6 +507,8 @@ export function HostedLoginPage({
   /** Account lifecycle flows: forgot, invite set-password, reset and email verification. */
   const action = params.get('action');
   const flowToken = params.get('token') ?? undefined;
+  /** Opaque handle of a pending consent request (`?action=consent`). */
+  const consentRequest = params.get('consent_request') ?? undefined;
 
   const [config, setConfig] = React.useState<PublicConfigLike | null>(null);
   const [configState, setConfigState] = React.useState<ConfigState>(
@@ -897,6 +914,14 @@ export function HostedLoginPage({
         token={flowToken}
         backHref={backHref}
         onSubmit={setPassword}
+      />
+    ) : action === 'consent' ? (
+      <ConsentPage
+        locale={locale}
+        consentRequest={consentRequest}
+        load={loadConsent}
+        decide={decideConsent}
+        onRedirect={navigateTo}
       />
     ) : action === 'verify-email' ? (
       <VerifyEmailPage

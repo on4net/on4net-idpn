@@ -25,7 +25,10 @@ export interface ConsentRepository {
   isGranted(userId: string, clientId: string, scopes: readonly string[]): Promise<boolean>;
   /** Records or widens the approval; scopes approved earlier stay approved. */
   grant(userId: string, clientId: string, scopes: readonly string[], at: Date): Promise<void>;
-  /** Revokes the approval; `false` when there was none. */
+  /**
+   * Revokes the approval together with the user's live refresh tokens and unexchanged codes for
+   * that client; `false` when there was no approval.
+   */
   revoke(userId: string, clientId: string, at: Date): Promise<boolean>;
   listForUser(userId: string): Promise<ConsentGrant[]>;
 }
@@ -66,11 +69,32 @@ export function createPrismaConsentRepository(prisma: PrismaClient): ConsentRepo
     },
 
     async revoke(userId, clientId, at) {
-      const result = await prisma.consent.updateMany({
-        where: { userId, client: { clientId }, revokedAt: null },
-        data: { revokedAt: at },
+      // Withdrawing consent must end what the consent allowed, not only stop new approvals:
+      // one transaction revokes the approval, every live refresh token of this user for this
+      // client, and any authorization code that was issued but not yet exchanged. Access tokens
+      // already issued expire on their own (<= the client's access-token TTL).
+      return prisma.$transaction(async (tx) => {
+        const client = await tx.client.findUnique({ where: { clientId }, select: { id: true } });
+        if (client === null) {
+          return false;
+        }
+        const result = await tx.consent.updateMany({
+          where: { userId, clientId: client.id, revokedAt: null },
+          data: { revokedAt: at },
+        });
+        if (result.count === 0) {
+          return false;
+        }
+        await tx.refreshToken.updateMany({
+          where: { userId, clientId: client.id, revokedAt: null },
+          data: { revokedAt: at },
+        });
+        await tx.authorizationCode.updateMany({
+          where: { userId, clientId: client.id, consumedAt: null },
+          data: { consumedAt: at },
+        });
+        return true;
       });
-      return result.count > 0;
     },
 
     async listForUser(userId) {
