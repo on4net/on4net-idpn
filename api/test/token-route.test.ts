@@ -2,6 +2,8 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 
+import type { RateLimiter } from '../src/http/rate-limit.js';
+
 import { hashPassword, type Argon2Params } from '../src/auth/password.js';
 import {
   createClientSecretService,
@@ -178,6 +180,7 @@ interface HarnessOptions {
   access?: EffectiveAccessSource;
   metrics?: TokenMetricsSink;
   audit?: { record(event: AuditEventInput): Promise<void> };
+  rateLimiter?: RateLimiter;
 }
 
 async function harness(options: HarnessOptions = {}) {
@@ -223,6 +226,7 @@ async function harness(options: HarnessOptions = {}) {
     ...(options.access === undefined ? {} : { access: options.access }),
     ...(options.metrics === undefined ? {} : { metrics: options.metrics }),
     ...(options.audit === undefined ? {} : { audit: options.audit }),
+    ...(options.rateLimiter === undefined ? {} : { rateLimiter: options.rateLimiter }),
   });
   await app.ready();
   return { app, codes, refreshTokens, keys };
@@ -897,6 +901,41 @@ describe('POST /oauth2/token — client_credentials', () => {
       .expect(400);
 
     expect(response.body.error).toBe('unauthorized_client');
+    await app.close();
+  });
+});
+
+describe('POST /oauth2/token — rate limit (#70 item 11)', () => {
+  it('answers 429 with no-store and Retry-After once the per-address budget is spent', async () => {
+    const consumed: string[] = [];
+    let allowed = 2;
+    const { app } = await harness({
+      rateLimiter: {
+        async consume(key) {
+          consumed.push(key);
+          allowed -= 1;
+          return allowed >= 0;
+        },
+      },
+    });
+
+    const attempt = () =>
+      request(app.server)
+        .post('/oauth2/token')
+        .type('form')
+        .send({ grant_type: 'authorization_code', client_id: 'spa-app', code: 'x' });
+
+    expect((await attempt()).status).toBe(400);
+    expect((await attempt()).status).toBe(400);
+    const limited = await attempt();
+    expect(limited.status).toBe(429);
+    expect(limited.headers['cache-control']).toBe('no-store');
+    expect(limited.headers['retry-after']).toBe('60');
+    expect(limited.body).toEqual({
+      error: 'temporarily_unavailable',
+      error_description: 'too many requests',
+    });
+    expect(consumed.every((key) => key.startsWith('token:ip:'))).toBe(true);
     await app.close();
   });
 });

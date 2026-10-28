@@ -38,6 +38,7 @@ export function registerPublicConfigRoute(
   const buckets = new Map<string, Bucket>();
   const limit = options.rateLimit ?? { windowSeconds: 60, max: 60 };
   const nowMs = options.now ?? (() => Date.now());
+  let lastPruneAt = nowMs();
 
   app.get('/api/v1/clients/:clientId/public-config', async (request, reply) => {
     const { clientId } = request.params as { clientId: string };
@@ -46,7 +47,11 @@ export function registerPublicConfigRoute(
     // into the key let a probe over distinct ids bypass the window entirely and grew the map
     // without bound (card #70 finding 11).
     const at = nowMs();
-    pruneExpired(buckets, at);
+    // A full scan per request would be O(distinct addresses); once per window is enough.
+    if (at - lastPruneAt >= limit.windowSeconds * 1000) {
+      pruneExpired(buckets, at);
+      lastPruneAt = at;
+    }
     const decision = consume(buckets, ip, limit, at);
     if (!decision.allowed) {
       return problem(reply, 429, 'Too many requests', {

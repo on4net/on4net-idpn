@@ -6,6 +6,8 @@ export interface Argon2Env {
   ARGON2_TIME_COST: number;
   ARGON2_PARALLELISM: number;
   PASSWORD_PEPPER?: string | undefined;
+  PASSWORD_PEPPER_PREVIOUS?: string[] | undefined;
+  PASSWORD_ACCEPT_UNPEPPERED?: boolean | undefined;
 }
 
 /**
@@ -21,5 +23,9 @@ export function argon2ParamsFromEnv(env: Argon2Env): Argon2Params {
     ...(env.PASSWORD_PEPPER === undefined || env.PASSWORD_PEPPER === ''
       ? {}
       : { pepper: env.PASSWORD_PEPPER }),
+    ...(env.PASSWORD_PEPPER_PREVIOUS === undefined || env.PASSWORD_PEPPER_PREVIOUS.length === 0
+      ? {}
+      : { previousPeppers: env.PASSWORD_PEPPER_PREVIOUS }),
+    ...(env.PASSWORD_ACCEPT_UNPEPPERED === true ? { acceptUnpeppered: true } : {}),
   };
 }

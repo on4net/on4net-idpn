@@ -380,6 +380,7 @@ const app = buildServer({
       }
     : {}),
   token: {
+    rateLimiter: accountRateLimiter,
     clients: clientsRepository,
     clientSecrets,
     codes: authorizationCodes,

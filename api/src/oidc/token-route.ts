@@ -4,6 +4,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
 import type { AuditEventInput } from '../audit/sanitize.js';
 import { registerFormBodyParser } from '../http/form-body.js';
+import type { RateLimiter, RateLimitPolicy } from '../http/rate-limit.js';
 import type { IdpSession } from '../session/types.js';
 import type { ClientSecretService } from '../auth/client-secret.js';
 import {
@@ -40,8 +41,17 @@ import {
 } from './token-claims.js';
 import type { EffectiveAccess, EffectiveAccessSource } from './effective-access.js';
 
+/**
+ * Per-address budget for `POST /oauth2/token`. The endpoint is unauthenticated, so client-secret
+ * guessing, refresh-token spraying and plain flooding are bounded before any credential work.
+ * Generous on purpose: server-side clients behind one NAT share an address.
+ */
+export const TOKEN_RATE_LIMIT: RateLimitPolicy = { windowSeconds: 60, max: 300 };
+
 export interface TokenRouteOptions {
   issuer: string;
+  /** Shared limiter; a request over budget is answered `429` before client authentication. */
+  rateLimiter?: RateLimiter;
   clients: ClientAuthRepository;
   /** Keyed client-secret verifier; defaults to the process environment configuration. */
   clientSecrets?: ClientSecretService;
@@ -117,6 +127,15 @@ export function registerTokenRoute(app: FastifyInstance, options: TokenRouteOpti
   registerFormBodyParser(app);
 
   app.post('/oauth2/token', async (request, reply) => {
+    if (
+      options.rateLimiter !== undefined &&
+      !(await options.rateLimiter.consume(`token:ip:${request.ip}`, TOKEN_RATE_LIMIT))
+    ) {
+      return noStore(reply)
+        .header('Retry-After', String(TOKEN_RATE_LIMIT.windowSeconds))
+        .code(429)
+        .send({ error: 'temporarily_unavailable', error_description: 'too many requests' });
+    }
     const payload = body(request);
     const basic = parseBasicAuthHeader(request.headers.authorization);
     const clientId = basic?.clientId ?? payload.client_id;

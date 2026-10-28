@@ -281,7 +281,10 @@ export function buildPublicClientConfig(
       selfServiceRegistration:
         client.mfeFeatures.selfServiceRegistration === true ||
         client.registrationPolicy === 'self_service',
-      mfa: client.mfaFeaturesEnabled === true || client.mfaPolicy !== 'optional',
+      mfa:
+        client.mfeFeatures.mfa === true ||
+        client.mfaFeaturesEnabled === true ||
+        client.mfaPolicy !== 'optional',
     },
     mfe: dependencies.mfe,
   };

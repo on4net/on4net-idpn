@@ -74,6 +74,16 @@ describe('buildPublicClientConfig', () => {
     ]);
   });
 
+  it('advertises MFA when the admin flag or a non-optional policy says so (#70 item 14)', () => {
+    const feature = (overrides: Partial<PublicClientSource>) =>
+      buildPublicClientConfig({ ...source, ...overrides }, deps).features.mfa;
+
+    expect(feature({ mfaPolicy: 'optional', mfeFeatures: {} })).toBe(false);
+    expect(feature({ mfaPolicy: 'optional', mfeFeatures: { mfa: true } })).toBe(true);
+    expect(feature({ mfaPolicy: 'required_admins', mfeFeatures: {} })).toBe(true);
+    expect(feature({ mfaPolicy: 'optional', mfeFeatures: { mfa: false } })).toBe(false);
+  });
+
   it('publishes only the documented context branding and registration policy', () => {
     const config = buildPublicClientConfig(source, deps);
 

@@ -1,6 +1,7 @@
+import argon2 from 'argon2';
 import Fastify from 'fastify';
 import request from 'supertest';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { hashPassword, verifyPassword, type Argon2Params } from '../src/auth/password.js';
 import { createMemoryRateLimiter, type RateLimiter } from '../src/http/rate-limit.js';
@@ -122,6 +123,34 @@ async function harness(
 }
 
 describe('POST /api/v1/login', () => {
+  it('pays exactly one Argon2 verification on every rejection branch (timing oracle)', async () => {
+    const hash = await hashPassword(password, FAST);
+    const locked = new Date('2026-10-18T13:00:00Z');
+    const cases: Array<[string, LoginUserRecord | null]> = [
+      ['unknown user', null],
+      ['disabled', await user({ status: 'disabled' })],
+      ['locked', await user({ lockedUntil: locked })],
+      ['deleted', await user({ deletedAt: new Date('2026-10-01T00:00:00Z') })],
+      ['no password', await user({ passwordHash: null })],
+      ['wrong password', await user({ passwordHash: hash })],
+    ];
+    const verify = vi.spyOn(argon2, 'verify');
+    try {
+      for (const [name, record] of cases) {
+        const { app } = await harness(record, undefined, { passwordParams: FAST });
+        verify.mockClear();
+        await request(app.server)
+          .post('/api/v1/login')
+          .send({ identifier: 'sara@example.com', password: 'not-the-password' })
+          .expect(401);
+        expect(verify, name).toHaveBeenCalledTimes(1);
+        await app.close();
+      }
+    } finally {
+      verify.mockRestore();
+    }
+  });
+
   it('sets an HttpOnly session cookie and returns a safe redirect', async () => {
     const { app } = await harness(await user());
 
@@ -201,10 +230,7 @@ describe('POST /api/v1/login', () => {
   it('rejects a malformed body instead of throwing', async () => {
     const { app } = await harness(await user());
 
-    await request(app.server)
-      .post('/api/v1/login')
-      .send({ identifier: 123, password })
-      .expect(400);
+    await request(app.server).post('/api/v1/login').send({ identifier: 123, password }).expect(400);
 
     await app.close();
   });

@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import argon2 from 'argon2';
+import { describe, expect, it, vi } from 'vitest';
 
 import { authenticateWithPassword, isLocked, type AuthenticatableUser } from './authenticate.js';
 import { hashPassword, type Argon2Params } from './password.js';
@@ -90,16 +91,20 @@ describe('authenticateWithPassword', () => {
     expect(result).toEqual({ ok: false, reason: 'no_password' });
   });
 
-  it('does not verify anything for a locked account (no timing oracle)', async () => {
+  it('short-circuits a locked account without hashing; the login route pays the cost', async () => {
     const locked = await baseUser({
       status: 'locked',
       lockedUntil: new Date('2030-01-01T00:00:00Z'),
     });
-    const started = performance.now();
-
-    await authenticateWithPassword(locked, password, { params: FAST });
-
-    expect(performance.now() - started).toBeLessThan(50);
+    const verify = vi.spyOn(argon2, 'verify');
+    try {
+      await authenticateWithPassword(locked, password, { params: FAST });
+      // Deliberate: the decoy verification lives in the route (`login-route.test.ts` asserts
+      // exactly one Argon2 verification on every rejection branch), not in this helper.
+      expect(verify).not.toHaveBeenCalled();
+    } finally {
+      verify.mockRestore();
+    }
   });
 });
 
