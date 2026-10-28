@@ -171,6 +171,10 @@ model User {
   @@unique([tenantId, email])
   // The login lookup has no tenant filter, so these standalone indexes serve it
   // (migration 0016); the tenant-prefixed uniques cannot.
+  // Prisma cannot express `WHERE deleted_at IS NULL`, so the database holds PARTIAL indexes
+  // (`users_email_lookup_idx`, `users_username_lookup_idx`) while these declarations describe full
+  // ones. Never regenerate migrations from this model with `migrate dev`/`db push`: it would
+  // replace the partial indexes. `database.test.ts` asserts the partial predicate.
   @@index([email])
   @@index([username])
   @@unique([tenantId, phone])

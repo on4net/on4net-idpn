@@ -404,6 +404,35 @@ describe('initial schema', () => {
     expect(Number(applied.rows[0]?.count)).toBeGreaterThan(0);
   });
 
+  it('keeps the partial login-lookup indexes the datamodel cannot express (#18)', async () => {
+    const indexes = await client.query<{ indexname: string; indexdef: string }>(
+      `SELECT indexname, indexdef FROM pg_indexes
+        WHERE indexname IN ('users_email_lookup_idx', 'users_username_lookup_idx')`,
+    );
+    expect(indexes.rows).toHaveLength(2);
+    for (const row of indexes.rows) {
+      expect(row.indexdef, row.indexname).toMatch(/WHERE \(?\(?deleted_at IS NULL\)?\)?/);
+    }
+  });
+
+  it('allows only one active signing key (0014, #75)', async () => {
+    const insert = (kid: string, status: 'active' | 'retired') =>
+      client.query(
+        `INSERT INTO signing_keys (kid, alg, public_key, private_key_ref, status)
+         VALUES ($1, 'ES256', '{}', 'enc:x', $2::"SigningKeyStatus")`,
+        [kid, status],
+      );
+    await client.query('DELETE FROM signing_keys');
+    await insert('active-1', 'active');
+    await insert('retired-1', 'retired');
+    await insert('retired-2', 'retired');
+    await expect(insert('active-2', 'active')).rejects.toMatchObject({ code: '23505' });
+    // Retiring the active key frees the slot, which is what a rotation does.
+    await client.query(`UPDATE signing_keys SET status = 'retired' WHERE kid = 'active-1'`);
+    await insert('active-2', 'active');
+    await client.query('DELETE FROM signing_keys');
+  });
+
   it('rolls back and re-applies the migrations', async () => {
     const firstParty = await rollbackLatestMigration({ connectionString, confirm: true });
     expect(firstParty).toBe('0019_client_first_party');

@@ -119,6 +119,26 @@ const serverEnvBase = z.object({
   /** Optional server-side pepper for Argon2id; supply from KMS/Vault in production. */
   PASSWORD_PEPPER: z.preprocess(emptyToUndefined, z.string().min(32).optional()),
   /**
+   * Comma-separated peppers used before the current one. Hashes that only verify under one of
+   * them keep working and are rewritten under `PASSWORD_PEPPER` at the owner's next login.
+   * Remove the old value once `ops` shows no remaining hashes (docs/security.md 3.1).
+   */
+  PASSWORD_PEPPER_PREVIOUS: z.preprocess(
+    emptyToUndefined,
+    z
+      .string()
+      .transform((value) =>
+        value
+          .split(',')
+          .map((item) => item.trim())
+          .filter((item) => item !== ''),
+      )
+      .pipe(z.array(z.string().min(32)).max(4))
+      .optional(),
+  ),
+  /** Also accept hashes created before any pepper existed (enabling the first pepper). */
+  PASSWORD_ACCEPT_UNPEPPERED: booleanFlag(false),
+  /**
    * Server-side pepper for client-secret hashes (HMAC-SHA-256). Supply it from KMS/Vault: it
    * must never be stored next to the digests and it is required in production
    * (docs/client-secret-hashing.md). At least 32 characters.
@@ -246,7 +266,14 @@ const serverEnvBase = z.object({
   ),
   /** Envelope sender for transactional mail (invite, verification, password reset). */
   MAIL_FROM: z.preprocess(emptyToUndefined, z.string().email().default('no-reply@on4net.dev')),
+  /**
+   * Networks whose `X-Forwarded-For` is trusted. Empty means the peer address is the client, so
+   * behind a reverse proxy every user shares the proxy's address and the per-address login and
+   * token limits become a deployment-wide lockout (card #18 review finding 3).
+   */
   TRUSTED_PROXY_CIDRS: csv(z.string().min(1)).default([]),
+  /** Production only: confirms the API is reached directly, so no proxy CIDRs are required. */
+  ALLOW_DIRECT_CLIENT_IPS: booleanFlag(false),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   /**
    * Enables the internal Prometheus endpoint (`GET /metrics`, docs/monitoring.md). Keep it
@@ -301,6 +328,19 @@ export const serverEnvSchema = serverEnvBase.superRefine((value, ctx) => {
       code: 'custom',
       path: ['SIGNING_KEY_REF'],
       message: 'is required in production (file:// on a shared volume, or a KMS/Vault reference)',
+    });
+  }
+  if (
+    value.NODE_ENV === 'production' &&
+    value.TRUSTED_PROXY_CIDRS.length === 0 &&
+    !value.ALLOW_DIRECT_CLIENT_IPS
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['TRUSTED_PROXY_CIDRS'],
+      message:
+        'is required in production behind a reverse proxy (set the proxy CIDRs), or set ' +
+        'ALLOW_DIRECT_CLIENT_IPS=true when clients reach the API directly',
     });
   }
 });

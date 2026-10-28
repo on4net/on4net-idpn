@@ -531,12 +531,17 @@ describe('password reset', () => {
     expect(known.body).toEqual(missing.body);
     expect(mailer.lastTo(unknown)).toBeUndefined();
 
+    // The endpoint answers 202 before the mail is dispatched.
+    await vi.waitFor(() => expect(mailer.lastTo(email)).toBeDefined());
     const firstToken = tokenFromMail(mailer.lastTo(email)?.text ?? '');
     // A second request invalidates the first link (one active token per user).
     const second = await request(app.server)
       .post('/api/v1/account/password/forgot')
       .send({ email });
     expect(second.status).toBe(202);
+    await vi.waitFor(() =>
+      expect(tokenFromMail(mailer.lastTo(email)?.text ?? '')).not.toBe(firstToken),
+    );
     const secondToken = tokenFromMail(mailer.lastTo(email)?.text ?? '');
     expect(secondToken).not.toBe(firstToken);
 

@@ -181,7 +181,23 @@ describe('parseServerEnv', () => {
         key: 'SIGNING_KEY_REF',
         message: 'is required in production (file:// on a shared volume, or a KMS/Vault reference)',
       },
+      {
+        key: 'TRUSTED_PROXY_CIDRS',
+        message:
+          'is required in production behind a reverse proxy (set the proxy CIDRs), or set ' +
+          'ALLOW_DIRECT_CLIENT_IPS=true when clients reach the API directly',
+      },
     ]);
+    expect(() =>
+      parseServerEnv({
+        ...minimalEnv,
+        NODE_ENV: 'production',
+        CLIENT_SECRET_PEPPER: 'production-client-secret-pepper-value',
+        RECOVERY_LOOKUP_KEY: 'production-recovery-lookup-key-value-0001',
+        SIGNING_KEY_REF: 'file:///var/lib/idpn/signing-keys.json',
+        ALLOW_DIRECT_CLIENT_IPS: 'true',
+      }),
+    ).not.toThrow();
 
     const dev = parseServerEnv(minimalEnv);
     expect(dev.CLIENT_SECRET_PEPPER).toBeUndefined();

@@ -7,6 +7,7 @@ import { maskEmail } from '../auth/normalize.js';
 import {
   DEFAULT_ARGON2_PARAMS,
   hashPassword,
+  needsPepperUpgrade,
   needsRehash,
   type Argon2Params,
 } from '../auth/password.js';
@@ -157,10 +158,12 @@ export function registerLoginRoute(app: FastifyInstance, options: LoginRouteOpti
         options.rateLimiter.consume(`login:ip:${request.ip}`, LOGIN_IP_RATE_LIMIT),
       ]);
       if (!identifierAllowed || !addressAllowed) {
-        // Report the window of the bucket that actually blocked the attempt.
-        const retryAfter = Math.max(
-          identifierAllowed ? 0 : LOGIN_RATE_LIMIT.windowSeconds,
-          addressAllowed ? 0 : LOGIN_IP_RATE_LIMIT.windowSeconds,
+        // The limiter only answers yes/no, so report the shortest window among the buckets that
+        // blocked: a client over the 60 s identifier bucket alone must not be told to wait 10
+        // minutes. Retrying earlier than the longer bucket allows just gets another 429.
+        const retryAfter = Math.min(
+          identifierAllowed ? Infinity : LOGIN_RATE_LIMIT.windowSeconds,
+          addressAllowed ? Infinity : LOGIN_IP_RATE_LIMIT.windowSeconds,
         );
         return reply
           .code(429)
@@ -388,7 +391,10 @@ async function upgradePasswordHash(
     return;
   }
   const params = options.passwordParams ?? DEFAULT_ARGON2_PARAMS;
-  if (!needsRehash(user.passwordHash, params)) {
+  if (
+    !needsRehash(user.passwordHash, params) &&
+    !(await needsPepperUpgrade(user.passwordHash, password, params))
+  ) {
     return;
   }
   try {

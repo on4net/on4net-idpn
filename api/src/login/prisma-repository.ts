@@ -89,7 +89,8 @@ export function createPrismaLoginRepository(prisma: PrismaClient): LoginUserRepo
           failedLoginCount: attempts,
           // The lock lives in `locked_until` only. Writing `status = 'locked'` made the lock
           // permanent, because the login route refuses any non-active account.
-          ...(lockedUntil === null ? {} : { lockedUntil }),
+          // Always written: an elapsed lock must be cleared or the counter restarts forever (#18).
+          lockedUntil,
         },
       });
     },

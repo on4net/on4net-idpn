@@ -7,7 +7,7 @@
 
 | بخش | مسیر | وضعیت |
 |---|---|---|
-| اپ Hosted (ورود) | `web/index.html`، `web/src/main.tsx`، `web/src/app/login-page.tsx` | ✅ |
+| اپ Hosted (ورود) | `web/index.html`، `web/src/main.tsx`، `web/src/app/hosted-login.tsx` | ✅ |
 | ریشه مشترک + Portal | `web/src/app/idpn-root.tsx` (`DirectionProvider`، `.idpn-root`، `idpn-portal-root`) | ✅ |
 | کامپوننت‌های shadcn-style | `web/src/components/ui/{button,input,label,dialog,select}.tsx` | ✅ |
 | ماژول MFE | `web/src/mfe/user-management.tsx` | ✅ |

@@ -362,7 +362,8 @@ export function createPrismaMfaRepository(
         where: { id: userId },
         data: {
           failedLoginCount: attempts,
-          ...(lockedUntil === null ? {} : { lockedUntil }),
+          // Always written so an elapsed lock is cleared and can re-arm (#18).
+          lockedUntil,
         },
       });
     },
