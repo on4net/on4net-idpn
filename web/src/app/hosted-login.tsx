@@ -461,6 +461,10 @@ export function safeRedirectTarget(value: string | undefined): string {
     if (resolved.origin !== origin) {
       return '/';
     }
+    // Dot-segments normalise into a protocol-relative path (`/..//host` -> `//host`).
+    if (resolved.pathname.startsWith('//')) {
+      return '/';
+    }
     return trimmed.startsWith('/')
       ? `${resolved.pathname}${resolved.search}${resolved.hash}`
       : resolved.toString();

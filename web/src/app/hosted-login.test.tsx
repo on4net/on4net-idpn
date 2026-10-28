@@ -539,6 +539,10 @@ describe('HostedLoginPage', () => {
     expect(safeRedirectTarget('//evil.example/login')).toBe('/');
     expect(safeRedirectTarget('/\\evil.example')).toBe('/');
     expect(safeRedirectTarget('javascript:alert(1)')).toBe('/');
+    // Dot-segments collapse into a protocol-relative target; the result is what is checked.
+    for (const value of ['/..//evil.example', '/.//evil.example', '/a/../..//evil.example']) {
+      expect(safeRedirectTarget(value)).toBe('/');
+    }
     expect(safeRedirectTarget('https://evil.example/oauth2/authorize')).toBe('/');
     expect(safeRedirectTarget('/oauth2/authorize?client_id=app-a')).toBe(
       '/oauth2/authorize?client_id=app-a',

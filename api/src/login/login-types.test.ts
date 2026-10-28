@@ -16,6 +16,14 @@ describe('sanitizeReturnTo', () => {
     expect(sanitizeReturnTo('//evil.example.com/x', appUrl)).toBeUndefined();
     expect(sanitizeReturnTo('javascript:alert(1)', appUrl)).toBeUndefined();
     expect(sanitizeReturnTo(undefined, appUrl)).toBeUndefined();
+    // Dot-segments collapse into a protocol-relative target; the result is what is checked.
+    for (const value of [
+      '/..//evil.example.com',
+      '/.//evil.example.com',
+      '/a/../..//evil.example.com',
+    ]) {
+      expect(sanitizeReturnTo(value, appUrl)).toBeUndefined();
+    }
   });
 
   it('rejects control characters and backslashes that a browser would normalise', () => {

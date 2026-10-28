@@ -82,6 +82,11 @@ export function sanitizeReturnTo(returnTo: string | undefined, appUrl: string): 
     if (resolved.origin !== origin) {
       return undefined;
     }
+    // Dot-segments normalise into a protocol-relative path (`/..//host` -> `//host`), so the
+    // *result* is checked, not only the input.
+    if (resolved.pathname.startsWith('//')) {
+      return undefined;
+    }
     return value.startsWith('/')
       ? `${resolved.pathname}${resolved.search}${resolved.hash}`
       : resolved.toString();

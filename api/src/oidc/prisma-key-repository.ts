@@ -2,6 +2,7 @@ import { calculateJwkThumbprint, type JWK } from 'jose';
 
 import type { KeyringSecretBox } from '../crypto/secret-box.js';
 import type { PrismaClient } from '../generated/prisma/client.js';
+import { SigningKeyConflictError } from './keys.js';
 import type { SigningKeyRepository, SigningKeyStatus, StoredSigningKey } from './key-types.js';
 
 /**
@@ -90,11 +91,19 @@ export function createPrismaSigningKeyRepository(
         createdAt: key.createdAt,
         retiredAt: key.retiredAt ?? null,
       };
-      await prisma.signingKey.upsert({
-        where: { kid: key.kid },
-        create: { kid: key.kid, alg: 'ES256', ...data },
-        update: data,
-      });
+      try {
+        await prisma.signingKey.upsert({
+          where: { kid: key.kid },
+          create: { kid: key.kid, alg: 'ES256', ...data },
+          update: data,
+        });
+      } catch (error) {
+        // P2002: the partial unique index on active keys (migration 0014) rejected a second one.
+        if ((error as { code?: unknown }).code === 'P2002' && key.status === 'active') {
+          throw new SigningKeyConflictError();
+        }
+        throw error;
+      }
     },
 
     async updateStatus(kid: string, status: SigningKeyStatus, retiredAt?: Date) {

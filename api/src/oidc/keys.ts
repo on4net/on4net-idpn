@@ -78,6 +78,17 @@ export class KeyRotationCooldownError extends Error {
   }
 }
 
+/**
+ * Raised by a key store when the single-active-key invariant rejects an insert: another replica
+ * or request provisioned or rotated the active key first.
+ */
+export class SigningKeyConflictError extends Error {
+  override readonly name = 'SigningKeyConflictError';
+  constructor() {
+    super('another request changed the active signing key first');
+  }
+}
+
 export class SigningKeyManager {
   private readonly retiredRetentionMs: number;
   private readonly rotationDueAfterDays: number;
@@ -172,7 +183,20 @@ export class SigningKeyManager {
       return active;
     }
     const created = await generateSigningKey('active', this.now());
-    await this.repository.save(created);
+    try {
+      await this.repository.save(created);
+    } catch (error) {
+      if (!(error instanceof SigningKeyConflictError)) {
+        throw error;
+      }
+      // Another replica provisioned the first key between our read and write: use its key.
+      this.invalidate();
+      const winner = (await this.loadKeys()).find((key) => key.status === 'active');
+      if (winner === undefined) {
+        throw error;
+      }
+      return winner;
+    }
     this.invalidate();
     return created;
   }
@@ -277,7 +301,14 @@ export class SigningKeyManager {
       await this.repository.updateStatus(key.kid, revokePrevious ? 'revoked' : 'retired', now);
     }
     const created = await generateSigningKey('active', now);
-    await this.repository.save(created);
+    try {
+      await this.repository.save(created);
+    } catch (error) {
+      // A concurrent rotation won the unique index. Whatever we retired above was retired by the
+      // winner too, so the store still ends with exactly one active key; the caller answers 409.
+      this.invalidate();
+      throw error;
+    }
     this.invalidate();
     return {
       active: created,

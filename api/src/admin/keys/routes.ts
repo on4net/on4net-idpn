@@ -1,4 +1,4 @@
-import { KeyRotationCooldownError } from '../../oidc/keys.js';
+import { KeyRotationCooldownError, SigningKeyConflictError } from '../../oidc/keys.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 
@@ -162,6 +162,16 @@ export function registerKeyAdminRoutes(app: FastifyInstance, options: KeyRoutesO
             status: 409,
             detail: `${error.message}. Use revokePrevious for an emergency rotation.`,
           });
+      }
+      if (error instanceof SigningKeyConflictError) {
+        return sendProblem(
+          reply,
+          409,
+          'conflict',
+          'Conflict',
+          'another rotation ran at the same time; check GET /api/v1/keys and retry if needed',
+          '/api/v1/keys/rotate',
+        );
       }
       throw error;
     }
