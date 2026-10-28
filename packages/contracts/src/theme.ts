@@ -344,34 +344,86 @@ export const IDPN_BASE_THEME = {
   light: {
     background: 'oklch(1 0 0)',
     foreground: 'oklch(0.145 0 0)',
-    card: 'oklch(1 0 0)',
-    cardForeground: 'oklch(0.145 0 0)',
     primary: 'oklch(0.48 0.11 190)',
     primaryForeground: 'oklch(0.99 0 0)',
-    secondary: 'oklch(0.97 0 0)',
-    secondaryForeground: 'oklch(0.205 0 0)',
-    muted: 'oklch(0.97 0 0)',
-    mutedForeground: 'oklch(0.52 0 0)',
-    accent: 'oklch(0.97 0 0)',
-    accentForeground: 'oklch(0.205 0 0)',
+    destructive: 'oklch(0.577 0.245 27.325)',
   },
   dark: {
     background: 'oklch(0.145 0 0)',
     foreground: 'oklch(0.985 0 0)',
-    card: 'oklch(0.205 0 0)',
-    cardForeground: 'oklch(0.985 0 0)',
     primary: 'oklch(0.72 0.12 190)',
     primaryForeground: 'oklch(0.205 0 0)',
-    secondary: 'oklch(0.269 0 0)',
-    secondaryForeground: 'oklch(0.985 0 0)',
-    muted: 'oklch(0.269 0 0)',
-    mutedForeground: 'oklch(0.708 0 0)',
-    accent: 'oklch(0.371 0 0)',
-    accentForeground: 'oklch(0.985 0 0)',
+    destructive: 'oklch(0.704 0.191 22.216)',
   },
 } as const;
 
 type ContrastBase = Readonly<Record<keyof (typeof IDPN_BASE_THEME)['light'], string>>;
+type ThemeMode = 'light' | 'dark';
+
+/**
+ * Text tokens that follow the effective `foreground` instead of being fixed literals
+ * (`web/src/styles/globals.css`). A literal such as `oklch(0.52 0 0)` stayed dark when a client
+ * painted a dark `background`, so placeholder, description and tab text vanished (card #53
+ * review findings 1-2). The value is the share of `foreground` that remains (muted text is 75 %).
+ */
+export const IDPN_DERIVED_TEXT = {
+  cardForeground: 1,
+  secondaryForeground: 1,
+  accentForeground: 1,
+  mutedForeground: 0.75,
+} as const;
+
+/**
+ * Surfaces a client did not set are mixed from the effective `background` and `foreground`
+ * (`color-mix(in srgb, background, foreground N%)` in `globals.css`), so a dark brand theme gets
+ * dark cards and tinted surfaces instead of the light built-ins. The value is the share of
+ * `foreground` per mode.
+ */
+export const IDPN_DERIVED_SURFACES = {
+  light: { card: 0, secondary: 0.04, muted: 0.04, accent: 0.04 },
+  dark: { card: 0.07, secondary: 0.15, muted: 0.15, accent: 0.28 },
+} as const;
+
+const percent = (channel: number): string => `${(channel * 100).toFixed(4)}%`;
+
+/** `front` blended over `back` with the given share of `front` (sRGB, as `color-mix` does). */
+function mixColors(front: string, back: string, share: number): string {
+  const a = resolveThemeColor(front);
+  const b = resolveThemeColor(back);
+  if (a === null || b === null) {
+    return back;
+  }
+  const mix = (x: number, y: number): string => percent(x * share + y * (1 - share));
+  return `rgb(${mix(a.r, b.r)} ${mix(a.g, b.g)} ${mix(a.b, b.b)})`;
+}
+
+/** The colour a token really paints, given the client's overrides and the built-ins. */
+export function effectiveColor(
+  key: string,
+  colors: IdpnThemeColors,
+  base: ContrastBase,
+  mode: ThemeMode,
+): string {
+  const set = clientColor(colors, key);
+  if (set !== undefined) {
+    return set;
+  }
+  const foreground = colors.foreground ?? base.foreground;
+  const background = colors.background ?? base.background;
+  if (key in IDPN_DERIVED_TEXT) {
+    const share = IDPN_DERIVED_TEXT[key as keyof typeof IDPN_DERIVED_TEXT];
+    const rgb = resolveThemeColor(foreground);
+    if (share === 1 || rgb === null) {
+      return foreground;
+    }
+    return `rgb(${percent(rgb.r)} ${percent(rgb.g)} ${percent(rgb.b)} / ${share})`;
+  }
+  if (key in IDPN_DERIVED_SURFACES[mode]) {
+    const share = IDPN_DERIVED_SURFACES[mode][key as keyof (typeof IDPN_DERIVED_SURFACES)['light']];
+    return share === 0 ? background : mixColors(foreground, background, share);
+  }
+  return (base as Readonly<Record<string, string>>)[key] ?? '';
+}
 
 /**
  * Every text/surface pair the contract exposes. Four of the twelve client keys are surfaces
@@ -385,6 +437,19 @@ export const IDPN_CONTRAST_PAIRS = [
   ['secondaryForeground', 'secondary'],
   ['mutedForeground', 'muted'],
   ['accentForeground', 'accent'],
+  // `destructive` is client-settable and painted both as text (alerts) and as a surface behind
+  // `primaryForeground` (destructive button/badge) (card #53 review finding 1).
+  ['destructive', 'background'],
+  ['destructive', 'card'],
+  ['primaryForeground', 'destructive'],
+  // The converse direction: fixed text literals over client-set surfaces (placeholders, table
+  // headers, descriptions, inactive tabs) and inherited `foreground` on tinted surfaces
+  // (finding 2). A failing pair drops the client-set member, i.e. the surface.
+  ['mutedForeground', 'background'],
+  ['mutedForeground', 'card'],
+  ['foreground', 'muted'],
+  ['foreground', 'secondary'],
+  ['foreground', 'accent'],
 ] as const;
 
 const CLIENT_COLOR_KEYS = new Set<string>(IDPN_THEME_COLOR_KEYS);
@@ -398,13 +463,29 @@ const clientColor = (colors: IdpnThemeColors, key: string): string | undefined =
  * {@link MIN_CONTRAST_RATIO}, is unmeasurable (e.g. a translucent background) or unknown;
  * every client-settable member of the pair is removed so the fallback stays coherent.
  */
-function enforceContrast(colors: IdpnThemeColors, base: ContrastBase): IdpnThemeColors {
+function enforceContrast(
+  colors: IdpnThemeColors,
+  base: ContrastBase,
+  mode: ThemeMode,
+): IdpnThemeColors {
   const result: IdpnThemeColors = { ...colors };
   for (const [foregroundKey, backgroundKey] of IDPN_CONTRAST_PAIRS) {
-    const foreground = clientColor(result, foregroundKey) ?? base[foregroundKey];
-    const background = clientColor(result, backgroundKey) ?? base[backgroundKey];
+    const involvesDestructive = foregroundKey === 'destructive' || backgroundKey === 'destructive';
+    // The built-in red is only known-good against the built-in pages, and no single red can be
+    // readable both on a very dark page and under a white label, so a pair that involves
+    // `destructive` is enforced when the client chose that colour (the review's exploit), and
+    // the offending client colour is the one that goes.
+    if (involvesDestructive && result.destructive === undefined) {
+      continue;
+    }
+    const foreground = effectiveColor(foregroundKey, result, base, mode);
+    const background = effectiveColor(backgroundKey, result, base, mode);
     const ratio = contrastRatio(foreground, background);
     if (ratio !== null && ratio >= MIN_CONTRAST_RATIO) {
+      continue;
+    }
+    if (involvesDestructive) {
+      delete result.destructive;
       continue;
     }
     if (CLIENT_COLOR_KEYS.has(foregroundKey)) {
@@ -552,14 +633,16 @@ const sanitizeFontFamily = (input: unknown): IdpnThemeFontFamily => {
 export function sanitizeIdpnTheme(input: unknown): IdpnTheme {
   if (!isRecord(input)) return {};
 
-  const theme: IdpnTheme = { ...enforceContrast(sanitizeColors(input), IDPN_BASE_THEME.light) };
+  const theme: IdpnTheme = {
+    ...enforceContrast(sanitizeColors(input), IDPN_BASE_THEME.light, 'light'),
+  };
   const radius = sanitizeIdpnRadius(input.radius);
   if (radius !== undefined) theme.radius = radius;
 
   const family = sanitizeFontFamily(input.fontFamily);
   if (Object.keys(family).length > 0) theme.fontFamily = family;
 
-  const dark = enforceContrast(sanitizeColors(input.dark), IDPN_BASE_THEME.dark);
+  const dark = enforceContrast(sanitizeColors(input.dark), IDPN_BASE_THEME.dark, 'dark');
   if (Object.keys(dark).length > 0) theme.dark = dark;
 
   return theme;
@@ -657,11 +740,6 @@ const colorFields = {
 
 const fontSchema = z.enum(IDPN_THEME_FONT_KEYS);
 
-/**
- * Public theme payload. Unknown fields are allowed and stripped by `sanitizeIdpnTheme` (a
- * client may store extra branding in its row); values must already be canonical — the
- * sanitizer is the input boundary.
- */
 /**
  * Public theme payload. Unknown fields are allowed and stripped by `sanitizeIdpnTheme` (a
  * client may store extra branding in its row); values must already be canonical — the

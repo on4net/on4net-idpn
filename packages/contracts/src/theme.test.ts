@@ -5,6 +5,9 @@ import { describe, expect, it } from 'vitest';
 import {
   IDPN_BASE_THEME,
   IDPN_CONTRAST_PAIRS,
+  IDPN_DERIVED_SURFACES,
+  IDPN_DERIVED_TEXT,
+  effectiveColor,
   IDPN_THEME_COLOR_KEYS,
   IDPN_THEME_FONT_KEYS,
   MIN_CONTRAST_RATIO,
@@ -288,6 +291,37 @@ describe('theme contrast guard', () => {
     expect(sanitizeIdpnTheme({ primary: '#ffffff', primaryForeground: '#ffffff' })).toEqual({});
   });
 
+  it('drops a destructive colour that is unreadable as text or behind the button label', () => {
+    // 1.16:1 on white; the built-in is 4.76.
+    expect(sanitizeIdpnTheme({ destructive: '#eeeeee' })).toEqual({});
+    // A white label on a white destructive surface is 1.00:1.
+    expect(
+      sanitizeIdpnTheme({
+        primary: '#0f766e',
+        primaryForeground: '#ffffff',
+        destructive: '#ffffff',
+      }),
+    ).toEqual({ primary: '#0f766e', primaryForeground: '#ffffff' });
+    // A readable destructive colour is kept.
+    expect(sanitizeIdpnTheme({ destructive: '#b91c1c' })).toEqual({ destructive: '#b91c1c' });
+    // The dark half is measured against the dark built-ins.
+    expect(sanitizeIdpnTheme({ dark: { destructive: '#222222' } }).dark).toBeUndefined();
+  });
+
+  it('drops a client surface that makes the fixed text tokens unreadable', () => {
+    // `placeholder:text-muted-foreground` over a mid-grey page background is ~1.04:1.
+    expect(sanitizeIdpnTheme({ background: '#666666', foreground: '#ffffff' })).toEqual({});
+    // Inherited `foreground` on a tinted `muted` surface (inactive tab) is 1.00:1.
+    expect(
+      sanitizeIdpnTheme({ background: '#111111', foreground: '#ffffff', muted: '#ffffff' }),
+    ).toEqual({ background: '#111111', foreground: '#ffffff' });
+    // Secondary and accent surfaces are held to the same standard.
+    expect(sanitizeIdpnTheme({ secondary: '#000000' })).toEqual({});
+    expect(sanitizeIdpnTheme({ accent: '#000000' })).toEqual({});
+    // A light, readable surface still passes.
+    expect(sanitizeIdpnTheme({ muted: '#f1f5f9' })).toEqual({ muted: '#f1f5f9' });
+  });
+
   it('resolves every supported colour syntax and rejects the rest', () => {
     // rgb with percentage channels and an alpha channel.
     expect(resolveThemeColor('rgb(100% 0% 0% / 50%)')).toMatchObject({ r: 1, g: 0, b: 0 });
@@ -335,7 +369,10 @@ describe('theme contrast guard', () => {
     for (const mode of ['light', 'dark'] as const) {
       const base = IDPN_BASE_THEME[mode];
       for (const [foregroundKey, backgroundKey] of IDPN_CONTRAST_PAIRS) {
-        const ratio = contrastRatio(base[foregroundKey], base[backgroundKey]);
+        const ratio = contrastRatio(
+          effectiveColor(foregroundKey, {}, base, mode),
+          effectiveColor(backgroundKey, {}, base, mode),
+        );
         expect(ratio, `${mode} ${foregroundKey}/${backgroundKey}`).not.toBeNull();
         expect(ratio ?? 0, `${mode} ${foregroundKey}/${backgroundKey}`).toBeGreaterThanOrEqual(
           MIN_CONTRAST_RATIO,
@@ -350,23 +387,55 @@ describe('theme contrast guard', () => {
       new URL('../../../web/src/styles/globals.css', import.meta.url),
       'utf8',
     );
-    const value = (name: string): string => {
-      const match = new RegExp(`--${name}:\\s*([^;]+);`).exec(css);
+    // Declarations are read from the rule that renders them, not from the first match in the
+    // file: the fixed `*-foreground` literals live in `.idpn-root` (light) and `.idpn-root.dark`.
+    const rules = { light: '.idpn-root {', dark: '.idpn-root.dark {' } as const;
+    const block = (opening: string): string => {
+      const start = css.indexOf(opening);
+      if (start === -1) {
+        throw new Error(`missing rule ${opening}`);
+      }
+      return css.slice(start, css.indexOf('}', start));
+    };
+    const declared = (rule: string, name: string): string => {
+      const match = new RegExp(`--${name}:\\s*([^;]+);`).exec(rule);
       if (match?.[1] === undefined) {
         throw new Error(`missing --${name}`);
       }
       return match[1].trim();
     };
+    const kebab = (key: string): string => key.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
     for (const mode of ['light', 'dark'] as const) {
-      const prefix = mode === 'dark' ? 'idpn-dark-' : 'idpn-';
-      const base = IDPN_BASE_THEME[mode];
-      for (const [key, expected] of Object.entries(base)) {
-        if (key.endsWith('Foreground') && !(key === 'foreground' || key === 'primaryForeground')) {
-          continue;
-        }
-        const cssName =
-          key === 'primaryForeground' ? `${prefix}primary-foreground` : `${prefix}${key}`;
-        expect(value(cssName), cssName).toBe(expected);
+      for (const [key, expected] of Object.entries(IDPN_BASE_THEME[mode])) {
+        const cssName = `${mode === 'dark' ? 'idpn-dark-' : 'idpn-'}${kebab(key)}`;
+        expect(declared(block(rules.light), cssName), cssName).toBe(expected);
+      }
+    }
+    // The text tokens that follow `foreground` are declared once, in the light rule, and the
+    // dark rule must not re-introduce a fixed literal for any of them.
+    const light = block(rules.light);
+    const dark = block(rules.dark);
+    for (const [key, alpha] of Object.entries(IDPN_DERIVED_TEXT)) {
+      const name = kebab(key);
+      expect(declared(light, name), `--${name}`).toBe(
+        alpha === 1
+          ? 'var(--foreground)'
+          : `color-mix(in srgb, var(--foreground) ${alpha * 100}%, transparent)`,
+      );
+      expect(dark, `.dark must not pin --${name}`).not.toContain(`--${name}:`);
+    }
+    // Unset surfaces are mixed from the effective background and foreground.
+    for (const mode of ['light', 'dark'] as const) {
+      for (const [key, share] of Object.entries(IDPN_DERIVED_SURFACES[mode])) {
+        const name = kebab(key);
+        const fallback =
+          share === 0
+            ? 'var(--background)'
+            : `color-mix(in srgb, var(--background) ${100 - share * 100}%, var(--foreground))`;
+        const prefix = mode === 'dark' ? 'idpn-dark-' : 'idpn-';
+        expect(declared(mode === 'dark' ? dark : light, name), `${mode} --${name}`).toBe(
+          `var(--${prefix}${name}, ${fallback})`,
+        );
       }
     }
   });

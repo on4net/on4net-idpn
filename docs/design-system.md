@@ -103,11 +103,25 @@ packages/ui/                  # یا web/src/components/ui
 
 - استفاده از رنگ‌های پیش‌فرض Tailwind (`bg-red-500`, `text-slate-500`) ممنوع است.
 - فقط توکن‌های shadcn یا `--idpn-*` استفاده شود.
-- **کنتراست WCAG AA (۴٫۵:۱) اجباری است.** `sanitizeIdpnTheme` جفت‌های
-  `foreground`/`background` و `primaryForeground`/`primary` (و معادل‌های `dark`) را با
-  `contrastRatio` می‌سنجد؛ جفتی که به ۴٫۵:۱ نرسد کنار گذاشته می‌شود و پالت داخلی
-  (`IDPN_BASE_THEME`) اعمال می‌شود. پالت داخلی در هر دو حالت روشن و تاریک با تست واحد
-  تأیید می‌شود.
+- **کنتراست WCAG AA (۴٫۵:۱) اجباری است.** `sanitizeIdpnTheme` همهٔ جفت‌های
+  `IDPN_CONTRAST_PAIRS` را (در هر دو حالت روشن و `dark`) با `contrastRatio` می‌سنجد:
+  `foreground`/`background`، `primaryForeground`/`primary`، متن کارت/ثانویه/تأکید روی سطح خودش،
+  `destructive` به‌عنوان متن روی `background` و `card` و `primaryForeground` روی `destructive`
+  (این سه جفت فقط وقتی اعمال می‌شوند که کلاینت خودش `destructive` داده باشد؛ قرمز داخلی فقط
+  روی صفحهٔ داخلی تضمین‌شده است، پس کلاینتی با صفحهٔ تیره باید `destructive` مناسب هم بدهد)،
+  `mutedForeground` روی `background`/`card`/`muted`، و `foreground` روی `muted`/`secondary`/
+  `accent`. جفتی که به ۴٫۵:۱ نرسد، یا قابل‌سنجش نباشد (مثلاً پس‌زمینهٔ نیمه‌شفاف)، کنار گذاشته
+  می‌شود: اعضای قابل‌تنظیم آن جفت (معمولاً همان سطحی که کلاینت داده) حذف و پالت داخلی
+  (`IDPN_BASE_THEME`) اعمال می‌شود.
+- متن‌هایی که ثابت نیستند از `foreground` مؤثر مشتق می‌شوند (`IDPN_DERIVED_TEXT`):
+  `--card-foreground`، `--secondary-foreground` و `--accent-foreground` همان `--foreground`
+  هستند و `--muted-foreground` برابر `color-mix(in srgb, var(--foreground) 75%, transparent)`
+  است. به همین دلیل تم تاریک کلاینت روی حالت روشن، متن ثابت تیره روی پس‌زمینهٔ تیره باقی نمی‌گذارد.
+  تست آینه‌ای مقدارهای `globals.css` را با ثابت‌های قرارداد مقایسه می‌کند (قاعدهٔ `.idpn-root` و
+  `.idpn-root.dark` جدا خوانده می‌شوند).
+- `IdpnRoot` تنها در صورتی `dark` می‌گیرد که صفحهٔ میزبان آن را بدهد؛ سطوح محصول (Hosted
+  UI و MFE) فعلاً فقط حالت روشن را رندر می‌کنند و حالت تاریک در لایهٔ قرارداد، `IdpnRoot` و
+  تست‌های visual پوشش داده می‌شود.
 - Dark Mode از طریق کلاس `.dark` و توکن‌های Semantic؛ بازنویسی هر کلاینت زیر `dark` می‌آید.
 
 ## 5. تم هر اپلیکیشن

@@ -72,12 +72,8 @@
   /* Local defaults; inline `--idpn-*` values from the client theme win over these. */
   --idpn-background: oklch(1 0 0);
   --idpn-foreground: oklch(0.145 0 0);
-  --idpn-card: oklch(1 0 0);
   --idpn-primary: oklch(0.48 0.11 190);
   --idpn-primary-foreground: oklch(0.99 0 0);
-  --idpn-secondary: oklch(0.97 0 0);
-  --idpn-muted: oklch(0.97 0 0);
-  --idpn-accent: oklch(0.97 0 0);
   --idpn-destructive: oklch(0.577 0.245 27.325);
   --idpn-border: oklch(0.922 0 0);
   --idpn-input: oklch(0.922 0 0);
@@ -86,12 +82,8 @@
 
   --idpn-dark-background: oklch(0.145 0 0);
   --idpn-dark-foreground: oklch(0.985 0 0);
-  --idpn-dark-card: oklch(0.205 0 0);
   --idpn-dark-primary: oklch(0.72 0.12 190);
   --idpn-dark-primary-foreground: oklch(0.205 0 0);
-  --idpn-dark-secondary: oklch(0.269 0 0);
-  --idpn-dark-muted: oklch(0.269 0 0);
-  --idpn-dark-accent: oklch(0.371 0 0);
   --idpn-dark-destructive: oklch(0.704 0.191 22.216);
   --idpn-dark-border: oklch(1 0 0 / 12%);
   --idpn-dark-input: oklch(1 0 0 / 18%);
@@ -99,17 +91,23 @@
 
   --background: var(--idpn-background);
   --foreground: var(--idpn-foreground);
-  --card: var(--idpn-card);
-  --card-foreground: oklch(0.145 0 0);
+  --card: var(--idpn-card, var(--background));
+  /*
+   * Surfaces the client did not set are mixed from the effective background and foreground
+   * (`IDPN_DERIVED_SURFACES`), and text tokens follow the effective `foreground`, so a client that paints a dark page (or any
+   * tinted surface) never leaves a fixed dark literal on it. The 75 % share for muted text is
+   * mirrored by `IDPN_DERIVED_TEXT` in packages/contracts/src/theme.ts, which the contrast guard
+   * measures (card #53).
+   */
+  --card-foreground: var(--foreground);
   --primary: var(--idpn-primary);
   --primary-foreground: var(--idpn-primary-foreground);
-  --secondary: var(--idpn-secondary);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: var(--idpn-muted);
-  /* 0.52 keeps muted text at AA (4.34 → 5.05) on the muted surface (card #53 finding 1). */
-  --muted-foreground: oklch(0.52 0 0);
-  --accent: var(--idpn-accent);
-  --accent-foreground: oklch(0.205 0 0);
+  --secondary: var(--idpn-secondary, color-mix(in srgb, var(--background) 96%, var(--foreground)));
+  --secondary-foreground: var(--foreground);
+  --muted: var(--idpn-muted, color-mix(in srgb, var(--background) 96%, var(--foreground)));
+  --muted-foreground: color-mix(in srgb, var(--foreground) 75%, transparent);
+  --accent: var(--idpn-accent, color-mix(in srgb, var(--background) 96%, var(--foreground)));
+  --accent-foreground: var(--foreground);
   --destructive: var(--idpn-destructive);
   --border: var(--idpn-border);
   --input: var(--idpn-input);
@@ -129,16 +127,12 @@
 .idpn-root.dark {
   --background: var(--idpn-dark-background);
   --foreground: var(--idpn-dark-foreground);
-  --card: var(--idpn-dark-card);
-  --card-foreground: oklch(0.985 0 0);
+  --card: var(--idpn-dark-card, color-mix(in srgb, var(--background) 93%, var(--foreground)));
   --primary: var(--idpn-dark-primary);
   --primary-foreground: var(--idpn-dark-primary-foreground);
-  --secondary: var(--idpn-dark-secondary);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: var(--idpn-dark-muted);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: var(--idpn-dark-accent);
-  --accent-foreground: oklch(0.985 0 0);
+  --secondary: var(--idpn-dark-secondary, color-mix(in srgb, var(--background) 85%, var(--foreground)));
+  --muted: var(--idpn-dark-muted, color-mix(in srgb, var(--background) 85%, var(--foreground)));
+  --accent: var(--idpn-dark-accent, color-mix(in srgb, var(--background) 72%, var(--foreground)));
   --destructive: var(--idpn-dark-destructive);
   --border: var(--idpn-dark-border);
   --input: var(--idpn-dark-input);
