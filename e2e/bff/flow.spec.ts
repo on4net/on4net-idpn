@@ -1,7 +1,12 @@
 import { expect, test, type Cookie } from '@playwright/test';
 
 const identifier = process.env.E2E_USER_IDENTIFIER ?? 'user@example.com';
-const password = process.env.E2E_USER_PASSWORD ?? 'e2e-user-password-123';
+const password = process.env.E2E_USER_PASSWORD ?? '';
+if (password === '') {
+  throw new Error(
+    'E2E_USER_PASSWORD is minted by playwright.config.ts; run through `pnpm test:e2e`',
+  );
+}
 
 const bffSessionCookie = (cookies: Cookie[]) =>
   cookies.find((cookie) => cookie.name === 'bff_session');

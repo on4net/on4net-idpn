@@ -298,6 +298,94 @@ describe('supply-chain gate', () => {
     expect(result.code).toBe(0);
     expect(result.stderr).toBe('');
   });
+
+  describe('--licenses against a fixture lockfile (#71)', () => {
+    const lockfile = (snapshotLines: string[]): string =>
+      [
+        "lockfileVersion: '9.0'",
+        'importers:',
+        '  .:',
+        '    dependencies:',
+        '      a:',
+        '        specifier: 1.0.0',
+        '        version: 1.0.0',
+        'snapshots:',
+        ...snapshotLines,
+        '',
+      ].join('\n');
+
+    const runLicenses = async (
+      inventory: Record<string, Array<{ name: string; versions: string[] }>>,
+    ): Promise<{ code: number; stderr: string }> => {
+      const file = join(directory, 'inventory.json');
+      await writeFile(file, JSON.stringify(inventory));
+      try {
+        await execFileAsync(process.execPath, [
+          join(REPO_ROOT, 'tools/check-supply-chain.mjs'),
+          '--root',
+          directory,
+          '--licenses',
+          '--inventory',
+          file,
+        ]);
+        return { code: 0, stderr: '' };
+      } catch (error) {
+        const failed = error as { code?: number; stderr?: string };
+        return { code: failed.code ?? 1, stderr: String(failed.stderr ?? '') };
+      }
+    };
+
+    const setup = async (snapshotLines: string[]): Promise<void> => {
+      await writeWorkspace({ name: 'fixture', dependencies: { a: '1.0.0' } });
+      await writeFile(join(directory, 'pnpm-lock.yaml'), lockfile(snapshotLines));
+    };
+
+    const chain = ['  a@1.0.0:', '    dependencies:', '      b: 1.0.0', '  b@1.0.0: {}'];
+
+    it('fails when a transitive dependency carries a non-allowlisted license', async () => {
+      await setup(chain);
+      const result = await runLicenses({
+        MIT: [{ name: 'a', versions: ['1.0.0'] }],
+        'GPL-3.0': [{ name: 'b', versions: ['1.0.0'] }],
+      });
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain('unapproved license "GPL-3.0" is shipped by: b');
+    });
+
+    it('passes when the whole closure is allowlisted', async () => {
+      await setup(chain);
+      const result = await runLicenses({
+        MIT: [
+          { name: 'a', versions: ['1.0.0'] },
+          { name: 'b', versions: ['1.0.0'] },
+        ],
+      });
+      expect(result.code).toBe(0);
+    });
+
+    it('fails when a shipped package cannot be resolved in the lockfile', async () => {
+      await setup(['  a@1.0.0:', '    dependencies:', '      missing: 2.0.0']);
+      const result = await runLicenses({ MIT: [{ name: 'a', versions: ['1.0.0'] }] });
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain('cannot resolve');
+    });
+
+    it('fails when the graph walk stopped at the first level', async () => {
+      await setup(['  a@1.0.0: {}']);
+      const result = await runLicenses({ MIT: [{ name: 'a', versions: ['1.0.0'] }] });
+      expect(result.code).toBe(1);
+      expect(result.stderr).toContain('the lockfile graph was not walked');
+    });
+  });
+
+  it('reports a missing workspace directory instead of crashing', async () => {
+    await writeFile(join(directory, 'pnpm-workspace.yaml'), "packages:\n  - 'nowhere/*'\n");
+    await writeFile(join(directory, 'package.json'), JSON.stringify({ name: 'fixture' }));
+
+    const result = await runGate();
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain('points at a directory that does not exist');
+  });
 });
 
 describe('restore safety', () => {

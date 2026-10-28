@@ -3,7 +3,12 @@ import { createHash, randomBytes } from 'node:crypto';
 import { expect, test } from '@playwright/test';
 
 const identifier = process.env.E2E_USER_IDENTIFIER ?? 'user@example.com';
-const password = process.env.E2E_USER_PASSWORD ?? 'e2e-user-password-123';
+const password = process.env.E2E_USER_PASSWORD ?? '';
+if (password === '') {
+  throw new Error(
+    'E2E_USER_PASSWORD is minted by playwright.config.ts; run through `pnpm test:e2e`',
+  );
+}
 const idpUrl = process.env.E2E_IDP_URL ?? 'http://127.0.0.1:3100';
 const secondClientId = process.env.E2E_SECOND_CLIENT_ID ?? 'sample-bff-b';
 const secondRedirectUri =

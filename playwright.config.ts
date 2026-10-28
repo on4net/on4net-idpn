@@ -33,6 +33,10 @@ const bffClientId = process.env.E2E_BFF_CLIENT_ID ?? 'sample-bff';
  */
 const randomSecret = (prefix: string): string =>
   `${prefix}-${randomBytes(24).toString('base64url')}`;
+// A server left over from an earlier run was seeded with that run's random values, so it can only
+// be reused when the caller pinned the credentials themselves (card #71 finding 6).
+const credentialsPinned =
+  process.env.E2E_BFF_CLIENT_SECRET !== undefined && process.env.E2E_USER_PASSWORD !== undefined;
 const bffClientSecret = process.env.E2E_BFF_CLIENT_SECRET ?? randomSecret('e2e-bff');
 const e2eUserIdentifier = process.env.E2E_USER_IDENTIFIER ?? 'user@example.com';
 const e2eUserPassword = process.env.E2E_USER_PASSWORD ?? randomSecret('e2e-user');
@@ -111,7 +115,7 @@ export default defineConfig({
     {
       command: 'pnpm --filter @idpn/api dev',
       url: `${apiURL}/healthz`,
-      reuseExistingServer: !isCI,
+      reuseExistingServer: !isCI && credentialsPinned,
       timeout: 120_000,
       env: {
         NODE_ENV: 'test',
@@ -129,7 +133,7 @@ export default defineConfig({
       // `web/host` loads the real `dist-wc/web-component.js`, not the TS source.
       command: 'pnpm --filter @idpn/web run dev:e2e',
       url: webURL,
-      reuseExistingServer: !isCI,
+      reuseExistingServer: !isCI && credentialsPinned,
       timeout: 180_000,
       env: {
         VITE_PORT: String(WEB_PORT),
@@ -147,7 +151,7 @@ export default defineConfig({
     {
       command: 'pnpm --filter @idpn/web dev:host',
       url: hostURL,
-      reuseExistingServer: !isCI,
+      reuseExistingServer: !isCI && credentialsPinned,
       timeout: 180_000,
       env: {
         // Host configuration is build-time only; the E2E suite asserts these values are
@@ -167,7 +171,7 @@ export default defineConfig({
       // Seeds the sample BFF client and a login credential, then starts the sample app.
       command: 'pnpm --filter @idpn/api run seed:e2e && pnpm --filter @idpn/example-bff run dev',
       url: `${bffURL}/healthz`,
-      reuseExistingServer: !isCI,
+      reuseExistingServer: !isCI && credentialsPinned,
       timeout: 180_000,
       env: {
         DATABASE_URL: databaseURL,

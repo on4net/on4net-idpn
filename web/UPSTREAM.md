@@ -36,7 +36,7 @@
 1. **Preflight غیرفعال است.** فقط `tailwindcss/utilities.css` ایمپورت می‌شود (`tailwindcss/theme.css` هم وارد نمی‌شود، چون `:root, :host` را به سند میزبان تزریق می‌کند) تا CSS
    به Host نشت نکند (`docs/spikes/shadcn-mfe-spike.md`).
 2. **توکن‌ها روی `.idpn-root`** تعریف می‌شوند، نه `:root`؛ بنابراین چند MFE/تم می‌توانند همزیستی کنند.
-3. **همه Portalها** باید `container` داخل `.idpn-root` بگیرند (Dialog/Select).
+3. **Portalها** (Dialog/Select) مقصد را خودشان از `usePortalScope()` (داخل `.idpn-root`) حل می‌کنند؛ `container` فقط برای Override صریح است و هرگز `null` پاس نمی‌شود (`docs/design-system.md`).
 4. به‌جای پکیج‌های جداگانه `@radix-ui/react-*` از پکیج یکپارچه `radix-ui` استفاده می‌شود.
 5. **قرارداد جهت:** ریشه‌ها `DirectionProvider` دارند؛ `DialogContent` جهت را روی Overlay پورتال‌شده تکرار
    می‌کند تا سطوح standalone (Admin) هم در RTL درست بمانند. جزئیات Audit در `docs/rtl-audit.md`.

@@ -35,12 +35,17 @@ an opaque, `HttpOnly` session id; every token lives in the server-side session.
 
 The IdP must be reachable, and the client must be registered with the callback URI:
 
+The seed refuses committed credentials, so choose the two values first; the BFF reuses the secret.
+The supported end-to-end path is `pnpm test:e2e`, which mints throwaway values for you.
+
 ```powershell
+$env:E2E_BFF_CLIENT_SECRET='choose-a-long-random-secret'
+$env:E2E_USER_PASSWORD='choose-a-long-random-password'
 pnpm --filter @idpn/api run seed:e2e          # registers `sample-bff` + `user@example.com`
 $env:IDP_URL='http://127.0.0.1:3100'
 $env:HOSTED_UI_URL='http://127.0.0.1:5180'
 $env:BFF_CLIENT_ID='sample-bff'
-$env:BFF_CLIENT_SECRET='e2e-bff-client-secret'
+$env:BFF_CLIENT_SECRET=$env:E2E_BFF_CLIENT_SECRET
 $env:BFF_PORT='3200'
 pnpm --filter @idpn/example-bff run dev
 ```

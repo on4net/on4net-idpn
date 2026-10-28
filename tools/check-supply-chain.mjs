@@ -7,7 +7,10 @@
  *  3. the approved license allowlist must cover every **production** dependency
  *     (dev-only tooling is recorded in the SBOM but never shipped).
  *
- * Usage: node tools/check-supply-chain.mjs [--licenses]
+ * Usage: node tools/check-supply-chain.mjs [--licenses] [--root <dir>] [--inventory <file>]
+ *
+ * `--inventory` reads the `pnpm licenses list --json` document from a file, so the licence verdict
+ * can be tested against a fixture lockfile without a real install.
  */
 import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
@@ -149,9 +152,9 @@ if (problems.length > 0) {
 }
 
 console.log(
-  `Supply-chain check passed: ${PINNED.length} pinned packages, react ${[
-    ...reactVersions,
-  ].join('/')}, ${manifests.length} manifests${
+  `Supply-chain check passed: ${PINNED.length} pinned packages, react ${[...reactVersions].join(
+    '/',
+  )}, ${manifests.length} manifests${
     process.argv.includes('--licenses') ? `, ${productionClosure().size} shipped packages` : ''
   }`,
 );
@@ -174,7 +177,14 @@ function discoverManifests() {
     const normalised = String(pattern).replace(/\/+$/, '');
     if (normalised.endsWith('*')) {
       const parent = join(ROOT, normalised.slice(0, -1));
-      for (const entry of readdirSync(parent, { withFileTypes: true })) {
+      let entries;
+      try {
+        entries = readdirSync(parent, { withFileTypes: true });
+      } catch {
+        problems.push(`workspace entry "${normalised}" points at a directory that does not exist`);
+        continue;
+      }
+      for (const entry of entries) {
         if (entry.isDirectory() && !entry.name.startsWith('.')) {
           // Only directories that are really workspace packages.
           const candidate = join(parent, entry.name, 'package.json');
@@ -291,15 +301,24 @@ export function productionClosure(lockfilePath = join(ROOT, 'pnpm-lock.yaml')) {
 
   if (unresolved.size > 0) {
     problems.push(
-      `cannot resolve ${unresolved.size} shipped package(s) in the lockfile: ${[
-        ...unresolved,
-      ].join(', ')}`,
+      `cannot resolve ${unresolved.size} shipped package(s) in the lockfile: ${[...unresolved].join(
+        ', ',
+      )}`,
     );
   }
   return seen;
 }
 
 function readLicenseInventory() {
+  const inventoryArgument = process.argv.indexOf('--inventory');
+  if (inventoryArgument !== -1) {
+    try {
+      return JSON.parse(readFileSync(resolve(process.argv[inventoryArgument + 1] ?? ''), 'utf8'));
+    } catch (error) {
+      console.error(`supply-chain: could not read the license inventory file: ${error.message}`);
+      process.exit(1);
+    }
+  }
   try {
     const execPath = process.env.npm_execpath;
     const options = {
