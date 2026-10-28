@@ -1,5 +1,6 @@
 import type { PrismaClient } from '../generated/prisma/client.js';
 import { recordAuditEvent } from '../audit/prisma-audit.js';
+import { recordFailedCredential } from '../login/lockout-store.js';
 import type {
   CreateTotpFactorResult,
   MfaFactorRecord,
@@ -357,15 +358,9 @@ export function createPrismaMfaRepository(
       await recordAuditEvent(prisma, event);
     },
 
-    async registerFailedAttempt(userId, attempts, lockedUntil) {
-      await prisma.user.update({
-        where: { id: userId },
-        data: {
-          failedLoginCount: attempts,
-          // Always written so an elapsed lock is cleared and can re-arm (#18).
-          lockedUntil,
-        },
-      });
+    async registerFailedAttempt(userId) {
+      // One atomic statement shared with the password path (see `lockout-store.ts`).
+      await recordFailedCredential(prisma, userId);
     },
 
     async resolveMfaPolicy({ clientId, loginContext }): Promise<MfaPolicy> {

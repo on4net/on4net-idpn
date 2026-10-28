@@ -1,5 +1,6 @@
 import type { PrismaClient } from '../generated/prisma/client.js';
 import { recordAuditEvent } from '../audit/prisma-audit.js';
+import { recordFailedCredential } from './lockout-store.js';
 import type { LoginUserRecord, LoginUserRepository } from './login-types.js';
 
 /** Prisma-backed login lookups: identifier resolution, lock counters and last-login time. */
@@ -82,17 +83,12 @@ export function createPrismaLoginRepository(prisma: PrismaClient): LoginUserRepo
       return { ...record, hasConfirmedFactor: mfaFactors.length > 0 };
     },
 
-    async registerFailedAttempt(userId, attempts, lockedUntil) {
-      await prisma.user.update({
-        where: { id: userId },
-        data: {
-          failedLoginCount: attempts,
-          // The lock lives in `locked_until` only. Writing `status = 'locked'` made the lock
-          // permanent, because the login route refuses any non-active account.
-          // Always written: an elapsed lock must be cleared or the counter restarts forever (#18).
-          lockedUntil,
-        },
-      });
+    async registerFailedAttempt(userId) {
+      // Atomic in the database (the route's snapshot-based `attempts`/`lockedUntil` are not
+      // trusted): parallel guesses cannot undercount, and an elapsed lock is cleared so it
+      // re-arms (#18). The lock lives in `locked_until` only; `status = 'locked'` would be
+      // permanent because the login route refuses any non-active account.
+      await recordFailedCredential(prisma, userId);
     },
 
     async registerSuccessfulLogin(userId, at) {

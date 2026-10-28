@@ -7,12 +7,7 @@ import { Client } from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { PrismaClient } from '../src/generated/prisma/client.js';
-import {
-  LOCK_DURATION_MS,
-  MAX_FAILED_ATTEMPTS,
-  isAccountLocked,
-  nextFailureState,
-} from '../src/login/lockout.js';
+import { LOCK_DURATION_MS, MAX_FAILED_ATTEMPTS, isAccountLocked } from '../src/login/lockout.js';
 import { createPrismaLoginRepository } from '../src/login/prisma-repository.js';
 import { createPrismaMfaRepository } from '../src/mfa/prisma-repository.js';
 
@@ -73,25 +68,20 @@ const makeUser = (name: string) =>
     },
   });
 
-/** One wrong credential exactly as the routes do it: read, compute, persist. */
-async function fail(
-  userId: string,
-  at: Date,
-  persist: (id: string, attempts: number, until: Date | null) => Promise<void>,
-): Promise<void> {
-  const row = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
-  const next = nextFailureState(row, at);
-  await persist(userId, next.attempts, next.lockedUntil);
-}
+type Persist = (id: string, attempts: number, until: Date | null) => Promise<void>;
+const required = (persist: Persist | undefined): Persist => {
+  if (persist === undefined) {
+    throw new Error('repository has no registerFailedAttempt');
+  }
+  return persist;
+};
 
-describe('lockout re-arms after the first lock expires (card #18)', () => {
-  type Persist = (id: string, attempts: number, until: Date | null) => Promise<void>;
-  const required = (persist: Persist | undefined): Persist => {
-    if (persist === undefined) {
-      throw new Error('repository has no registerFailedAttempt');
-    }
-    return persist;
-  };
+/** The route-computed arguments are ignored by the stores; the database applies the policy. */
+const fail = (persist: Persist, userId: string): Promise<void> => persist(userId, 0, null);
+
+const state = (userId: string) => prisma.user.findUniqueOrThrow({ where: { id: userId } });
+
+describe('account lockout is atomic and re-arms after expiry (card #18)', () => {
   const stores: Record<string, () => Persist> = {
     login: () => required(createPrismaLoginRepository(prisma).registerFailedAttempt),
     mfa: () => required(createPrismaMfaRepository(prisma).registerFailedAttempt),
@@ -101,21 +91,37 @@ describe('lockout re-arms after the first lock expires (card #18)', () => {
     it(`${name}: lock, expiry, then five more failures lock the account again`, async () => {
       const persist = pick();
       const user = await makeUser(`lock-${name}`);
-      const start = new Date();
 
       for (let i = 0; i < MAX_FAILED_ATTEMPTS; i += 1) {
-        await fail(user.id, start, persist);
+        await fail(persist, user.id);
       }
-      const first = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
-      expect(isAccountLocked(first.lockedUntil, start)).toBe(true);
+      const first = await state(user.id);
+      expect(isAccountLocked(first.lockedUntil, new Date())).toBe(true);
 
-      const afterExpiry = new Date(start.getTime() + LOCK_DURATION_MS + 1_000);
+      // A failure during the lock neither counts nor slides the expiry.
+      await fail(persist, user.id);
+      const during = await state(user.id);
+      expect(during.lockedUntil?.getTime()).toBe(first.lockedUntil?.getTime());
+      expect(during.failedLoginCount).toBe(first.failedLoginCount);
+
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { lockedUntil: new Date(Date.now() - LOCK_DURATION_MS) },
+      });
       for (let i = 0; i < MAX_FAILED_ATTEMPTS; i += 1) {
-        await fail(user.id, afterExpiry, persist);
+        await fail(persist, user.id);
       }
-      const second = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
-      expect(isAccountLocked(second.lockedUntil, afterExpiry)).toBe(true);
-      expect(second.lockedUntil!.getTime()).toBeGreaterThan(first.lockedUntil!.getTime());
+      const second = await state(user.id);
+      expect(isAccountLocked(second.lockedUntil, new Date())).toBe(true);
+    });
+
+    it(`${name}: parallel guesses cannot undercount the failures`, async () => {
+      const persist = pick();
+      const user = await makeUser(`race-${name}`);
+      await Promise.all(Array.from({ length: MAX_FAILED_ATTEMPTS }, () => fail(persist, user.id)));
+      const row = await state(user.id);
+      expect(row.failedLoginCount).toBe(MAX_FAILED_ATTEMPTS);
+      expect(isAccountLocked(row.lockedUntil, new Date())).toBe(true);
     });
   }
 });
