@@ -25,6 +25,7 @@ export const ALLOWED_NAMESPACES = [
   'members',
   'mfa',
   'sessions',
+  'setup',
 ];
 
 export const REQUIRED_NAMESPACES = [

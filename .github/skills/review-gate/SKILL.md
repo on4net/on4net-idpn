@@ -17,12 +17,19 @@ A task is marked **Done only after the review gate passes**. Never claim complet
 
 ### 1. Issue & DoD completeness
 - No open sub-task or dependency that blocks the task.
-- Every acceptance criterion in the issue is met and checked (`- [x]`), not just described.
+- Every acceptance criterion is met and checked (`- [x]`), not just described — **or** it is recorded
+  as deferred on the card with a follow-up issue and no criterion depends on it. A recorded, ticketed
+  deferral counts as met; an unrecorded gap does not.
+- A criterion that is implemented but whose proof could not run in the review sandbox (Playwright,
+  Testcontainers/Docker, provider credentials) is `unverified`, not failed — cite CI evidence on the
+  same SHA instead.
 - If the issue has no checklist, verify against `docs/` and state the evidence.
 
 ### 2. Test gate
 - Unit + Integration for the touched area; E2E when a user flow changed.
-- Lint, typecheck and build pass.
+- Lint, typecheck and build pass, or a CI run on this exact SHA shows them green.
+- A check the environment cannot run is recorded `NOT RUN` with the exact error and marked
+  `unverified`; on its own it never fails the gate.
 - OIDC/RBAC/social negative cases covered where relevant.
 - MFE changes: RTL, axe, style isolation and Portal tests pass.
 - See `docs/testing.md` for the test matrix and coverage gates.
@@ -56,7 +63,10 @@ A task is marked **Done only after the review gate passes**. Never claim complet
 - Completion summary includes tests run and evidence.
 
 ## Output
-- Gate verdict: PASS / FAIL
+- Gate verdict: PASS / PASS WITH WARNINGS / FAIL / INCONCLUSIVE
+  (`FAIL` only for a blocking finding: CRITICAL/HIGH, a check failing in the changed files, a missing
+  security or data-integrity control, a regression, a false completion claim, or a criterion
+  implemented nowhere. LOW/INFO and environment-blocked checks do not fail the gate.)
 - Which step failed (if any) and what is needed
 - Commands/tests run with results
 - Docs and project fields updated

@@ -639,3 +639,14 @@ model SigningKey {
   @@index([status])
   @@map("signing_keys")
 }
+
+/// Singleton install marker (migration 0020). The constant-true primary key makes a second row
+/// impossible, so the install wizard can only ever complete once.
+model SystemInstall {
+  installed   Boolean  @id @default(true)
+  installedAt DateTime @default(now()) @map("installed_at") @db.Timestamptz(6)
+  installedBy String?  @map("installed_by") @db.Uuid
+  source      String   @db.VarChar(16)
+
+  @@map("system_install")
+}

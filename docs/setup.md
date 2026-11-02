@@ -56,25 +56,26 @@ Copy-Item .env.example .env
 سپس مقادیر واقعی را در `.env` جایگزین کنید. `.env` در `.gitignore` است و **هرگز Commit نمی‌شود**؛
 فقط `.env.example` با مقادیر نمونه در مخزن نگهداری می‌شود.
 
-| متغیر                      | الزامی               | نمونه                                                 | توضیح                                                             |
-| -------------------------- | -------------------- | ----------------------------------------------------- | ----------------------------------------------------------------- |
-| `NODE_ENV`                 | خیر                  | `development`                                         | یکی از `development`، `test`، `production`؛ پیش‌فرض `development` |
-| `PORT`                     | خیر                  | `6000`                                                | پورت سرور API؛ پیش‌فرض `6000`                                     |
-| `APP_URL`                  | **بله**              | `https://auth.example.com`                            | Issuer و Base URL سامانه                                          |
-| `VITE_APP_URL`             | **بله** (برای `web`) | `http://localhost:6000`                               | همان `APP_URL` که در Build فرانت‌اند قابل استفاده است             |
-| `VITE_PORT`                | خیر                  | `6001`                                                | پورت سرور توسعه/پیش‌نمایش Hosted UI؛ پیش‌فرض `6001`               |
-| `VITE_API_PROXY`           | خیر                  | `http://127.0.0.1:6000`                               | مقصد Proxy درخواست‌های API در حالت توسعه؛ پیش‌فرض از `PORT`       |
-| `ADMIN_URL`                | خیر                  | `https://admin.example.com`                           | آدرس پنل مدیریت                                                   |
-| `DATABASE_URL`             | **بله**              | `postgresql://…`                                      | اتصال PostgreSQL (باید `postgres://` یا `postgresql://` باشد)     |
-| `REDIS_URL`                | **بله**              | `redis://localhost:6379`                              | اتصال Redis (باید `redis://` یا `rediss://` باشد)                 |
-| `SESSION_SECRET`           | **بله**              | —                                                     | حداقل ۳۲ کاراکتر؛ امضای کوکی/CSRF                                 |
-| `SIGNING_KEY_REF`          | در production **بله** | `file:///var/lib/idpn/signing-keys.json`              | مرجع کلید امضا؛ در توسعه خالی می‌ماند؛ نبودنش در production باعث توقف راه‌اندازی می‌شود |
-| `MFE_PUBLIC_URL`           | خیر                  | `https://cdn.example.com/idpn-mfe`                    | آدرس پایه Remoteهای MFE                                           |
-| `MFE_ALLOWED_ORIGINS`      | خیر                  | `https://app-a.example.com,https://app-b.example.com` | فهرست Originهای مجاز Host (با کاما)                               |
-| `SOCIAL_CALLBACK_BASE_URL` | خیر                  | `https://auth.example.com`                            | پایه Callback سوشال                                               |
-| `SMTP_URL`                 | خیر                  | `smtp://localhost:1025`                               | ارسال ایمیل (به `smtp://` یا `smtps://` نیاز دارد)                |
-| `TRUSTED_PROXY_CIDRS`      | خیر                  | `10.0.0.0/8`                                          | CIDRهای پراکسی معتمد (با کاما)                                    |
-| `LOG_LEVEL`                | خیر                  | `info`                                                | `fatal`، `error`، `warn`، `info`، `debug`، `trace`، `silent`      |
+| متغیر                      | الزامی                | نمونه                                                 | توضیح                                                                                           |
+| -------------------------- | --------------------- | ----------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `NODE_ENV`                 | خیر                   | `development`                                         | یکی از `development`، `test`، `production`؛ پیش‌فرض `development`                               |
+| `PORT`                     | خیر                   | `6000`                                                | پورت سرور API؛ پیش‌فرض `6000`                                                                   |
+| `APP_URL`                  | **بله**               | `https://auth.example.com`                            | Issuer و Base URL سامانه                                                                        |
+| `VITE_APP_URL`             | **بله** (برای `web`)  | `http://localhost:6000`                               | همان `APP_URL` که در Build فرانت‌اند قابل استفاده است                                           |
+| `VITE_PORT`                | خیر                   | `6001`                                                | پورت سرور توسعه/پیش‌نمایش Hosted UI؛ پیش‌فرض `6001`                                             |
+| `VITE_API_PROXY`           | خیر                   | `http://127.0.0.1:6000`                               | مقصد Proxy درخواست‌های API در حالت توسعه؛ پیش‌فرض از `PORT`                                     |
+| `ADMIN_URL`                | خیر                   | `https://admin.example.com`                           | آدرس پنل مدیریت                                                                                 |
+| `DATABASE_URL`             | **بله**               | `postgresql://…`                                      | اتصال PostgreSQL (باید `postgres://` یا `postgresql://` باشد)                                   |
+| `REDIS_URL`                | **بله**               | `redis://localhost:6379`                              | اتصال Redis (باید `redis://` یا `rediss://` باشد)                                               |
+| `SESSION_SECRET`           | **بله**               | —                                                     | حداقل ۳۲ کاراکتر؛ امضای کوکی/CSRF                                                               |
+| `SIGNING_KEY_REF`          | در production **بله** | `file:///var/lib/idpn/signing-keys.json`              | مرجع کلید امضا؛ در توسعه خالی می‌ماند؛ نبودنش در production باعث توقف راه‌اندازی می‌شود         |
+| `MFE_PUBLIC_URL`           | خیر                   | `https://cdn.example.com/idpn-mfe`                    | آدرس پایه Remoteهای MFE                                                                         |
+| `MFE_ALLOWED_ORIGINS`      | خیر                   | `https://app-a.example.com,https://app-b.example.com` | فهرست Originهای مجاز Host (با کاما)                                                             |
+| `SOCIAL_CALLBACK_BASE_URL` | خیر                   | `https://auth.example.com`                            | پایه Callback سوشال                                                                             |
+| `SMTP_URL`                 | خیر                   | `smtp://localhost:1025`                               | ارسال ایمیل (به `smtp://` یا `smtps://` نیاز دارد)                                              |
+| `TRUSTED_PROXY_CIDRS`      | خیر                   | `10.0.0.0/8`                                          | CIDRهای پراکسی معتمد (با کاما)                                                                  |
+| `LOG_LEVEL`                | خیر                   | `info`                                                | `fatal`، `error`، `warn`، `info`، `debug`، `trace`، `silent`                                    |
+| `SETUP_TOKEN`              | خیر                   | —                                                     | توکن ویزارد نصب (حداقل ۳۲ کاراکتر)؛ خالی = توکن تصادفی در stdout؛ پس از نصب نادیده گرفته می‌شود |
 
 ### اعتبارسنجی
 
@@ -135,12 +136,12 @@ docker compose down -v        # حذف کامل همراه داده‌ها (تخ
 
 مدل داده با **Prisma 7** و PostgreSQL 16 پیاده‌سازی شده است.
 
-| مورد            | مسیر                                                                     |
-| --------------- | ------------------------------------------------------------------------ |
-| Schema          | `api/prisma/schema.prisma`                                               |
-| Migrationها     | `api/prisma/migrations/<name>/migration.sql` و `down.sql`                |
-| Seed            | `api/prisma/seed.ts`                                                     |
-| Client تولیدشده | `api/src/generated/prisma` (در Git نیست؛ با `pnpm install` تولید می‌شود) |
+| مورد            | مسیر                                                                                                |
+| --------------- | --------------------------------------------------------------------------------------------------- |
+| Schema          | `api/prisma/schema.prisma`                                                                          |
+| Migrationها     | `api/prisma/migrations/<name>/migration.sql` و `down.sql`                                           |
+| Seed            | `api/prisma/seed.ts`                                                                                |
+| Client تولیدشده | `api/src/generated/prisma` (در Git نیست؛ با `pnpm install` تولید می‌شود)                            |
 | تنظیم اتصال     | `api/prisma.config.ts` (`api/.env` را پیش از `.env` ریشه می‌خواند؛ بنابراین `api/.env` اولویت دارد) |
 
 ```powershell
@@ -171,6 +172,45 @@ pnpm --filter @idpn/api db:seed       # داده اولیه (Idempotent)
   جدول‌های `MfaFactor` و `ClientTranslation` در Migrationهای `0004` و `0008` اضافه شده‌اند.
 - **تست:** `pnpm --filter @idpn/api test` با Testcontainers روی PostgreSQL واقعی اجرا می‌شود و Migration، Rollback،
   اعمال مجدد و Idempotency مربوط به Seed را بررسی می‌کند (Docker باید فعال باشد).
+
+## 6.1 ویزارد نصب اولیه
+
+روی یک نمونهٔ نصب‌نشده، به‌جای `db:seed` و ساخت دستی کاربر می‌توان از ویزارد نصب استفاده کرد.
+ویزارد فقط تا لحظهٔ ساخته‌شدن اولین مدیر باز است و پس از آن برای همیشه از دسترس خارج می‌شود.
+
+```powershell
+pnpm --filter @idpn/api db:deploy   # فقط Migrationها؛ نیازی به db:seed نیست
+pnpm --filter @idpn/api dev         # یا start
+```
+
+API در صورت نصب‌نشده بودن، آدرس و توکن نصب را در stdout چاپ می‌کند:
+
+```
+  on4net IDPN is not installed yet.
+  Open http://localhost:6001/?action=setup
+  Setup token: <توکن یک‌بارمصرف>
+```
+
+| گام | کار                                                                |
+| --- | ------------------------------------------------------------------ |
+| ۱   | وارد کردن توکن نصب (اثبات دسترسی به سرور)                          |
+| ۲   | نام، نام کاربری، ایمیل و رمز مدیر؛ آدرس عمومی پنل مدیریت (اختیاری) |
+| ۳   | پایان؛ ورود اول MFA را برای `admin-panel` اجباری می‌کند            |
+
+- **توکن:** به‌طور پیش‌فرض در هر راه‌اندازی تصادفی (۱۹۲ بیت) ساخته و فقط در stdout چاپ می‌شود، نه در Log ساخت‌یافته
+  و نه در Audit. برای چند Replica مقدار `SETUP_TOKEN` (حداقل ۳۲ کاراکتر) را ست کنید تا همهٔ نمونه‌ها یک توکن داشته باشند.
+  مقایسهٔ توکن زمان‌ثابت است و هر IP در ۱۵ دقیقه حداکثر ۱۰ تلاش دارد.
+- **چه چیزی ساخته می‌شود:** Tenant پیش‌فرض، کاتالوگ مجوز/نقش، کلاینت `admin-panel`، مدیر با نقش `idp:superadmin` و
+  رویداد Audit با نام `setup.install`. کاربران تست (`admin`، `support`، `user`) ساخته **نمی‌شوند**. اگر آدرس پنل مدیریت داده شود،
+  Redirect URI و Origin کلاینت `admin-panel` به همان Origin تغییر می‌کند.
+- **بسته‌شدن دائمی:** همهٔ این‌ها در یک تراکنش انجام می‌شود و ردیف تکی جدول `system_install` (کلید اصلی ثابت) قفل نصب است؛ اگر چند
+  درخواست هم‌زمان برسند فقط یکی برنده می‌شود. پس از نصب `POST /api/v1/setup/verify` و `POST /api/v1/setup/complete` مثل مسیر
+  ناموجود `404` می‌دهند و صفحهٔ `?action=setup` فقط پیام «نصب قبلاً انجام شده» را نشان می‌دهد. فقط `GET /api/v1/setup/status` پاسخ
+  می‌دهد (`{"installed": true}`).
+- **ارتقا:** Migration `0020` اگر قبلاً کاربری با رمز عبور وجود داشته باشد، نمونه را «نصب‌شده» (`source = existing`) علامت می‌زند؛
+  بنابراین ویزارد روی استقرار در حال کار هرگز باز نمی‌شود.
+- **بازگشت:** `db:rollback` جدول `system_install` را حذف می‌کند و ویزارد دوباره باز می‌شود؛ مثل هر Rollback دیگر فقط روی محیط
+  کنترل‌شده انجام دهید.
 
 ## 7. اسکریپت‌ها
 

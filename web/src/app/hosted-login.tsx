@@ -23,6 +23,12 @@ import {
 } from '@/app/consent-page';
 import { LoginForm, type LoginFormValues } from '@/app/login-form';
 import {
+  SetupPage,
+  type SetupAdminValues,
+  type SetupResult,
+  type SetupStatus,
+} from '@/app/setup-page';
+import {
   contextAllowsPassword,
   resolveLoginContext,
   sanitizeLoginContexts,
@@ -115,6 +121,10 @@ export interface HostedLoginPageProps {
     consentRequest: string,
     decision: 'allow' | 'deny',
   ) => Promise<ConsentDecisionResult>;
+  /** First-run install wizard calls (`?action=setup`), injectable for tests. */
+  loadSetupStatus?: () => Promise<SetupStatus>;
+  verifySetupToken?: (token: string) => Promise<SetupResult>;
+  completeSetup?: (values: SetupAdminValues) => Promise<SetupResult>;
   /** Called with a safe redirect target; defaults to `window.location.assign`. */
   navigate?: (target: string) => void;
   /** Bundle call, injectable for tests; returns the untrusted JSON body. */
@@ -412,6 +422,77 @@ async function defaultSetPassword(input: {
   return { ok: true };
 }
 
+async function defaultLoadSetupStatus(): Promise<SetupStatus> {
+  try {
+    const response = await fetch('/api/v1/setup/status', {
+      headers: { Accept: 'application/json' },
+      credentials: 'same-origin',
+    });
+    if (!response.ok) {
+      return 'error';
+    }
+    const body = (await response.json()) as { installed?: unknown };
+    return body.installed === true ? 'installed' : 'open';
+  } catch {
+    return 'error';
+  }
+}
+
+/** Maps the setup endpoints' problem responses; `404` means the wizard is closed for good. */
+async function setupResult(response: Response): Promise<SetupResult> {
+  if (response.ok) {
+    return { ok: true };
+  }
+  if (response.status === 404) {
+    return { ok: false, error: 'closed' };
+  }
+  if (response.status === 403) {
+    return { ok: false, error: 'invalid_token' };
+  }
+  if (response.status === 429) {
+    return { ok: false, error: 'rate_limited' };
+  }
+  if (response.status === 409) {
+    return { ok: false, error: 'exists' };
+  }
+  if (response.status === 422) {
+    const problem = (await response.json().catch((): unknown => null)) as {
+      code?: unknown;
+      violations?: unknown;
+    } | null;
+    if (problem?.code === 'password_policy') {
+      return {
+        ok: false,
+        error: 'password_policy',
+        violations: Array.isArray(problem.violations)
+          ? problem.violations.filter((entry): entry is string => typeof entry === 'string')
+          : [],
+      };
+    }
+  }
+  return { ok: false, error: response.status >= 500 ? 'network' : 'server' };
+}
+
+async function postSetup(path: string, body: unknown): Promise<SetupResult> {
+  try {
+    const response = await fetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify(body),
+    });
+    return await setupResult(response);
+  } catch {
+    return { ok: false, error: 'network' };
+  }
+}
+
+const defaultVerifySetupToken = (token: string): Promise<SetupResult> =>
+  postSetup('/api/v1/setup/verify', { token });
+
+const defaultCompleteSetup = (values: SetupAdminValues): Promise<SetupResult> =>
+  postSetup('/api/v1/setup/complete', values);
+
 async function defaultConfirmEmail(token: string): Promise<AccountFlowResult> {
   let response: Response;
   try {
@@ -489,6 +570,9 @@ export function HostedLoginPage({
   forgotPassword = defaultForgotPassword,
   setPassword = defaultSetPassword,
   confirmEmail = defaultConfirmEmail,
+  loadSetupStatus = defaultLoadSetupStatus,
+  verifySetupToken = defaultVerifySetupToken,
+  completeSetup = defaultCompleteSetup,
   loadConsent = defaultLoadConsent,
   decideConsent = defaultDecideConsent,
   navigate,
@@ -909,7 +993,15 @@ export function HostedLoginPage({
   };
 
   const flowView =
-    action === 'forgot-password' ? (
+    action === 'setup' ? (
+      <SetupPage
+        locale={locale}
+        backHref={backHref}
+        loadStatus={loadSetupStatus}
+        verifyToken={verifySetupToken}
+        complete={completeSetup}
+      />
+    ) : action === 'forgot-password' ? (
       <ForgotPasswordPage locale={locale} backHref={backHref} onSubmit={forgotPassword} />
     ) : action === 'set-password' || action === 'reset-password' ? (
       <SetPasswordPage

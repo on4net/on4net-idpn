@@ -290,6 +290,12 @@ const serverEnvBase = z.object({
    * `idpn_backup_last_success_timestamp_seconds` so the backup-freshness alert can fire.
    */
   BACKUP_STATUS_FILE: z.preprocess(emptyToUndefined, z.string().min(1).optional()),
+  /**
+   * Token that unlocks the first-run install wizard. Optional: when unset the API generates a
+   * one-time token at startup and prints it to its log. Set it for multi-replica deployments,
+   * where a per-process token would differ between instances. Ignored once installed.
+   */
+  SETUP_TOKEN: z.preprocess(emptyToUndefined, z.string().min(32).max(256).optional()),
 });
 
 /**

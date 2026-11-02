@@ -75,6 +75,8 @@ import { readBackupStatus } from './observability/backup-status.js';
 import { DependencyMonitor } from './observability/health.js';
 import { sanitizeLogMessage } from './observability/logging.js';
 import { ApiMetrics } from './observability/metrics.js';
+import { createPrismaSetupStore } from './setup/prisma-store.js';
+import { generateSetupToken } from './setup/token.js';
 import { createPrismaSessionRevocationHook } from './session/prisma-revocation.js';
 import { createPrismaSessionSlideMirror } from './session/prisma-slide.js';
 import { createTokenDenyList } from './oidc/token-denylist.js';
@@ -362,6 +364,14 @@ const securityAlerts = createSecurityAlertSink({
  */
 const passwordParams = argon2ParamsFromEnv(env);
 
+/**
+ * First-run install wizard (`/api/v1/setup/*`). The token is only needed, and only printed,
+ * while the instance is not installed; afterwards the routes answer 404 for good.
+ */
+const setupStore = createPrismaSetupStore(prisma);
+const needsSetup = !(await setupStore.isInstalled());
+const setupToken = env.SETUP_TOKEN ?? generateSetupToken();
+
 const app = buildServer({
   issuer: env.APP_URL,
   keys,
@@ -569,6 +579,14 @@ const app = buildServer({
     adminClientId: env.ADMIN_CLIENT_ID,
     permissions: permissionReader,
     audit: createPrismaAdminAudit(prisma),
+  },
+  setup: {
+    store: setupStore,
+    token: setupToken,
+    rateLimit: accountRateLimiter,
+    hash: (plain: string) => hashPassword(plain, passwordParams),
+    onInstalled: () =>
+      app.log.info({ component: 'setup' }, 'installation completed; wizard closed'),
   },
   accountLifecycle: {
     sessions,
@@ -784,3 +802,21 @@ app.log.info(
   },
   'on4net IDPN API listening',
 );
+
+if (needsSetup) {
+  const setupUrl = `${(env.HOSTED_UI_URL ?? env.APP_URL).replace(/\/+$/, '')}/?action=setup`;
+  // The token is a credential for creating the first administrator, so it goes to stdout for
+  // the operator, never through the structured logger or the audit trail.
+  console.warn(
+    [
+      '',
+      '  on4net IDPN is not installed yet.',
+      `  Open ${setupUrl}`,
+      env.SETUP_TOKEN === undefined
+        ? `  Setup token: ${setupToken}`
+        : '  Setup token: the value of SETUP_TOKEN',
+      '  The wizard closes permanently as soon as the first administrator is created.',
+      '',
+    ].join('\n'),
+  );
+}

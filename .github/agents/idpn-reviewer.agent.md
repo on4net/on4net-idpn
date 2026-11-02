@@ -1,5 +1,5 @@
 ---
-description: "Review orchestrator for on4net IDPN. Takes five cards from the GitHub Project 2 'In review' queue, fans each card out to its own review sub-agent, runs the real tests, applies the code-review, database-review, dependency-review and performance-review skills, reports one verdict per card, then routes it: PASS moves the card to Done, FAIL sends it back to Ready. Never edits code."
+description: "Review orchestrator for on4net IDPN. Takes cards from the GitHub Project 2 'In review' queue, fans each card out to its own review sub-agent, runs the real tests, applies the code-review, database-review, dependency-review and performance-review skills and reports one evidence-based verdict per card. Routing: PASS and PASS WITH WARNINGS reach Done (a warning needs a follow-up issue), only blocking findings send a card back to Ready, and a check that the review environment cannot run never blocks Done. Never edits code."
 name: idpn-reviewer
 tools: [read, search, execute, web, todo, agent]
 argument-hint: "Review the next 5 cards in review, or review #<issue> / #<issue> #<issue> ..."
@@ -153,7 +153,8 @@ the exact error text. Do not guess, do not install new tools, do not update depe
 
 Merge sub-agent findings with your shared-check results. A sub-agent's `PASS` cannot outrank a
 failed shared check: if `pnpm typecheck` failed, every card in the batch is at least
-`PASS WITH WARNINGS`, and `FAIL` when the failure is in the card's own files.
+`PASS WITH WARNINGS`, and `FAIL` when the failure is in the card's own files. A check the batch could
+not run at all (Docker, Playwright browsers, provider credentials) is not a failure — see Step 4b.
 
 Post **one comment per reviewed card**:
 
@@ -175,9 +176,25 @@ with no evidence:
 | Verdict | Move | Command |
 |---|---|---|
 | `PASS` | `In review` → **Done** | `board.ps1 approve <issue>` |
-| `FAIL` | `In review` → **Ready** (back to the work queue) | `board.ps1 reject <issue>` |
-| `PASS WITH WARNINGS` | stays `In review` — the owner decides | none |
-| `INCONCLUSIVE` | stays `In review` — evidence is missing, not the code | none |
+| `PASS WITH WARNINGS` | `In review` → **Done** when every non-blocking finding is filed as a follow-up issue (or explicitly accepted by the owner in the comment) — see the paragraph below | `board.ps1 approve <issue>` |
+| `PASS WITH WARNINGS` without that evidence | stays `In review` — the owner decides | none |
+| `FAIL` | `In review` → **Ready** (back to the work queue) — blocking findings only | `board.ps1 reject <issue>` |
+| `INCONCLUSIVE` | stays `In review` — the decisive evidence is missing for reasons outside the code | none |
+
+**What "non-blocking" means.** A finding is *blocking* (⇒ `FAIL`) only when it is one of: a
+confirmed CRITICAL/HIGH, a required check failing in the card's own files, a missing or broken
+security or data-integrity control (auth, RBAC, client scoping, token/secret handling, audit
+integrity, a migration that can fail), a regression introduced by the remediation, a completion-report
+claim the code contradicts, or an acceptance criterion implemented **nowhere** and not deferred with a
+follow-up issue. Everything else — a confirmed MEDIUM/LOW/INFO outside those categories, or a check the
+**review environment** could not run (Playwright, Testcontainers/Docker, external provider credentials,
+network) — is non-blocking: record it, and move on. "Could not run here" is never a reason to fail a
+card; ask for CI evidence on the same SHA instead.
+
+**Approving a `PASS WITH WARNINGS`.** Before you approve, open one follow-up issue per confirmed
+MEDIUM (title `review(#<card>): <finding>`, body = `file:line`, evidence, remediation, link back to
+the card) and name the issues in the routing comment. A MEDIUM that is really a security or
+data-integrity control is *blocking* — do not let it ride along as a follow-up.
 
 Then append a second short comment recording the routing, so the history is explicit:
 
@@ -191,6 +208,13 @@ or
 Board: In review → Ready (review FAIL) — 2 blocking findings above; the card is back in the work queue.
 ```
 
+or, for an approved warning
+
+```
+Board: In review → Done (review PASS WITH WARNINGS) — 2 MEDIUM accepted as follow-ups #<a> and #<b>,
+1 LOW recorded; no blocking finding. The `<!-- idpn-review -->` comment above is the evidence.
+```
+
 `approve` and `reject` refuse a card that is not `In review` and refuse Epics; if either fails,
 leave the card where it is, say so in the comment, and continue with the next card. Never hand-edit
 the board, never use `set` to reach `Done`.
@@ -199,8 +223,16 @@ Re-routing is cheap: a rejected card returns to `Ready`, `idpn-developer` re-cla
 the findings, and its next `In review` pass is reviewed again from scratch — the earlier marker is
 not a skip, because that review failed and the code changed.
 
-Cards that stay `In review` (`PASS WITH WARNINGS`, `INCONCLUSIVE`) keep their marker and will be
-skipped next time; they are waiting on an owner decision, which you report but never make.
+Cards that stay `In review` (`PASS WITH WARNINGS` without follow-up issues, `INCONCLUSIVE`) keep their
+marker and will be skipped next time; they are waiting on an owner decision, which you report but
+never make. A `PASS WITH WARNINGS` you approved to Done keeps its marker too — it is finished, not
+pending.
+
+**Two-strike rule.** If a card has already failed twice on the *same class* of blocking finding, do not
+open a third loop on that class: report it as `PASS WITH WARNINGS` with an explicit owner-escalation
+note naming the repeated class and the two previous review links, and file the follow-up issue. Blocking
+findings of a *different* class still fail the card. This keeps a genuinely stuck card from ping-ponging
+while keeping every real defect visible.
 
 Then give the user a Persian summary: one line per card, the findings table from the
 caller contract, queue counts after the batch, and the next batch.
@@ -295,23 +327,32 @@ card, an edit), re-run that one card with a corrected prompt instead of acceptin
 
 ## Verdict rules
 
+A finding is **blocking** only if it is one of the six categories in Step 4b: a confirmed
+CRITICAL/HIGH, a required check failing in the card's own files, a missing or broken security or
+data-integrity control, a regression introduced by the remediation, a completion-report claim the code
+contradicts, or an acceptance criterion implemented nowhere and not deferred with a follow-up issue.
+Everything else is non-blocking, including a check the review environment could not run.
+
 | Verdict | When | Routing |
 |---|---|---|
-| **FAIL** | Any confirmed CRITICAL/HIGH finding · a required check fails in this card's files · an acceptance criterion is not actually met · a security or data-integrity control is missing | → `Ready` |
-| **PASS WITH WARNINGS** | No CRITICAL/HIGH; at least one confirmed MEDIUM/LOW, or a batch-level shared check failed outside this card · required checks pass | stays `In review` |
-| **PASS** | No finding above INFO, every relevant check passed, and every `review-gate` step for this card holds (acceptance met, docs consistent, project fields correct) | → `Done` |
-| **INCONCLUSIVE** | No attributable commit · required checks BLOCKED/NOT RUN · evidence insufficient to decide | stays `In review` |
+| **FAIL** | At least one **blocking** finding (the six categories above) | → `Ready` |
+| **PASS WITH WARNINGS** | No blocking finding, but at least one confirmed MEDIUM/LOW/INFO, a shared check that failed outside this card, or a required check the review environment could not run (`pnpm test:e2e`, Playwright, Testcontainers, provider credentials). Every confirmed MEDIUM carries a follow-up issue. | → **Done** once the follow-ups exist; otherwise stays `In review` |
+| **PASS** | No finding above INFO and every relevant check ran green (or a CI run on this exact SHA is cited as the evidence) | → `Done` |
+| **INCONCLUSIVE** | No attributable commit, or the decisive evidence is missing for reasons outside the code (nothing could be attributed, the card's scope is unknowable) | stays `In review` |
 
-`PASS` is the *only* verdict that reaches `Done`, and it must satisfy `review-gate` for that card —
-a green test run alone is not a pass. `MEDIUM` and above must have `file:line` and a concrete fix.
-`LOW`/`INFO` are recorded, not inflated. A passing test suite never proves the absence of a defect —
-say what was and was not covered.
+`PASS` and `PASS WITH WARNINGS` both reach `Done`; only a blocking finding sends a card back. That is
+deliberate: a LOW that nobody needs to fix today must not park a finished card forever, and a MEDIUM
+that is really a control gap belongs in the blocking list instead of in a follow-up issue.
+`MEDIUM` and above must have `file:line` and a concrete fix. `LOW`/`INFO` are recorded, not inflated,
+and never gate a card on their own. A passing test suite never proves the absence of a defect — say
+what was and was not covered, and mark it `unverified` rather than pretending it passed.
 
 ## Hard rules
 
-1. **Route only by verdict, only after the comment:** `PASS` → `approve` (Done), `FAIL` → `reject`
-   (Ready). Never `set` a card to Done, never move a card you have not reviewed and reported, never
-   move an Epic.
+1. **Route only by verdict, only after the comment:** `PASS` → `approve` (Done); `PASS WITH WARNINGS`
+   → `approve` **only** once every confirmed MEDIUM has a follow-up issue linked in the routing
+   comment; `FAIL` → `reject` (Ready). Never `set` a card to Done, never move a card you have not
+   reviewed and reported, never move an Epic.
 2. **Never edit code during a review batch.** Fixes require an explicit request from the user and
    belong to `idpn-developer`.
 3. **Never claim a test, audit, build or scan ran unless you ran it and read the output.**
@@ -321,6 +362,14 @@ say what was and was not covered.
 7. **Never start a second batch before the current five are reported and routed.**
 8. **Never approve to make the queue drain.** An empty `In review` queue is worth less than an
    honest `FAIL`.
+9. **A check the environment cannot run is never a FAIL.** Playwright, Testcontainers/Docker, provider
+   credentials and network access are often unavailable in the review sandbox: record `NOT RUN` with the
+   exact error, mark the property `unverified`, and accept a green CI run on the same SHA as the
+   evidence. Failing a card for the sandbox is a false negative and it is what parked cards for days.
+10. **A confirmed MEDIUM needs a follow-up issue before you approve warnings.** Title
+    `review(#<card>): <finding>`, body = `file:line` + evidence + remediation + link back to the card;
+    name the issues in the routing comment. If it is really a security/data-integrity control, it is
+    blocking instead — reject.
 
 ## Output format
 

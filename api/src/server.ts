@@ -8,6 +8,8 @@ import { registerAccountRoutes } from './account/routes.js';
 import { registerConsentRoutes, type ConsentRoutesOptions } from './oidc/consent-routes.js';
 import type { AccountLifecycleRoutesOptions } from './account/lifecycle-routes.js';
 import { registerAccountLifecycleRoutes } from './account/lifecycle-routes.js';
+import type { SetupRoutesOptions } from './setup/routes.js';
+import { registerSetupRoutes } from './setup/routes.js';
 import { registerFormBodyParser } from './http/form-body.js';
 import type { AdminRoutesOptions } from './admin/routes.js';
 import { registerAdminRoutes } from './admin/routes.js';
@@ -139,6 +141,8 @@ export interface BuildServerOptions {
   account?: Omit<AccountRoutesOptions, 'appUrl'>;
   /** Mounts invite acceptance, email verification and password reset (docs/auth-flows.md 8). */
   accountLifecycle?: Omit<AccountLifecycleRoutesOptions, 'appUrl'>;
+  /** Mounts the first-run install wizard API (`/api/v1/setup/*`); closed once installed. */
+  setup?: SetupRoutesOptions;
   /**
    * Reverse proxies whose `X-Forwarded-For` may be trusted (CIDR list). `request.ip` is the
    * proxy address without it, so every per-IP limit would share one bucket.
@@ -395,6 +399,10 @@ export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
 
   if (options.accountLifecycle !== undefined) {
     registerAccountLifecycleRoutes(app, { ...options.accountLifecycle, appUrl: issuer });
+  }
+
+  if (options.setup !== undefined) {
+    registerSetupRoutes(app, options.setup);
   }
 
   return app;

@@ -6,7 +6,17 @@ All notable changes to on4net IDPN are recorded here. The format follows
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- First-run install wizard (`/?action=setup`, `/api/v1/setup/*`): one-time setup token, creates
+  the first `idp:superadmin` and permanently closes. Migration `0020_system_install` adds the
+  singleton `system_install` marker and flags already running instances as installed.
+- `SETUP_TOKEN` environment variable for multi-replica installs.
+
+### Changed
+
+- The permission/role/admin-client catalog moved from `api/prisma/seed.ts` to
+  `api/src/db/catalog.ts` so the wizard can reuse it without dev dependencies.
 
 ## [0.1.0] — 2026-10-20
 
