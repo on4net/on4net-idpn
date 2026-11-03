@@ -1,0 +1,4 @@
+email,displayName,externalId,locale,roleKeys,memberships
+ali.rezaei@example.com,Ali Rezaei,legacy-1001,fa-IR,platform-a:member,
+sara.ahmadi@example.com,Sara Ahmadi,legacy-1002,fa-IR,platform-a:editor,
+reza.karimi@example.com,Reza Karimi,legacy-1003,en-US,,"[{""clientId"":""platform-a"",""roleKeys"":[""platform-a:member""]},{""clientId"":""platform-b"",""roleKeys"":[""platform-b:member""]}]"

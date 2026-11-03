@@ -1,0 +1,27 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "allowImportingTsExtensions": true,
+    "types": [],
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"],
+      "@idpn/mfe-sdk": ["../packages/mfe-sdk/src/index.ts"],
+      "@idpn/contracts/theme": ["../packages/contracts/src/theme.ts"]
+    }
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "host/**/*.ts",
+    "host-mf/**/*.ts",
+    "host-mf/**/*.tsx",
+    "harness/**/*.ts",
+    "harness/**/*.tsx",
+    "vite*.config.ts"
+  ]
+}

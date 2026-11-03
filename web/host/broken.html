@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vanilla host — missing bundle fixture</title>
+    <link rel="stylesheet" href="/host/host.css" />
+  </head>
+  <body>
+    <h1 id="host-title">Host application (missing bundle)</h1>
+    <p id="host-paragraph">This fixture proves the safe fallback when the bundle fails.</p>
+
+    <p id="host-status-message" role="status" data-testid="host-status">
+      Loading the IDPN modules…
+    </p>
+
+    <div id="host-fallback" class="host-alert" role="alert" hidden data-testid="host-fallback">
+      <p id="host-fallback-message" data-testid="host-fallback-message">
+        The IDPN modules are unavailable.
+      </p>
+      <a id="host-fallback-link" data-testid="host-fallback-link" href="/oauth2/authorize" hidden>
+        Open the hosted account page
+      </a>
+    </div>
+
+    <script type="module" src="/host/broken-host.ts"></script>
+  </body>
+</html>

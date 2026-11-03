@@ -1,0 +1,36 @@
+{
+  "clientId": "platform-b",
+  "name": "Platform B (example)",
+  "socialProviders": {
+    "google": {
+      "enabled": true,
+      "scopes": ["openid", "email", "profile"],
+      "allowedEmailDomains": ["platform-b.example.com"]
+    }
+  },
+  "permissions": [
+    { "key": "platform-b:invoice:read", "description": "Read invoices of the app" },
+    { "key": "platform-b:invoice:write", "description": "Create and update invoices of the app" }
+  ],
+  "roles": [
+    {
+      "key": "platform-b:member",
+      "name": "Member",
+      "description": "Default role assigned to every new member of the app",
+      "permissions": ["platform-b:invoice:read"]
+    },
+    {
+      "key": "platform-b:user-admin",
+      "name": "User administrator",
+      "description": "Delegated user administration scoped to this app",
+      "permissions": [
+        "idp:client-member:read",
+        "idp:client-member:invite",
+        "idp:client-role:read",
+        "idp:client-role:assign"
+      ]
+    }
+  ],
+  "defaultRole": "platform-b:member",
+  "userAdminRole": "platform-b:user-admin"
+}

@@ -14,13 +14,13 @@
 
 برای هر پلتفرم یک کلاینت جدا ثبت کنید:
 
-| فیلد | نمونه |
-|---|---|
-| `clientId` | `platform-a` |
-| `type` | `web` / `spa` / `mobile` / `m2m` |
-| Redirect URI | `https://platform-a.example.com/auth/callback` |
-| Post Logout URI | `https://platform-a.example.com/` |
-| Scopes | `openid profile email offline_access` |
+| فیلد                    | نمونه                                                    |
+| ----------------------- | -------------------------------------------------------- |
+| `clientId`              | `platform-a`                                             |
+| `type`                  | `web` / `spa` / `mobile` / `m2m`                         |
+| Redirect URI            | `https://platform-a.example.com/auth/callback`           |
+| Post Logout URI         | `https://platform-a.example.com/`                        |
+| Scopes                  | `openid profile email offline_access`                    |
 | Back-channel Logout URI | `https://platform-a.example.com/auth/backchannel-logout` |
 
 **قواعد:**
@@ -29,6 +29,31 @@
 - از Wildcard در Redirect URI استفاده نکنید.
 - Client Secret فقط یک بار نمایش داده می‌شود؛ آن را در Secret Store پلتفرم ذخیره کنید.
 - برای SPA/Mobile فقط کلاینت عمومی با PKCE بسازید (بدون Secret).
+
+### 2.0 زبان و مدل‌های ورود اپ
+
+پیش از اتصال، این دو را برای هر اپ مشخص کنید:
+
+| مورد            | نمونه                                               |
+| --------------- | --------------------------------------------------- |
+| زبان پیش‌فرض    | `fa-IR`                                             |
+| زبان‌های فعال   | `fa-IR`, `en-US`                                    |
+| مدل‌های ورود    | `customer-admin`, `customer-team`, `platform-admin` |
+| Context پیش‌فرض | `customer-team`                                     |
+
+- زبان‌ها و متن‌ها با API مدیریت می‌شوند و در Public Config به MFE می‌رسند.
+- هر مسیر اپ باید `login_context` مشخص خودش را بفرستد:
+
+```ts
+// /admin → customer-admin
+redirectToAuthorize({ loginContext: 'customer-admin' });
+
+// /team → customer-team
+redirectToAuthorize({ loginContext: 'customer-team' });
+```
+
+- `login_context` از مسیر اپ تعیین می‌شود، نه از Query یا ورودی کاربر.
+- جزئیات: [localization.md](./localization.md) و [login-contexts.md](./login-contexts.md).
 
 ### 2.1 فعال‌سازی سوشال لاگین برای اپ
 
@@ -108,7 +133,7 @@ const IdpnAccount = React.lazy(() => import('idpn/AccountApp'));
   apiBaseUrl="/auth"
   locale="fa"
   onEvent={(event) => handleAuthEvent(event)}
-/>
+/>;
 ```
 
 ### گزینه B — Web Component (سایر فریمورک‌ها)
@@ -139,6 +164,12 @@ const IdpnAccount = React.lazy(() => import('idpn/AccountApp'));
 - UI مشترک با **shadcn/ui + Tailwind v4** ساخته می‌شود و داخل بسته MFE قرار دارد.
 - اپ‌های میزبان نباید shadcn یا Tailwind نسخه خودشان را برای MFE نصب کنند.
 - اپ میزبان فقط Theme/Locale را از Config می‌دهد؛ استایل کامپوننت‌ها را Override نمی‌کند.
+- MFE هیچ فونتی دانلود نمی‌کند و روی صفحه میزبان درخواست `@font-face` نمی‌سازد. اگر ظاهر MFE باید
+  با تایپوگرافی IdP یکی باشد، میزبان فایل‌های `vazirmatn-arabic.woff2`، `vazirmatn-latin.woff2` و
+  `inter-latin.woff2` را از `web/public/fonts/` در دامنه خود سرو می‌کند و با `font-display: swap`
+  اعلان می‌کند (CSP: `font-src 'self'`). فایل `web/public/fonts/OFL.txt` (متن کامل SIL OFL 1.1 و
+  کپی‌رایت هر دو فونت) باید همراه همان فایل‌ها در بستهٔ میزبان منتشر شود. در غیر این صورت پشته فونت
+  به فونت سیستم برمی‌گردد.
 - جزئیات توکن‌ها، RTL و ایزولاسیون: [design-system.md](./design-system.md).
 
 ## 4. الگوی BFF (توصیه‌شده)
@@ -173,6 +204,11 @@ sequenceDiagram
 - نشست پلتفرم با `HttpOnly; Secure; SameSite=Lax` باشد.
 - Refresh Token فقط در سرور باشد.
 - مسیر Callback با متد GET/POST مطابق پیکربندی کلاینت باشد.
+- `scope` شامل `offline_access` باشد تا Refresh Token صادر شود.
+
+**نمونهٔ اجراشدنی:** [`examples/bff`](../examples/bff/README.md) این الگو را با یک اپلیکیشن کوچک
+Fastify پیاده می‌کند (`/login`، `/auth/callback`، `/refresh`، `/logout`) و تست‌های E2E آن در
+`e2e/bff/flow.spec.ts` اجرا می‌شوند.
 
 ## 5. الگوی SPA / Mobile
 
@@ -185,19 +221,19 @@ sequenceDiagram
 
 ## 6. کتابخانه‌های پیشنهادی
 
-| استک | کتابخانه |
-|---|---|
-| Node.js / Express | `openid-client` |
-| NestJS | `openid-client` (سرویس اختصاصی) |
-| Next.js | Auth.js (NextAuth) با Provider سفارشی OIDC |
-| React SPA | `oidc-client-ts` + `react-oidc-context` |
-| .NET | `Microsoft.AspNetCore.Authentication.OpenIdConnect` |
-| Spring Boot | `spring-boot-starter-oauth2-client` |
-| Go | `github.com/coreos/go-oidc/v3/oidc` |
-| Laravel | `jumbojett/openid-connect-php` یا `socialiteproviders/oidc` |
-| Django | `mozilla-django-oidc` |
-| Flutter | `openid_client` / `flutter_appauth` |
-| React Native | `react-native-app-auth` |
+| استک              | کتابخانه                                                    |
+| ----------------- | ----------------------------------------------------------- |
+| Node.js / Express | `openid-client`                                             |
+| NestJS            | `openid-client` (سرویس اختصاصی)                             |
+| Next.js           | Auth.js (NextAuth) با Provider سفارشی OIDC                  |
+| React SPA         | `oidc-client-ts` + `react-oidc-context`                     |
+| .NET              | `Microsoft.AspNetCore.Authentication.OpenIdConnect`         |
+| Spring Boot       | `spring-boot-starter-oauth2-client`                         |
+| Go                | `github.com/coreos/go-oidc/v3/oidc`                         |
+| Laravel           | `jumbojett/openid-connect-php` یا `socialiteproviders/oidc` |
+| Django            | `mozilla-django-oidc`                                       |
+| Flutter           | `openid_client` / `flutter_appauth`                         |
+| React Native      | `react-native-app-auth`                                     |
 
 > نسخه‌ها باید Pin و به‌روز نگه داشته شوند. کتابخانه‌های بدون نگهداری فعال استفاده نشوند.
 
@@ -234,10 +270,10 @@ granted: token.permissions.includes(required)
 
 ## 9. خروج
 
-| اقدام | فراخوانی |
-|---|---|
-| خروج محلی | پاک‌کردن Session پلتفرم؛ بدون تماس با IdP |
-| خروج سراسری | `GET /oauth2/logout?id_token_hint=...&post_logout_redirect_uri=...&state=...` |
+| اقدام               | فراخوانی                                                                            |
+| ------------------- | ----------------------------------------------------------------------------------- |
+| خروج محلی           | پاک‌کردن Session پلتفرم؛ بدون تماس با IdP                                           |
+| خروج سراسری         | `GET /oauth2/logout?id_token_hint=...&post_logout_redirect_uri=...&state=...`       |
 | دریافت Back-channel | Endpoint پلتفرم که Logout Token را بررسی و Sessionهای مربوط به `sid` را باطل می‌کند |
 
 **Endpoint نمونه Back-channel (شبه‌کد):**
@@ -259,13 +295,13 @@ app.post('/auth/backchannel-logout', async (req, res) => {
 
 ## 10. محیط توسعه محلی
 
-| مورد | پیشنهاد |
-|---|---|
-| دامنه | `localhost` برای IdP و پلتفرم‌ها با پورت‌های مختلف |
-| HTTPS | mkcert یا self-signed |
-| Redirect URI | `http://localhost:3001/auth/callback` (فقط در حالت توسعه) |
-| Cookie | در `localhost` پرچم `Secure` می‌تواند غیرفعال شود (فقط توسعه) |
-| داده | کاربر تست و کلاینت توسعه با Seed ایجاد شود |
+| مورد         | پیشنهاد                                                       |
+| ------------ | ------------------------------------------------------------- |
+| دامنه        | `localhost` برای IdP و پلتفرم‌ها با پورت‌های مختلف            |
+| HTTPS        | mkcert یا self-signed                                         |
+| Redirect URI | `http://localhost:6001/auth/callback` (فقط در حالت توسعه)     |
+| Cookie       | در `localhost` پرچم `Secure` می‌تواند غیرفعال شود (فقط توسعه) |
+| داده         | کاربر تست و کلاینت توسعه با Seed ایجاد شود                    |
 
 > تنظیمات «مجاز بودن HTTP» باید فقط در محیط توسعه فعال باشد و در تولید غیرفعال شود.
 
@@ -294,26 +330,35 @@ app.post('/auth/backchannel-logout', async (req, res) => {
 - [ ] رویدادهای MFE هیچ توکنی افشا نمی‌کنند.
 - [ ] CSS و Preflight کلاس‌های Host را تغییر نمی‌دهد.
 - [ ] RTL فارسی و Theme اپ در Host تست شده است.
+- [ ] `login_context` از مسیر اپ تعیین و ارسال می‌شود.
+- [ ] زبان پیش‌فرض و زبان‌های فعال اپ در Public Config درست است.
+- [ ] متن‌های اختصاصی اپ روی بسته پایه اعمال می‌شوند.
+- [ ] توکن `login_context` دارد و نقش‌ها فیلتر شده‌اند.
 
 ## 12. عیب‌یابی رایج
 
-| نشانه | علت احتمالی | راه‌حل |
-|---|---|---|
-| `redirect_uri_mismatch` | URI دقیقاً ثبت نشده | افزودن URI کامل (Scheme/Host/Port/Path) |
-| `invalid_grant` در Callback | Code منقضی/استفاده‌شده | عدم استفاده مجدد؛ شروع مجدد ورود |
-| `login_required` با `prompt=none` | نشست IdP وجود ندارد | Redirect به ورود تعاملی |
-| `invalid_client` | Secret اشتباه/منقضی | چرخش Secret و به‌روزرسانی Secret Store |
-| بعد از خروج همچنان وارد است | خروج محلی بوده | استفاده از خروج سراسری یا Back-channel |
-| توکن در API رد می‌شود | `aud`/`iss` نادرست یا ساعت ناهمگام | بررسی تنظیمات و NTP |
-| صفحه ورود در IFrame باز نمی‌شود | محدودیت Third-Party Cookie | استفاده از Redirect سطح‌بالا |
-| نقش‌ها به‌روز نیستند | کش توکن | Refresh توکن یا خواندن مجدد `/userinfo` |
-| MFE بارگذاری نمی‌شود | خطای CDN/نسخه/CSP | بررسی Remote و Fallback Hosted |
-| دکمه سوشال نمایش داده نمی‌شود | Provider برای اپ فعال نیست | فعال‌سازی در تنظیمات کلاینت |
-| `redirect_uri_mismatch` در سوشال | Callback اختصاصی ثبت نشده | ثبت `.../social/{clientId}/{provider}/callback` |
-| `social_email_unverified` | ایمیل Provider تأیید نشده | تأیید ایمیل یا ورود رمز |
-| ادمین اپ `403` می‌گیرد | `clientId` مسیر با توکن یکی نیست | استفاده از توکن همان اپ |
-| کاربر در یک اپ مسدود است | Membership همان اپ `suspended` است | بررسی وضعیت عضویت |
-| داده اپ در توکن اپ دیگر است | خطای Config/Claim | بررسی `aud` و کاتالوگ مجوز |
+| نشانه                             | علت احتمالی                               | راه‌حل                                          |
+| --------------------------------- | ----------------------------------------- | ----------------------------------------------- |
+| `redirect_uri_mismatch`           | URI دقیقاً ثبت نشده                       | افزودن URI کامل (Scheme/Host/Port/Path)         |
+| `invalid_grant` در Callback       | Code منقضی/استفاده‌شده                    | عدم استفاده مجدد؛ شروع مجدد ورود                |
+| `login_required` با `prompt=none` | نشست IdP وجود ندارد                       | Redirect به ورود تعاملی                         |
+| `invalid_client`                  | Secret اشتباه/منقضی                       | چرخش Secret و به‌روزرسانی Secret Store          |
+| بعد از خروج همچنان وارد است       | خروج محلی بوده                            | استفاده از خروج سراسری یا Back-channel          |
+| توکن در API رد می‌شود             | `aud`/`iss` نادرست یا ساعت ناهمگام        | بررسی تنظیمات و NTP                             |
+| صفحه ورود در IFrame باز نمی‌شود   | محدودیت Third-Party Cookie                | استفاده از Redirect سطح‌بالا                    |
+| نقش‌ها به‌روز نیستند              | کش توکن                                   | Refresh توکن یا خواندن مجدد `/userinfo`         |
+| MFE بارگذاری نمی‌شود              | خطای CDN/نسخه/CSP                         | بررسی Remote و Fallback Hosted                  |
+| دکمه سوشال نمایش داده نمی‌شود     | Provider برای اپ فعال نیست                | فعال‌سازی در تنظیمات کلاینت                     |
+| `redirect_uri_mismatch` در سوشال  | Callback اختصاصی ثبت نشده                 | ثبت `.../social/{clientId}/{provider}/callback` |
+| `social_email_unverified`         | ایمیل Provider تأیید نشده                 | تأیید ایمیل یا ورود رمز                         |
+| ادمین اپ `403` می‌گیرد            | `clientId` مسیر با توکن یکی نیست          | استفاده از توکن همان اپ                         |
+| کاربر در یک اپ مسدود است          | Membership همان اپ `suspended` است        | بررسی وضعیت عضویت                               |
+| داده اپ در توکن اپ دیگر است       | خطای Config/Claim                         | بررسی `aud` و کاتالوگ مجوز                      |
+| `context_not_found`               | Context برای این اپ تعریف نشده            | ثبت Context در تنظیمات کلاینت                   |
+| کاربر `access_denied` می‌گیرد     | عضو آن Context نیست                       | دعوت به Context یا انتخاب Context دیگر          |
+| نقش‌ها کمتر از انتظار             | `allowed_roles` Context محدود است         | بررسی تنظیم Context                             |
+| زبان اپ تغییر نمی‌کند             | Locale در Public Config یا پروفایل نادرست | بررسی `locales` و `ui_locales`                  |
+| متن اپ جای پایه را نمی‌گیرد       | Version/ETag کهنه یا کلید نادرست          | پاک‌سازی Cache و بررسی کلید                     |
 
 ## 13. قرارداد پشتیبانی بین تیم‌ها
 

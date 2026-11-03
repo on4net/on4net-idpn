@@ -51,6 +51,12 @@
 | T27 | MFE Token Exposure | دسترسی Host به توکن | BFF-first، عدم ارسال توکن در رویدادها، SPA فقط برای اپ معتمد |
 | T28 | Cross-Client Admin Access | دستکاری `clientId` در API | اعمال سروری `client_id` توکن، Deny-by-default، تست منفی |
 | T29 | Social Email Spoofing | Provider ایمیل جعلی برمی‌گرداند | الزام `email_verified`، بررسی دامنه، عدم Auto-link بدون تأیید |
+| T30 | Context Confusion | استفاده از توکن Context ضعیف در مسیر حساس | Claim `login_context` و الزام آن در Resource Server |
+| T31 | Cross-Context Escalation | انتخاب Context با نقش‌های بیشتر | فیلتر `allowed_roles` در زمان صدور توکن؛ منع `idp:*` |
+| T32 | Context Parameter Tampering | تغییر `login_context` در URL | اعتبارسنجی سروری مالکیت Context و عضویت فعال |
+| T33 | Translation Injection | متن مخرب یا HTML در Override | فقط متن ساده، Escape در رندر، Allowlist کلید و Placeholder |
+| T34 | Translation Enumeration | افشای زبان‌ها یا کلیدهای داخلی با خطا | پاسخ عمومی، Allowlist Locale، Rate Limit |
+| T35 | Locale Path Traversal | مقدار مخرب در `locale` | Allowlist Locale از Public Config؛ بدون مسیر مستقیم فایل |
 
 ## 3. کنترل‌های احراز هویت
 
@@ -69,18 +75,35 @@
 | بررسی افشا | HIBP با k-anonymity (اختیاری) |
 | تغییر اجباری دوره‌ای | خیر (مگر سیاست سازمانی) |
 
+- سیاست Hash از محیط خوانده می‌شود (`ARGON2_MEMORY_KIB`، `ARGON2_TIME_COST`،
+  `ARGON2_PARALLELISM`، `PASSWORD_PEPPER`) و یک‌بار در نقطه ترکیب ساخته می‌شود؛ همان پارامترها به
+  ورود، تغییر/بازیابی رمز، رمز موقت ادمین و کدهای بازیابی MFA داده می‌شود
+  (`api/src/auth/password-config.ts`).
+- `PASSWORD_PEPPER` به‌عنوان Argon2 secret اعمال می‌شود و هرگز ذخیره یا لاگ نمی‌شود. Argon2 راهی
+  برای تشخیص Pepper از روی Hash ندارد، پس **چرخش با پنجرهٔ مهاجرت** انجام می‌شود:
+  1. Pepper جدید را در `PASSWORD_PEPPER` و قبلی را در `PASSWORD_PEPPER_PREVIOUS` بگذارید
+     (برای فعال‌کردن اولین Pepper به‌جای آن `PASSWORD_ACCEPT_UNPEPPERED=true`).
+  2. ورود با Hash قدیمی هنوز موفق می‌شود؛ بلافاصله پس از ورود موفق، Hash زیر Pepper جدید بازنویسی
+     می‌شود (`needsPepperUpgrade`؛ فقط وقتی پنجره پیکربندی شده، یک تأیید Argon2 اضافه دارد).
+  3. وقتی کاربران فعال بازنویسی شدند، مقدار قبلی را حذف کنید. رمز کاربرانی که در پنجره وارد
+     نشدند با «فراموشی رمز» بازیابی می‌شود.
+- پس از هر ورود موفق، اگر Hash قدیمی‌تر از سیاست فعلی باشد (پارامتر ضعیف‌تر) با `needsRehash`، یا
+  زیر Pepper قبلی/بدون Pepper باشد با `needsPepperUpgrade` شناسایی و بی‌صدا بازنویسی می‌شود.
+
 ### 3.2 قفل و محدودیت
 
 | سطح | سیاست پیشنهادی |
 |---|---|
-| هر حساب | 5 تلاش ناموفق → قفل 15 دقیقه (تدریجی تا 24 ساعت) |
+| هر حساب | 5 تلاش ناموفق → قفل 15 دقیقه (مدت ثابت؛ افزایش تدریجی پیاده‌سازی نشده) |
 | هر IP | 20 تلاش در 10 دقیقه → محدودیت موقت |
-| `/token` | 60 درخواست در دقیقه به‌ازای کلاینت |
+| `/token` | 300 درخواست در دقیقه به‌ازای IP (`TOKEN_RATE_LIMIT`) → `429` با `Retry-After` و `Cache-Control: no-store`، قبل از احراز هویت کلاینت |
 | `/authorize` | 30 درخواست در دقیقه به‌ازای IP |
 | ارسال ایمیل | 5 در ساعت به‌ازای حساب |
 | OTP | 5 تلاش، سپس ابطال کد |
 
 - پاسخ‌ها و زمان پاسخ نباید وجود حساب را افشا کنند.
+- **آدرس کلاینت پشت پراکسی:** `TRUSTED_PROXY_CIDRS` به `fastify({trustProxy})` داده می‌شود؛ بدون آن `request.ip` آدرس پراکسی است و همهٔ کلاینت‌ها یک سبد Rate Limit مشترک دارند (و `ip` در Audit بی‌معنا می‌شود). فقط Peer داخل این محدوده‌ها اجازهٔ ارسال `X-Forwarded-For` دارد.
+- **بودجهٔ پاسخ یکسان:** `/password/forgot` و `/email/verification/request` با بودجهٔ ثابت (`RECOVERY_RESPONSE_BUDGET_MS`) و ارسال Mail به‌صورت پس‌زمینه پاسخ می‌دهند؛ Latency انتقال Mail به پاسخ نمی‌رسد، بنابراین زمان پاسخ آدرس موجود را افشا نمی‌کند.
 - هشدار به کاربر پس از ورود موفق از دستگاه جدید (اختیاری).
 
 ### 3.3 MFA
@@ -106,6 +129,37 @@
 | Provider Tokens | ذخیره نمی‌شوند؛ در صورت نیاز موقت و رمزنگاری‌شده |
 | Admin Panel | ورود سوشال غیرفعال یا محدود به Provider سازمانی |
 | Rate Limit | روی start و callback؛ پیام خطای عمومی |
+
+### 3.5 Login Context (چند مدل ورود)
+
+| کنترل | الزام |
+|---|---|
+| مالکیت Context | `login_context` باید متعلق به همان `client_id` باشد؛ در غیر این صورت رد |
+| فعال‌بودن | Context غیرفعال در authorize و token پذیرفته نمی‌شود |
+| عضویت | کاربر باید Membership فعال همان Context داشته باشد |
+| نقش‌ها | فقط `allowed_roles` همان Context؛ نقش `idp:*` ممنوع |
+| Claim | `login_context` در Access/ID Token و بررسی آن در مسیرهای حساس |
+| MFA | `mfa_policy` هر Context جداگانه اعمال می‌شود |
+| Step-up | Contextهای `step_up_required` بدون احراز هویت تازه توکن نمی‌دهند |
+| Refresh | Refresh Token به همان Context مقید است و برای Context دیگر کار نمی‌کند |
+| Audit | هر ورود/رد با `client_id` و `login_context` ثبت می‌شود |
+| Admin | ادمین Context فقط به همان Context دسترسی دارد |
+
+> Context نباید جایگزین بررسی سروری شود: Resource Server باید `login_context` را برای مسیرهای حساس الزام کند.
+
+### 3.6 چندزبانه بودن (Localization)
+
+| کنترل | الزام |
+|---|---|
+| منبع متن | فقط کلیدهای بسته پایه؛ کلید ناشناخته رد می‌شود |
+| مقدار متن | متن ساده، حداکثر 500 کاراکتر؛ HTML/Script ممنوع |
+| Placeholder | فقط `{name}`, `{appName}`, `{supportEmail}` |
+| رندر | Escape پیش‌فرض React؛ `dangerouslySetInnerHTML` ممنوع |
+| Locale | Allowlist از Public Config؛ بدون ساخت مسیر از ورودی |
+| Bundle عمومی | فقط متن‌ها؛ بدون داده شخصی یا Secret |
+| دسترسی | ادمین اپ فقط ترجمه اپ خودش |
+| Audit | `client.locale.updated` و `client.translation.updated` |
+| Cache | `ETag` بر اساس `version`؛ بدون افشای نسخه‌های دیگر |
 
 ## 4. کنترل‌های توکن
 
@@ -233,6 +287,14 @@
 
 ### 9.2 هشدارهای امنیتی
 
+هشدارها کانالی جدا از Audit هستند: Audit «چه اتفاقی افتاد» را برای انطباق نگه می‌دارد و هشدار از
+اپراتور می‌خواهد همین حالا نگاه کند. پیاده‌سازی فعلی (`api/src/security/alerts.ts`) هر هشدار را
+هم به‌صورت یک خط ساختاریافتهٔ `security-alert` در لاگ و هم به‌صورت شمارندهٔ
+`idpn_security_alerts_total{type,severity}` منتشر می‌کند تا قاعدهٔ Prometheus و Runbook روی آن
+عمل کنند؛ ارسال به Pager فقط با تزریق یک Sink دیگر لازم است و هرگز نمی‌تواند پاسخ احراز هویت را
+خراب کند. هشدارهای پیاده‌شده: قفل حساب به‌دلیل کدهای نادرست مرحلهٔ دوم (`mfa.lockout`، شدت بالا) و
+تمام‌شدن بودجهٔ چالش (`mfa.challenge_exhausted`، متوسط).
+
 | رخداد | شدت |
 |---|---|
 | Refresh Token Reuse | بحرانی |
@@ -308,4 +370,52 @@
 - [ ] رویدادهای MFE هیچ توکنی افشا نمی‌کنند.
 - [ ] Delegated Admin در تست منفی به داده اپ دیگر دسترسی ندارد.
 - [ ] `suspended` شدن Membership توکن‌های همان اپ را باطل می‌کند.
+- [ ] Context فقط نقش‌های `allowed_roles` خودش را می‌دهد و `idp:*` صادر نمی‌کند.
+- [ ] Resource Server برای مسیرهای حساس `login_context` را الزام می‌کند.
+- [ ] `login_context` نامعتبر یا متعلق به اپ دیگر رد می‌شود.
+- [ ] متن‌های ترجمه فقط متنی و Escape‌شده رندر می‌شوند.
+- [ ] Locale فقط از Allowlist پذیرفته می‌شود.
+- [ ] تغییر Context و ترجمه Audit و Step-up دارد.
 - [ ] تغییر Provider سوشال و نقش حساس Audit و Step-up دارد.
+
+## گزارش CSP، Trusted Types و هدرهای لبه (#78 §7)
+
+- `POST /csp-report` (بدون احراز هویت، ۱۶ KiB، ۳۰ گزارش در دقیقه برای هر آدرس) هر دو قالب `application/csp-report` و `application/reports+json` را می‌پذیرد، URLها را به origin+path کاهش می‌دهد و فقط شمارندهٔ `idpn_csp_reports_total{directive,disposition}` و یک لاگ بدون Secret می‌نویسد. پاسخ همیشه `204` است.
+- سیاست `report-to csp` و هدر `Reporting-Endpoints` از `buildSecurityHeaders({ reportEndpoint })` می‌آیند؛ فاز report-only برای Trusted Types هم به همین مقصد گزارش می‌دهد. `web/src/security/trusted-types.ts` سیاست `idpn` را که هر sink را رد می‌کند پیش از رندر ثبت می‌کند.
+- نمونه‌های `deploy/security/` با `web/src/security/deploy-parity.test.ts` به `headers.ts` گره خورده‌اند: مقدار هر هدر باید یکسان باشد. Nginx بدون `Origin` را مجاز و Origin بیگانه را `403` می‌کند (مثل `decideCors`)، Caddy هم Origin بیگانه را رد می‌کند و هر دو preflight واقعی دارند.
+
+## حلقهٔ کلید برای Secretهای رمزنگاری‌شده (#78 §3)
+
+- پاکت نسخهٔ ۲: `[2][keyId][iv][tag][ciphertext]`؛ شناسهٔ کلید (۱ تا ۲۵۵) هم‌راه نسخه به‌عنوان AAD احراز می‌شود. پاکت‌های نسخهٔ ۱ (پیش از حلقه) با همهٔ کلیدهای پیکربندی‌شده امتحان می‌شوند، پس استقرار اول به migration داده نیاز ندارد.
+- پیکربندی: `SOCIAL_SECRET_KEY` + `SOCIAL_SECRET_KEY_ID` + `SOCIAL_SECRET_PREVIOUS_KEYS=id:base64,...` و برای TOTP معادل `MFA_SECRET_*` (بدون کلید اختصاصی، حلقهٔ social استفاده می‌شود).
+- **چرخش:** کلید جدید با شناسهٔ جدید را فعال کنید، کلید قبلی را در `*_PREVIOUS_KEYS` نگه دارید، `pnpm --filter @idpn/api ops:rewrap-secrets` (با `--dry-run` برای شمارش) همهٔ ردیف‌ها را زیر کلید فعلی دوباره رمز می‌کند، سپس کلید قبلی را حذف کنید. اگر پاکتی را هیچ کلیدی باز نکند اسکریپت با خروجی ۱ آن را گزارش می‌دهد و چیزی را رد نمی‌کند.
+
+## کلیدهای امضا: زمان انتشار ابطال و cool-down (#78 §1)
+
+- **حد بالای انتشار ابطال کلید:** پس از `POST /api/v1/keys/rotate` با `revokePrevious` یا ابطال یک kid، هر replica حداکثر `KEY_CACHE_TTL_SECONDS` (پیش‌فرض ۳۰ ثانیه) کلید قبلی را در حافظه دارد و پاسخ JWKS با `Cache-Control: max-age=300` ارائه می‌شود. پس یک RP که JWKS را کش کرده ممکن است توکن امضاشده با کلید ابطال‌شده را تا حدود **۳۳۰ ثانیه** بپذیرد. این بازه را در Incident Response در نظر بگیرید: برای قطع فوری، علاوه بر ابطال کلید، `/oauth2/revoke` و حذف نشست‌ها لازم است.
+- **کلید retired** به اندازهٔ `KEY_RETIRED_RETENTION_SECONDS` (حداقل ۳۶۰۰، بلندترین عمر access token) در JWKS می‌ماند.
+- **Cool-down:** چرخش عادی تا `KEY_ROTATION_COOLDOWN_SECONDS` (پیش‌فرض ۳۰۰، `0` = خاموش) پس از ساخت کلید فعال پذیرفته نمی‌شود و `409` با `Retry-After` می‌دهد؛ چرخش اضطراری (`revokePrevious: true`) از آن مستثناست. هدف جلوگیری از چرخاندن پشت‌سرهمِ کلیدها با یک توکن ادمین دزدیده‌شده است که کلیدهای مشروع را از پنجرهٔ retention بیرون می‌اندازد.
+
+## جداسازی دسترسی لاگ Audit (#77 §4)
+
+تا وقتی نقش اپلیکیشن مالک جدول `audit_events` است، می‌تواند trigger «فقط-افزودن» را `DISABLE`/`DROP` کند یا سوئیچ نگه‌داری را خودش روشن کند. جداسازی، مالکیت را به یک نقش `NOLOGIN` می‌دهد و به اپلیکیشن فقط `INSERT, SELECT` می‌ماند.
+
+```bash
+# 1) SQL را ببینید یا به DBA بدهید (نام نقش‌ها اعتبارسنجی و quote می‌شوند)
+pnpm --filter @idpn/api ops:audit-privileges -- print --app-role idpn_app --owner-role idpn_audit_owner --maintenance-role idpn_maint
+# 2) با اتصال ادمین اعمال کنید (تراکنشی و idempotent)
+pnpm --filter @idpn/api ops:audit-privileges -- apply --admin-url "$ADMIN_DATABASE_URL" --confirm --app-role idpn_app --owner-role idpn_audit_owner --maintenance-role idpn_maint
+# 3) با DATABASE_URL خودِ اپلیکیشن بررسی کنید؛ هر شکاف exit 1 می‌دهد
+pnpm --filter @idpn/api ops:audit-privileges -- check
+```
+
+- نقش نگه‌داری (`--maintenance-role`) عضو نقش مالک است و فقط برای `ops:audit-retention` استفاده می‌شود؛ آن اسکریپت اگر `AUDIT_MAINTENANCE_DATABASE_URL` تنظیم شده باشد از آن استفاده می‌کند، وگرنه `DATABASE_URL`.
+- پس از جداسازی، حتی با `set_config('idpn.audit_maintenance','on')` نقش اپلیکیشن نمی‌تواند حذف کند (`permission denied`) و `ALTER TABLE ... DISABLE TRIGGER` / `DROP TRIGGER` با «must be owner» رد می‌شود؛ این رفتارها در `api/test/audit-privilege-split.integration.test.ts` روی PostgreSQL واقعی تست شده‌اند.
+- `check` ابرکاربر بودن، مالکیت یا عضویت در نقش مالک، و هر یک از `UPDATE/DELETE/TRUNCATE` را گزارش می‌کند و نبودنِ `INSERT` را هم (چون API دیگر نمی‌تواند Audit بنویسد).
+- این کار به یک اتصال ادمین نیاز دارد که این repository ندارد؛ اجرای `apply` روی محیط‌های واقعی با شماست.
+
+## رضایت کاربر و گیت `/authorize` (#81)
+
+- گیت قبلی fail-open بود (`isConsentGranted ?? true`) و هیچ‌چیز جدول `consents` را نمی‌خواند. اکنون: پیش‌فرض رد، ثبت مسیر بدون گیت خطا می‌دهد، و فقط کلاینتی که صریحاً `firstParty = true` دارد از رضایت معاف است.
+- handle رضایت مات، تک‌مصرف و وابسته به کاربر است؛ تصمیم فقط با بررسی Origin هم‌مبدأ و `Content-Type: application/json` پذیرفته می‌شود و فقط به redirect_uri ثبت‌شدهٔ کلاینت ریدایرکت می‌کند.
+- ابطال رضایت علاوه بر جدول `consents`، refresh tokenها و کدهای مبادله‌نشدهٔ همان (کاربر، کلاینت) را باطل می‌کند.

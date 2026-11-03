@@ -1,0 +1,35 @@
+{
+  "name": "@idpn/i18n",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Base message bundles, locale resolution and direction derivation for the on4net IDPN UI",
+  "license": "UNLICENSED",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./locale": {
+      "types": "./src/locale.ts",
+      "default": "./src/locale.ts"
+    },
+    "./messages/fa-IR.json": "./messages/fa-IR.json",
+    "./messages/en-US.json": "./messages/en-US.json"
+  },
+  "scripts": {
+    "check:messages": "node scripts/check-messages.mjs",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node scripts/check-messages.mjs && vitest run",
+    "test:coverage": "node scripts/check-messages.mjs && vitest run --coverage"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "@vitest/coverage-v8": "5.0.5",
+    "typescript": "5.9.3",
+    "vitest": "5.0.5"
+  }
+}

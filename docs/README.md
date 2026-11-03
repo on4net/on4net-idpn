@@ -1,8 +1,8 @@
 # on4net IDPN — سامانه هویت و دسترسی یکپارچه
 
-> **نسخه:** 0.3 (shadcn/ui انتخاب شد)
+> **نسخه:** 0.4 (چندزبانه per-app و Login Contexts اضافه شد)
 > **تاریخ:** 2026-10-18
-> **وضعیت:** استک، میکرو-فرانت‌اند، shadcn/ui، سوشال لاگین و الزام تست تأیید شد؛ جزئیات باز در بخش ۷.
+> **وضعیت:** استک، میکرو-فرانت‌اند، shadcn/ui، سوشال لاگین، چندزبانه per-app، چند مدل ورود per-app و الزام تست تأیید شد؛ جزئیات باز در بخش ۷.
 
 ## 1. خلاصه اجرایی
 
@@ -13,6 +13,8 @@
 - هر پلتفرم فقط نقش‌ها و مجوزهای مرتبط با خودش را می‌بیند.
 - رابط ورود مشترک روی دامنه IdP و ماژول‌های پروفایل/مدیریت کاربری به‌صورت **میکرو-فرانت‌اند** در اپ‌ها استفاده می‌شوند؛ هر اپ فقط کاربران و نقش‌های خودش را می‌بیند.
 - ورود با Google/Facebook با **Credential اختصاصی هر اپلیکیشن** پشتیبانی می‌شود.
+- هر اپ می‌تواند **چند مدل ورود** داشته باشد (مدیر مشتری، تیم مشتری، تیم ادمین و…) با نقش‌ها، روش‌های ورود، MFA و ظاهر مستقل.
+- هر اپ می‌تواند **زبان، جهت متن و متن‌های خودش** را داشته باشد (فارسی/انگلیسی و افزودنی) بدون Fork کردن UI.
 - خروج، مدیریت نشست‌ها، بازیابی رمز عبور، ورود دومرحله‌ای و گزارش‌های حسابرسی یک‌جا انجام می‌شود.
 - تست‌های Unit، Integration و E2E بخشی از تحویل هر قابلیت هستند.
 
@@ -29,6 +31,8 @@
 | P0 | میکرو-فرانت‌اند مشترک | ورود Hosted + ماژول‌های `account`/`user-management` بدون بازنویسی در اپ‌ها |
 | P0 | مدیریت کاربری هر اپ | ادمین هر اپ فقط اعضای همان اپ را می‌بیند (Delegated Admin) |
 | P0 | سوشال لاگین با کلید هر اپ | Google/Facebook با Client ID/Secret اختصاصی هر اپ |
+| P0 | چندزبانه به‌ازای هر اپ | هر اپ زبان پیش‌فرض، زبان‌های فعال، RTL و متن اختصاصی خودش را دارد |
+| P0 | چند مدل ورود در یک اپ | Login Context با نقش، روش ورود، MFA و ظاهر مستقل |
 | P0 | تست خودکار | Unit + Integration + E2E در CI برای هر قابلیت |
 | P1 | خروج یکپارچه | خروج از همه پلتفرم‌ها با یک اقدام + ابطال نشست‌ها |
 | P1 | ورود دومرحله‌ای (MFA) | TOTP و WebAuthn برای کاربران و اجباری برای ادمین‌ها |
@@ -45,6 +49,8 @@
 - میکرو-فرانت‌اند مشترک: صفحه ورود Hosted + ماژول‌های `account` و `user-management` با نسخه‌بندی مستقل
 - مدیریت کاربری scoped برای هر اپلیکیشن (`ClientMembership`) و ادمین واگذارشده (Delegated Admin)
 - سوشال لاگین Google/Facebook با Credential اختصاصی هر اپ
+- چندزبانه بودن per-app: بسته پایه `fa`/`en`، Override متن هر اپ، RTL/LTR، تاریخ و اعداد با Locale
+- مدل‌های ورود per-app (Login Contexts): چند درگاه ورود در یک اپ با نقش‌ها و سیاست‌های مستقل
 - Design System مشترک با shadcn/ui، Tailwind v4 و توکن‌های OKLCH
 - نقش‌ها، مجوزهای قابل تعریف توسط هر اپ و تخصیص آن‌ها در سطح سراسری/سازمان
 - انتشار نقش/مجوز و ویژگی‌های اختصاصی اپ در توکن دسترسی همان پلتفرم
@@ -77,6 +83,15 @@
 9. **یک UI، چند اپلیکیشن:** ورود روی دامنه IdP میزبانی می‌شود و مدیریت حساب/کاربری به‌صورت میکرو-فرانت‌اند با `clientId` و تنظیمات هر اپ رندر می‌شود؛ Fork کردن UI ممنوع است.
 10. **مرز داده‌ای هر اپ:** ادمین هر اپ فقط اعضای همان اپ را می‌بیند؛ محدودیت در سرور اعمال می‌شود، نه فقط در UI.
 11. **آزمون‌پذیری:** هر قابلیت با تست Unit/Integration/E2E و قرارداد نسخه‌دار تحویل می‌شود.
+12. **زبان بخشی از هویت اپ است:** زبان و متن هر اپ از تنظیمات همان کلاینت می‌آید، نه از کد مشترک؛ Override مجاز، Fork ممنوع.
+13. **هر درگاه ورود یک مرز دسترسی است:** هر Login Context فقط نقش‌های مجاز خودش را می‌دهد و Claim `login_context` مرز را در توکن ثابت می‌کند.
+
+### تغییرات نسخه 0.4
+
+- **چندزبانه per-app:** سند [localization.md](./localization.md) اضافه شد؛ زنجیره تعیین زبان، Override متن هر اپ، RTL/LTR و تاریخ/اعداد با Locale.
+- **چند مدل ورود per-app:** سند [login-contexts.md](./login-contexts.md) اضافه شد؛ `ClientLoginContext`، عضویت در سطح Context، Claim `login_context` و امنیت Cross-Context.
+- `ClientMembership` در سطح `(client, context, user)` تعریف شد.
+- هدف‌های P0 برای هر دو ماژول اضافه شد.
 
 ### تغییرات نسخه 0.3
 
@@ -95,14 +110,30 @@
 |---|---|
 | [architecture.md](./architecture.md) | معماری اجزا، جریان SSO، استقرار، الزامات غیرعملکردی، استک |
 | [micro-frontend.md](./micro-frontend.md) | معماری میکرو-فرانت‌اند، Module Federation/Web Component، قرارداد Config/Event، نسخه‌بندی |
+| [mfe-sdk.md](./mfe-sdk.md) | بسته `@idpn/mfe-sdk`، نصب و اتصال، مثال React/Vue/HTML، امنیت BFF/SPA، CSP، نسخه‌بندی و عیب‌یابی |
 | [design-system.md](./design-system.md) | shadcn/ui، توکن‌ها، RTL، ایزولاسیون Tailwind در MFE و Governance |
-| [domain-model.md](./domain-model.md) | مدل داده، ClientMembership، سوشال Provider، مدل RBAC، Claimها |
+| [localization.md](./localization.md) | چندزبانه per-app: تعیین زبان، Override متن، RTL، تاریخ و اعداد |
+| [login-contexts.md](./login-contexts.md) | چند مدل ورود در یک اپ: مدل داده، جریان، نقش‌ها و امنیت |
+| [domain-model.md](./domain-model.md) | مدل داده، ClientMembership، ClientLoginContext، سوشال Provider، مدل RBAC، Claimها |
 | [auth-flows.md](./auth-flows.md) | جریان‌های ورود، SSO، توکن‌ها، خروج، سوشال لاگین، MFA |
 | [api.md](./api.md) | قرارداد APIهای OIDC، Public Config، Admin و Delegated Admin |
-| [security.md](./security.md) | مدل تهدید، امنیت MFE و سوشال، کنترل‌ها، چک‌لیست |
+| [security.md](./security.md) | مدل تهدید، امنیت MFE، سوشال، Context و ترجمه، کنترل‌ها، چک‌لیست |
 | [integration-guide.md](./integration-guide.md) | راهنمای اتصال اپ‌ها و نمونه‌های استک‌های مختلف |
+| [app-onboarding.md](./app-onboarding.md) | ابزار و پیکربندی آماده‌سازی اپ: Credential سوشال هر اپ، نگاشت مجوز/نقش، مهاجرت کاربران |
+| [runbooks/app-onboarding.md](./runbooks/app-onboarding.md) | Runbook عملیاتی: ثبت Callback، چرخش Secret، مهاجرت، محیط Staging و Rollback |
+| [monitoring.md](./monitoring.md) | پایش: متریک‌های Prometheus، لاگ ساختاریافته، Probeها، هشدارها، بکاپ/بازیابی و RPO/RTO |
+| [runbooks/incidents.md](./runbooks/incidents.md) | Runbook پاسخ به حادثه: سطوح شدت، ۵ دقیقهٔ اول، سناریوهای خرابی، شواهد و Rollback |
 | [testing.md](./testing.md) | استراتژی Unit/Integration/Contract/E2E، پوشش، CI و تست امنیتی |
 | [roadmap.md](./roadmap.md) | فازبندی اجرا، معیار پذیرش و ریسک‌ها |
+
+### Skills و Agent پروژه
+
+- Skillهای پروژه در [`.github/skills`](../.github/skills/README.md) قرار دارند و همه مخصوص on4net IDPN هستند.
+- Agent پیاده‌سازی: [`.github/agents/idpn-developer.agent.md`](../.github/agents/idpn-developer.agent.md) — کارت از Project 2 برمی‌دارد، پیاده‌سازی و تست می‌کند و به `In review` می‌برد.
+- ابزار برد: [`.github/agents/board.ps1`](../.github/agents/board.ps1) — خروجی فشرده برای کاهش مصرف Context.
+- برای UI، توکن‌ها و RTL مرجع اصلی [design-system.md](./design-system.md) است.
+- برای تسک جدید `github-task-management`، برای کارکردن Board `board-loop`، و برای Done `review-gate`.
+- برای Task جدید از `github-task-management` و برای Done از `review-gate` استفاده شود.
 
 ## 6. تصمیم‌های تأییدشده و پیشنهادی
 
@@ -115,6 +146,9 @@
 | میکرو-فرانت‌اند | Login Hosted روی دامنه IdP + Module Federation/Web Component برای `account` و `user-management` + Fallback | یک UI مشترک بدون بازنویسی و با امنیت کوکی/SSO | **تأییدشده** (نحوه فنی پیشنهادی) |
 | مدیریت کاربری هر اپ | `ClientMembership` + Delegated Admin | هر اپ فقط کاربران و نقش‌های خودش را ببیند | پیشنهادی |
 | سوشال لاگین | Google/Facebook با Client ID/Secret اختصاصی هر کلاینت | الزام کارفرما | **تأییدشده** |
+| چندزبانه | بسته پایه `fa-IR`/`en-US` + Override متن هر اپ + RTL/LTR خودکار | زبان بخشی از هویت هر اپ است | **تأییدشده** |
+| مدل‌های ورود | `ClientLoginContext` چندگانه در هر اپ با نقش/روش ورود/MFA مستقل | مرزهای دسترسی روشن بین مشتری، تیم و ادمین | **تأییدشده** |
+| عضویت | `ClientMembership` در سطح `(client, context, user)` | یک نفر می‌تواند در دو Context همان اپ نقش متفاوت داشته باشد | پیشنهادی |
 | ورود Embedded | پشتیبانی نمی‌شود؛ Redirect سطح‌بالا به Hosted Auth UI | کوکی امن، SSO، محدودیت Third-Party Cookie | **نیازمند تأیید** |
 | تست | Vitest + Supertest + Testcontainers + Playwright + k6 | الزام Unit/Integration/E2E | **تأییدشده** |
 | پروتکل | OIDC + OAuth 2.1 | استاندارد، SSO آماده | پیشنهادی |
@@ -124,7 +158,7 @@
 | عمر Access Token | 10 دقیقه (قابل تنظیم به‌ازای کلاینت) | کاهش اثر سرقت توکن | پیشنهادی |
 | عمر Refresh Token | 30 روز، چرخشی، Hash‌شده، تشخیص Reuse | تعادل امنیت و تجربه | پیشنهادی |
 | نشست IdP | کوکی HttpOnly روی دامنه `auth` | SSO بدون ذخیره توکن | پیشنهادی |
-| مدل دسترسی | RBAC با کاتالوگ مجوز مخصوص هر اپ + تخصیص سازمانی | پاسخ به نیاز همه اپ‌ها | پیشنهادی |
+| مدل دسترسی | RBAC با کاتالوگ مجوز مخصوص هر اپ + محدودسازی با Login Context + تخصیص سازمانی | پاسخ به نیاز همه اپ‌ها | پیشنهادی |
 | محتوای Access Token | نقش/مجوز و ویژگی‌های همان `aud` (با سقف حجم) | جلوگیری از افشای دسترسی سایر اپ‌ها | پیشنهادی |
 | MFA | TOTP + WebAuthn؛ اجباری برای ادمین‌ها | امنیت حساب‌های حساس | پیشنهادی |
 | چندمستأجری | `tenant_id` در مدل، پیش‌فرض تک‌سازمانی | آمادگی رشد | پیشنهادی |
@@ -147,6 +181,11 @@
 12. **انطباق:** الزام نگهداشت لاگ، حذف داده کاربر یا ممیزی خاصی وجود دارد؟
 13. **APIهای ثالث:** سرویس‌های بیرونی هم باید توکن بگیرند یا فقط اپ‌های داخلی؟
 14. **برندینگ:** هر اپ تم/لوگو/دامنه ورود اختصاصی می‌خواهد یا ظاهر یکسان کافی است؟
+15. **زبان‌ها:** هر اپ کدام زبان‌ها را لازم دارد (fa، en، ar، …) و آیا اپ می‌خواهد متن‌های خودش را Override کند؟
+16. **تصمیم زبان:** زبان پیش‌فرض کل سامانه فارسی باشد یا هر اپ زبان خودش را داشته باشد؟
+17. **مدل‌های ورود:** برای هر اپ کدام Contextها لازم است (مثلاً مدیر مشتری، تیم مشتری، تیم ادمین، پشتیبانی)؟
+18. **مالکیت Context:** تعریف Contextها فقط با ادمین سراسری انجام شود یا ادمین هر اپ هم بتواند Context بسازد؟
+19. **تقویم:** نمایش تاریخ شمسی برای همه اپ‌ها الزامی است یا به‌ازای هر کلاینت قابل تنظیم باشد؟
 
 ## 8. واژه‌نامه
 
@@ -170,8 +209,14 @@
 | Host / Remote | اپلیکیشن میزبان / ماژول راه‌دور که در آن بارگذاری می‌شود |
 | Module Federation | روش به‌اشتراک‌گذاری ماژول و Dependency بین Buildها |
 | Web Component | Custom Element مستقل از فریمورک برای مصرف MFE |
-| ClientMembership | عضویت کاربر در یک اپلیکیشن با وضعیت و ویژگی‌های اختصاصی همان اپ |
-| Delegated Admin | ادمین محدود به یک اپلیکیشن که فقط اعضای همان اپ را مدیریت می‌کند |
+| ClientMembership | عضویت کاربر در یک Context از یک اپلیکیشن با وضعیت و ویژگی‌های اختصاصی |
+| Delegated Admin | ادمین محدود به یک اپ یا Context که فقط همان محدوده را مدیریت می‌کند |
 | Social Provider Credential | Client ID/Secret اختصاصی هر اپ برای Google/Facebook |
+| Login Context | درگاه ورود داخل یک اپ با نقش‌ها، روش‌های ورود و سیاست MFA مستقل |
+| Context Admin | ادمین محدود به یک Login Context |
+| Locale | زبان و منطقه (مثل `fa-IR`) که جهت متن، فونت و فرمت داده را تعیین می‌کند |
+| Translation Override | متن اختصاصی یک اپ که متن پایه را جایگزین می‌کند |
+| Dir (RTL/LTR) | جهت چیدمان متن و رابط |
+| ICU MessageFormat | قالب پیام برای جمع، انتخاب و Placeholder |
 | Test Pyramid | تقسیم تست‌ها به Unit، Integration و E2E |
 | Back-channel Logout | اطلاع‌رسانی سروربه‌سرور خروج به همه کلاینت‌ها |

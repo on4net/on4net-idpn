@@ -1,0 +1,136 @@
+import { Select as SelectPrimitive } from 'radix-ui';
+import * as React from 'react';
+
+import { resolvePortalTarget, usePortalScope } from '@/app/idpn-root';
+import { cn } from '@/lib/utils';
+
+const Select = SelectPrimitive.Root;
+const SelectValue = SelectPrimitive.Value;
+
+export const SelectTrigger = React.forwardRef<
+  React.ComponentRef<typeof SelectPrimitive.Trigger>,
+  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Trigger>
+>(({ className, children, ...props }, ref) => (
+  <SelectPrimitive.Trigger
+    ref={ref}
+    className={cn(
+      'flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-start text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+      className,
+    )}
+    {...props}
+  >
+    {children}
+    {/* The glyph is vertically symmetric, so it never needs mirroring; Radix places it. */}
+    <SelectPrimitive.Icon aria-hidden="true" className="opacity-60">
+      ▾
+    </SelectPrimitive.Icon>
+  </SelectPrimitive.Trigger>
+));
+SelectTrigger.displayName = 'SelectTrigger';
+
+export interface SelectContentProps extends React.ComponentPropsWithoutRef<
+  typeof SelectPrimitive.Content
+> {
+  /**
+   * Optional override. Inside `IdpnRoot` the overlay always targets the scoped portal host,
+   * so MFE code should leave this unset.
+   */
+  container?: HTMLElement | null;
+}
+
+export const SelectContent = React.forwardRef<
+  React.ComponentRef<typeof SelectPrimitive.Content>,
+  SelectContentProps
+>(({ className, children, container, ...props }, ref) => {
+  const scope = usePortalScope();
+  const target = resolvePortalTarget(container, scope, 'SelectContent');
+
+  /**
+   * Radix's select is modal-only: it marks every background sibling `aria-hidden` while
+   * the listbox is open but leaves its controls focusable, which axe reports as
+   * `aria-hidden-focus` (serious). A combobox popup does not need to remove the rest of
+   * the page from the accessibility tree - the focus guard already keeps Tab inside the
+   * popup - so this patch drops the `aria-hidden` marker. Radix restores its own state
+   * when the popup closes. Recorded in `web/UPSTREAM.md` (A11y #56).
+   */
+  React.useEffect(() => {
+    if (typeof document === 'undefined' || target === null) {
+      return;
+    }
+    /**
+     * Only our own island may be touched: `.idpn-root` owns its subtree, the host page owns
+     * everything else (`ui-components.instructions.md` rule 4). Stripping document-wide also
+     * left unrelated nodes exposed after the popup closed (card #56 finding 2).
+     */
+    const scopeRoot: ParentNode = target.closest('.idpn-root') ?? target;
+    const stripped = new Map<Element, string>();
+    const strip = (): void => {
+      for (const element of scopeRoot.querySelectorAll(
+        '[data-aria-hidden="true"][aria-hidden="true"]',
+      )) {
+        const value = element.getAttribute('aria-hidden');
+        if (value !== null && !stripped.has(element)) {
+          stripped.set(element, value);
+        }
+        element.removeAttribute('aria-hidden');
+      }
+    };
+    strip();
+    // Radix applies the marker in a layout/passive effect of the portalled content, which
+    // can commit after this effect; observe and strip until the popup closes.
+    const observer = new MutationObserver(strip);
+    observer.observe(scopeRoot instanceof Node ? scopeRoot : document.body, {
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['aria-hidden'],
+    });
+    return () => {
+      observer.disconnect();
+      // Put back exactly what this patch removed, so a later Radix cycle sees the truth.
+      for (const [element, value] of stripped) {
+        if (element.isConnected && !element.hasAttribute('aria-hidden')) {
+          element.setAttribute('aria-hidden', value);
+        }
+      }
+    };
+  }, [target]);
+
+  if (target === null) {
+    return null;
+  }
+
+  return (
+    <SelectPrimitive.Portal container={target}>
+      <SelectPrimitive.Content
+        ref={ref}
+        className={cn(
+          'z-50 max-h-60 overflow-auto rounded-md border border-border bg-background p-1 text-start text-foreground shadow-md',
+          className,
+        )}
+        {...props}
+      >
+        <SelectPrimitive.Viewport>{children}</SelectPrimitive.Viewport>
+      </SelectPrimitive.Content>
+    </SelectPrimitive.Portal>
+  );
+});
+SelectContent.displayName = 'SelectContent';
+
+export const SelectItem = React.forwardRef<
+  React.ComponentRef<typeof SelectPrimitive.Item>,
+  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Item>
+>(({ className, children, ...props }, ref) => (
+  <SelectPrimitive.Item
+    ref={ref}
+    className={cn(
+      'relative flex cursor-default select-none items-center rounded-sm px-2 py-1.5 text-start text-sm outline-none focus:bg-accent focus:text-accent-foreground',
+      className,
+    )}
+    {...props}
+  >
+    <SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText>
+  </SelectPrimitive.Item>
+));
+SelectItem.displayName = 'SelectItem';
+
+export { Select, SelectValue };

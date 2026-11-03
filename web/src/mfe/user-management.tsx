@@ -1,0 +1,693 @@
+import type { IdpnLocales, IdpnTheme } from '@idpn/mfe-sdk';
+import * as React from 'react';
+
+import { IdpnRoot } from '@/app/idpn-root';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Spinner } from '@/components/ui/spinner';
+import {
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
+  MfeApiError,
+  createMfeApiClient,
+  type MfeApiClient,
+  type MfeMember,
+  type MfeRole,
+  type MemberStatus,
+} from './api-client';
+import { resolveDirection, resolveLocale, translate, type Locale } from '@/i18n';
+
+export interface UserManagementEvent {
+  type: 'auth:error';
+  code: string;
+}
+
+export interface UserManagementProps {
+  /** Public client id of the host application; the API scope is limited to it. */
+  clientId: string;
+  /** BFF base URL; defaults to same-origin. */
+  apiBaseUrl?: string;
+  /** SPA mode only: returns the in-memory access token. Never persist it. */
+  getAccessToken?: () => string | null;
+  locale?: string;
+  dir?: 'rtl' | 'ltr';
+  /** Languages enabled by the client; only these are honoured. */
+  locales?: IdpnLocales;
+  pageSize?: number;
+  /** Receives non-sensitive module events; never contains a token. */
+  onEvent?: (event: UserManagementEvent) => void;
+  /** Test seam; production hosts use the configured client. */
+  apiClient?: MfeApiClient;
+}
+
+const STATUS_VARIANT: Record<MemberStatus, 'default' | 'outline' | 'destructive'> = {
+  invited: 'outline',
+  active: 'default',
+  suspended: 'destructive',
+};
+
+const STATUS_VALUES: readonly ('all' | MemberStatus)[] = ['all', 'invited', 'active', 'suspended'];
+
+type Translate = (key: string, values?: Record<string, string | number>) => string;
+
+const describeError = (error: unknown, t: Translate): string => {
+  if (error instanceof MfeApiError) {
+    if (error.kind === 'unauthorized' || error.kind === 'forbidden') {
+      return t('members.errorForbidden');
+    }
+    if (error.kind === 'network') {
+      return t('members.errorNetwork');
+    }
+    return error.detail ?? t('members.errorRequest');
+  }
+  return t('members.errorUnexpected');
+};
+
+const isAbort = (error: unknown): boolean =>
+  typeof DOMException !== 'undefined' &&
+  error instanceof DOMException &&
+  error.name === 'AbortError';
+
+const toggleKey = (keys: string[], key: string): string[] =>
+  keys.includes(key) ? keys.filter((entry) => entry !== key) : [...keys, key];
+
+/**
+ * `user-management` micro-frontend module (docs/micro-frontend.md 8).
+ *
+ * Renders the members of exactly one app. The client id is configuration, never user
+ * input; every request goes to `/api/v1/clients/{clientId}/…` through the host's BFF (or an
+ * in-memory token in SPA mode). Events never carry a token.
+ */
+export function UserManagement({
+  clientId,
+  apiBaseUrl,
+  getAccessToken,
+  locale = 'fa-IR',
+  dir,
+  locales,
+  pageSize = 10,
+  onEvent,
+  apiClient,
+}: UserManagementProps) {
+  const activeLocale: Locale = resolveLocale({
+    configLocale: locale,
+    supported: locales?.supported,
+    clientDefault: locales?.default,
+  });
+  const direction = resolveDirection(activeLocale, dir ?? locales?.dir?.[activeLocale]);
+  const t = React.useCallback(
+    (key: string, values: Record<string, string | number> = {}) =>
+      translate(activeLocale, key, values),
+    [activeLocale],
+  );
+  const statusOptions = React.useMemo(
+    () => STATUS_VALUES.map((value) => ({ value, label: t(`members.status.${value}`) })),
+    [t],
+  );
+  const statusLabel = (status: MemberStatus): string => t(`members.status.${status}`);
+  const api = React.useMemo(
+    () =>
+      apiClient ??
+      createMfeApiClient({
+        clientId,
+        ...(apiBaseUrl === undefined ? {} : { baseUrl: apiBaseUrl }),
+        ...(getAccessToken === undefined ? {} : { getAccessToken }),
+      }),
+    [apiClient, clientId, apiBaseUrl, getAccessToken],
+  );
+
+  const [members, setMembers] = React.useState<MfeMember[]>([]);
+  const [total, setTotal] = React.useState(0);
+  const [roles, setRoles] = React.useState<MfeRole[]>([]);
+  const [page, setPage] = React.useState(1);
+  const [searchInput, setSearchInput] = React.useState('');
+  const [query, setQuery] = React.useState('');
+  const [status, setStatus] = React.useState<'all' | MemberStatus>('all');
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+  const [reloadKey, setReloadKey] = React.useState(0);
+  /** Focus returns to the row's Roles button after the dialog closes (no DialogTrigger). */
+  const rolesTriggerRef = React.useRef<HTMLButtonElement | null>(null);
+
+  const report = React.useCallback(
+    (caught: unknown): string => {
+      if (caught instanceof MfeApiError) {
+        onEvent?.({ type: 'auth:error', code: caught.kind });
+      }
+      return describeError(caught, t);
+    },
+    [onEvent, t],
+  );
+
+  React.useEffect(() => {
+    const controller = new AbortController();
+    let active = true;
+    setLoading(true);
+    setError(null);
+
+    api
+      .listMembers(
+        {
+          page,
+          limit: pageSize,
+          ...(query === '' ? {} : { q: query }),
+          ...(status === 'all' ? {} : { status }),
+        },
+        { signal: controller.signal },
+      )
+      .then((result) => {
+        if (!active) {
+          return;
+        }
+        setMembers(result.items);
+        setTotal(result.total);
+      })
+      .catch((caught: unknown) => {
+        if (!active || isAbort(caught)) {
+          return;
+        }
+        setError(report(caught));
+      })
+      .finally(() => {
+        if (active) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [api, page, pageSize, query, status, reloadKey, report]);
+
+  React.useEffect(() => {
+    const controller = new AbortController();
+    let active = true;
+    api
+      .listRoles({ signal: controller.signal })
+      .then((items) => {
+        if (active) {
+          setRoles(items);
+        }
+      })
+      .catch(() => {
+        // Roles are optional for the list view; the dialogs explain the gap.
+        if (active) {
+          setRoles([]);
+        }
+      });
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [api]);
+
+  const [inviteOpen, setInviteOpen] = React.useState(false);
+  const [inviteEmail, setInviteEmail] = React.useState('');
+  const [inviteName, setInviteName] = React.useState('');
+  const [inviteRoleKeys, setInviteRoleKeys] = React.useState<string[]>([]);
+  const [inviteAttributes, setInviteAttributes] = React.useState('');
+  const [inviteError, setInviteError] = React.useState<string | null>(null);
+  const [inviting, setInviting] = React.useState(false);
+
+  const [roleTarget, setRoleTarget] = React.useState<MfeMember | null>(null);
+  const [roleDraft, setRoleDraft] = React.useState<string[]>([]);
+  const [roleError, setRoleError] = React.useState<string | null>(null);
+  const [savingRoles, setSavingRoles] = React.useState(false);
+
+  const resetInvite = () => {
+    setInviteEmail('');
+    setInviteName('');
+    setInviteRoleKeys([]);
+    setInviteAttributes('');
+    setInviteError(null);
+  };
+
+  const submitSearch = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setPage(1);
+    setQuery(searchInput.trim());
+  };
+
+  const submitInvite = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setInviteError(null);
+
+    let attributes: Record<string, unknown> = {};
+    if (inviteAttributes.trim() !== '') {
+      try {
+        const parsed: unknown = JSON.parse(inviteAttributes);
+        if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          throw new Error('not an object');
+        }
+        attributes = parsed as Record<string, unknown>;
+      } catch {
+        setInviteError(t('members.inviteInvalidAttributes'));
+        return;
+      }
+    }
+
+    setInviting(true);
+    try {
+      await api.inviteMember({
+        email: inviteEmail.trim(),
+        ...(inviteName.trim() === '' ? {} : { displayName: inviteName.trim() }),
+        roleKeys: inviteRoleKeys,
+        attributes,
+      });
+      setInviteOpen(false);
+      resetInvite();
+      setPage(1);
+      setReloadKey((value) => value + 1);
+    } catch (caught) {
+      setInviteError(report(caught));
+    } finally {
+      setInviting(false);
+    }
+  };
+
+  const openRoleDialog = (member: MfeMember) => {
+    setRoleTarget(member);
+    setRoleDraft(member.roleKeys);
+    setRoleError(null);
+  };
+
+  const saveRoles = async () => {
+    if (roleTarget === null) {
+      return;
+    }
+    setSavingRoles(true);
+    setRoleError(null);
+    try {
+      await api.replaceRoles(roleTarget.userId, roleDraft);
+      setRoleTarget(null);
+      setReloadKey((value) => value + 1);
+    } catch (caught) {
+      setRoleError(report(caught));
+    } finally {
+      setSavingRoles(false);
+    }
+  };
+
+  const changeStatus = async (member: MfeMember, next: MemberStatus) => {
+    setError(null);
+    try {
+      await api.updateMember(member.userId, { status: next });
+      setReloadKey((value) => value + 1);
+    } catch (caught) {
+      setError(report(caught));
+    }
+  };
+
+  const rolePicker = (selected: string[], onToggle: (key: string) => void, label: string) =>
+    roles.length === 0 ? (
+      <p className="text-sm text-muted-foreground">{t('members.noRoles')}</p>
+    ) : (
+      <div role="group" aria-label={label} className="flex flex-wrap gap-2">
+        {roles.map((role) => (
+          <Button
+            key={role.key}
+            type="button"
+            size="sm"
+            variant={selected.includes(role.key) ? 'default' : 'outline'}
+            aria-pressed={selected.includes(role.key)}
+            onClick={() => onToggle(role.key)}
+          >
+            {role.name}
+          </Button>
+        ))}
+      </div>
+    );
+
+  const pageCount = total === 0 ? 1 : Math.ceil(total / pageSize);
+
+  return (
+    <section
+      className="w-full max-w-4xl rounded-lg border border-border bg-card p-6"
+      aria-busy={loading}
+      dir={direction}
+      lang={activeLocale}
+      data-client-id={clientId}
+    >
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h2 className="text-lg font-semibold text-foreground">{t('members.title')}</h2>
+          <p className="text-sm text-muted-foreground">
+            <bdi dir="ltr">{clientId}</bdi>
+          </p>
+        </div>
+
+        <Dialog
+          open={inviteOpen}
+          onOpenChange={(open) => {
+            setInviteOpen(open);
+            if (!open) {
+              resetInvite();
+            }
+          }}
+        >
+          <DialogTrigger asChild>
+            <Button>{t('members.invite')}</Button>
+          </DialogTrigger>
+          <DialogContent aria-describedby="invite-member-description">
+            <DialogTitle>{t('members.inviteTitle')}</DialogTitle>
+            <DialogDescription id="invite-member-description" className="mt-2">
+              {t('members.inviteDescription')}
+            </DialogDescription>
+            <form className="mt-4 grid gap-3" onSubmit={submitInvite} noValidate>
+              <div className="grid gap-1">
+                <Label htmlFor="mfe-invite-email">{t('members.email')}</Label>
+                <Input
+                  id="mfe-invite-email"
+                  type="email"
+                  required
+                  dir="ltr"
+                  value={inviteEmail}
+                  onChange={(event) => setInviteEmail(event.target.value)}
+                />
+              </div>
+              <div className="grid gap-1">
+                <Label htmlFor="mfe-invite-name">{t('members.displayNameOptional')}</Label>
+                <Input
+                  id="mfe-invite-name"
+                  value={inviteName}
+                  onChange={(event) => setInviteName(event.target.value)}
+                />
+              </div>
+              <div className="grid gap-1">
+                <Label>{t('members.roles')}</Label>
+                {rolePicker(
+                  inviteRoleKeys,
+                  (key) => setInviteRoleKeys((keys) => toggleKey(keys, key)),
+                  t('members.rolesGroup'),
+                )}
+              </div>
+              <div className="grid gap-1">
+                <Label htmlFor="mfe-invite-attributes">{t('members.attributesOptional')}</Label>
+                <textarea
+                  id="mfe-invite-attributes"
+                  className="min-h-24 w-full rounded-md border border-input bg-background p-2 text-start text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  dir="ltr"
+                  value={inviteAttributes}
+                  onChange={(event) => setInviteAttributes(event.target.value)}
+                  aria-describedby="mfe-invite-attributes-help"
+                />
+                <p id="mfe-invite-attributes-help" className="text-xs text-muted-foreground">
+                  {t('members.attributesHint')}
+                </p>
+              </div>
+              {inviteError !== null && (
+                <Alert variant="destructive">
+                  <AlertTitle>{t('members.inviteFailed')}</AlertTitle>
+                  <AlertDescription>{inviteError}</AlertDescription>
+                </Alert>
+              )}
+              <div className="mt-2 flex justify-end gap-2">
+                <DialogClose asChild>
+                  <Button variant="outline" type="button">
+                    {t('members.cancel')}
+                  </Button>
+                </DialogClose>
+                <Button type="submit" disabled={inviting}>
+                  {inviting ? t('members.inviting') : t('members.inviteSubmit')}
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      <form className="mb-4 flex flex-wrap items-end gap-3" role="search" onSubmit={submitSearch}>
+        <div className="grid gap-1">
+          <Label htmlFor="mfe-member-search">{t('members.search')}</Label>
+          <Input
+            id="mfe-member-search"
+            placeholder={t('members.searchPlaceholder')}
+            value={searchInput}
+            onChange={(event) => setSearchInput(event.target.value)}
+          />
+        </div>
+        <div className="grid gap-1">
+          <Label htmlFor="mfe-member-status">{t('members.statusFilter')}</Label>
+          <Select
+            value={status}
+            onValueChange={(value) => {
+              setStatus(value as 'all' | MemberStatus);
+              setPage(1);
+            }}
+          >
+            <SelectTrigger id="mfe-member-status" aria-label={t('members.statusLabel')}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {statusOptions.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <Button type="submit" variant="secondary">
+          {t('members.search')}
+        </Button>
+      </form>
+
+      {error !== null && (
+        <Alert variant="destructive" className="mb-4">
+          <AlertTitle>{t('members.loadFailed')}</AlertTitle>
+          <AlertDescription>
+            <p>{error}</p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="mt-2"
+              onClick={() => setReloadKey((value) => value + 1)}
+            >
+              {t('members.retry')}
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      <div aria-live="polite" className="mb-2 min-h-6 text-sm text-muted-foreground">
+        {loading ? (
+          <span className="inline-flex items-center gap-2">
+            <Spinner label="" /> {t('members.loading')}
+          </span>
+        ) : (
+          t('members.caption', { total })
+        )}
+      </div>
+
+      {!loading && error === null && members.length === 0 && (
+        <p className="py-8 text-center text-muted-foreground">{t('members.empty')}</p>
+      )}
+
+      {!loading && members.length > 0 && error === null && (
+        <Table>
+          <TableCaption>{t('members.tableCaption', { clientId })}</TableCaption>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{t('members.columnName')}</TableHead>
+              <TableHead>{t('members.columnEmail')}</TableHead>
+              <TableHead>{t('members.columnStatus')}</TableHead>
+              <TableHead>{t('members.columnRoles')}</TableHead>
+              <TableHead>{t('members.columnActions')}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {members.map((member) => (
+              <TableRow key={member.userId}>
+                <TableCell className="font-medium text-foreground">{member.displayName}</TableCell>
+                <TableCell>
+                  <bdi dir="ltr">{member.email}</bdi>
+                </TableCell>
+                <TableCell>
+                  <Badge variant={STATUS_VARIANT[member.status]}>
+                    {statusLabel(member.status)}
+                  </Badge>
+                </TableCell>
+                <TableCell className="text-muted-foreground">
+                  <bdi>
+                    {member.roleKeys.length === 0
+                      ? t('members.none')
+                      : member.roleKeys.join(t('members.roleSeparator'))}
+                  </bdi>
+                </TableCell>
+                <TableCell>
+                  <div className="flex flex-wrap gap-2">
+                    {member.status === 'active' ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void changeStatus(member, 'suspended')}
+                      >
+                        {t('members.suspend')}
+                      </Button>
+                    ) : (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void changeStatus(member, 'active')}
+                      >
+                        {t('members.activate')}
+                      </Button>
+                    )}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      onClick={(event) => {
+                        rolesTriggerRef.current = event.currentTarget;
+                        openRoleDialog(member);
+                      }}
+                    >
+                      {t('members.rolesButton')}
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+
+      <div className="mt-4 flex items-center justify-between gap-2">
+        <span className="text-sm text-muted-foreground">
+          {t('members.pageOf', { page, pageCount })}
+        </span>
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            disabled={loading || page <= 1}
+            onClick={() => setPage((value) => value - 1)}
+          >
+            {t('members.previous')}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={loading || page >= pageCount}
+            onClick={() => setPage((value) => value + 1)}
+          >
+            {t('members.next')}
+          </Button>
+        </div>
+      </div>
+
+      <Dialog
+        open={roleTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRoleTarget(null);
+            setRoleError(null);
+          }
+        }}
+      >
+        <DialogContent
+          aria-describedby="member-roles-description"
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            rolesTriggerRef.current?.focus();
+          }}
+        >
+          <DialogTitle>
+            {t('members.rolesDialogTitle', { name: roleTarget?.displayName ?? '' })}
+          </DialogTitle>
+          <DialogDescription id="member-roles-description" className="mt-2">
+            {t('members.rolesDialogDescription')}
+          </DialogDescription>
+          <div className="mt-4 grid gap-3">
+            {rolePicker(
+              roleDraft,
+              (key) => setRoleDraft((keys) => toggleKey(keys, key)),
+              t('members.rolesGroup'),
+            )}
+            {roleError !== null && (
+              <Alert variant="destructive">
+                <AlertTitle>{t('members.rolesSaveFailed')}</AlertTitle>
+                <AlertDescription>{roleError}</AlertDescription>
+              </Alert>
+            )}
+            <div className="flex justify-end gap-2">
+              <DialogClose asChild>
+                <Button variant="outline" type="button">
+                  {t('members.cancel')}
+                </Button>
+              </DialogClose>
+              <Button type="button" disabled={savingRoles} onClick={() => void saveRoles()}>
+                {savingRoles ? t('members.savingRoles') : t('members.saveRoles')}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </section>
+  );
+}
+
+export interface UserManagementRootProps extends UserManagementProps {
+  /** Client theme tokens forwarded to the shared MFE root (docs/design-system.md 5). */
+  theme?: IdpnTheme;
+}
+
+/**
+ * Self-contained entry point for hosts: owns `.idpn-root`, direction and portal container so
+ * it works identically through Module Federation and the Web Component.
+ */
+export function UserManagementRoot({
+  locale = 'fa-IR',
+  dir,
+  locales,
+  theme,
+  ...props
+}: UserManagementRootProps) {
+  const activeLocale: Locale = resolveLocale({
+    configLocale: locale,
+    supported: locales?.supported,
+    clientDefault: locales?.default,
+  });
+  const direction = resolveDirection(activeLocale, dir ?? locales?.dir?.[activeLocale]);
+  return (
+    <IdpnRoot locale={activeLocale} dir={direction} theme={theme} layout="embedded">
+      <UserManagement
+        {...props}
+        locale={activeLocale}
+        dir={direction}
+        {...(locales === undefined ? {} : { locales })}
+      />
+    </IdpnRoot>
+  );
+}
+
+export default UserManagementRoot;

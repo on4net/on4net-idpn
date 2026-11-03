@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+dist-mfe/
+dist-wc/
+dist-host/
+web/host-mf/public/
+*.tsbuildinfo
+.vite/
+
+# Prisma generated client
+api/src/generated/
+
+# Test output
+coverage/
+playwright-report/
+test-results/
+
+# Environment and secrets — only the example file is committed
+.env
+.env.*
+!.env.example
+# Staging variable contract (placeholders only; the real .env.staging is ignored above).
+!.env.staging.example
+
+# Per-app social credentials for the onboarding CLI (fake examples are committed).
+*.secrets.json
+!*.secrets.example.json
+
+# Generated artifacts (SBOM, reports)
+artifacts/
+
+# Local development signing keys (never commit private key material)
+.idpn-keys.json
+
+# Logs and OS files
+*.log
+.DS_Store
+Thumbs.db
+
+# Operational backups and restore drills contain production PII: never commit them.
+backups/
